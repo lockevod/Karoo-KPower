@@ -1,8 +1,8 @@
 {
   "label": "Kpower",
   "packageName": "com.enderthor.kpower",
-  "latestApkUrl": "https://github.com/lockevod/Karoo-Power/releases/latest/download/kpower.apk",
-  "iconUrl": "https://github.com/lockevod/Karoo-Power/releases/latest/download/karoo-power_hr.png",
+  "latestApkUrl": "https://github.com/lockevod/Karoo-KPower/releases/latest/download/kpower.apk",
+  "iconUrl": "https://github.com/lockevod/Karoo-KPower/releases/latest/download/karoo-power_hr.png",
   "latestVersion": "1.6",
   "latestVersionCode": 12349,
   "developer": "Enderthor",
