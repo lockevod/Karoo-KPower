@@ -129,3 +129,7 @@ If you want to use openweathermap (better because they use near stations), you n
 [karoo-ext source](https://github.com/hammerheadnav/karoo-ext)
 [openmeteo](https://open-meteo.com/)
 [openweathermap](https://openweathermap.org/)
+[headwind](https://headwind.app/)
+[rolling resistance](https://www.bicyclerollingresistance.com/)
+https://sites.google.com/view/powerbikepro/configuration
+```
