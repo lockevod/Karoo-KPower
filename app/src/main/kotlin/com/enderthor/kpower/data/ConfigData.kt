@@ -46,4 +46,4 @@ data class ConfigData(
     val surface: KarooSurface,
     )
 
-val defaultConfigData = Json.encodeToString(listOf(ConfigData(0,"default", true, "14.0","0.0095","0.8","0.9","2.2","0.0", true, "cde014c2fab1dbabe2387e57f3ecc051","257", KarooSurface.STANDARD)))
+val defaultConfigData = Json.encodeToString(listOf(ConfigData(0,"default", true, "14.0","0.0095","0.8","0.9","2.2","0.0", false, "","200", KarooSurface.STANDARD)))
