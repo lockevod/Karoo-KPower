@@ -198,7 +198,8 @@ class EstimatedPowerSource(extension: String,  private val hr: Int ,private val 
                         powerLoss = powerconfigs[0].powerLoss.toDouble() / 100,
                         frontalArea = powerconfigs[0].frontalArea.toDouble(),
                         ftp = powerconfigs[0].ftp.toDouble(),
-                        cadence = cadence
+                        cadence = cadence,
+                        surface = powerconfigs[0].surface.factor
                     )
                     Timber.d("Out Estimated Power is ${powerbike.calculateCyclingWattage()}")
                     emitter.onNext(

@@ -33,6 +33,7 @@ To calculate cycling wattage, you need to provide the following parameters:
 
 - **Weight of Bike**: Include the weight of your bike along with any additional gear (in kg).
 - **Rolling Resistance Coefficient**: Depends on the type of surface and the tires you are using. You can use info from here https://www.bicyclerollingresistance.com/ 
+- **Surfaces**: You can select the surface you are riding on. The app will adapt the rolling resistance coefficient for this type of surface (if you don't know, or if you want to use only the value in rolling coefficient, use standard surface ).
 - **Aerodynamic Drag Coefficient**: Depends on your position on the bike and your frontal area
 - **Frontal Area**: The area of your body that is exposed to the wind (m2)
 - **Power Losses**: Includes losses due to chain resistance and derailleur pulleys.
@@ -66,7 +67,7 @@ Here are some typical values for these parameters:
 
 0.0095 MTB TIRES 
 
-Check https://www.bicyclerollingresistance.com/
+Check https://www.bicyclerollingresistance.com/ for better values for your tires.
 
 **Power Losses**
 
@@ -80,8 +81,11 @@ Check https://www.bicyclerollingresistance.com/
 
 3%-4% SHIMANO OTHER
 
+
 FTP is necessary to smooth the power estimation. If you don't know your FTP, you can use the following formula to get an estimation:
 FTP = 0.95 * 20 minutes power  or use a value between 150 and 200 watts and adjust it later.
+
+Surfaces:
 
 2- Kpower emulates a real power meter, then you need to add this power meter in the sensors configuration. 
 Start scan and  you'll see a new category (looks like a puzzle piece), select the powermeter.

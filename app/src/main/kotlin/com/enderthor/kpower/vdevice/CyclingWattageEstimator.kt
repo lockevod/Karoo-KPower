@@ -21,7 +21,8 @@ class CyclingWattageEstimator(
     private val powerLoss: Double,
     private val elevation: Double,
     private val ftp: Double,
-    private val cadence: Double
+    private val cadence: Double,
+    private val surface: Double
 ) {
 
     fun smoothPower(estimatedPower: Double): Double {
@@ -60,7 +61,7 @@ class CyclingWattageEstimator(
     }
 
     private fun calculateRollingResistanceForce(): Double {
-        return gravity * cos(atan(slope)) * totalMass * rollingResistanceCoefficient
+        return gravity * cos(atan(slope)) * totalMass * rollingResistanceCoefficient * surface
     }
 
     private fun calculateAerodynamicDragForce(): Double {

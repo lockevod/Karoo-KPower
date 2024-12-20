@@ -16,6 +16,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.enderthor.kpower.data.ConfigData
+import com.enderthor.kpower.data.KarooSurface
 import io.hammerhead.karooext.KarooSystemService
 
 
@@ -39,10 +40,11 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
     var apikey by remember { mutableStateOf(configdata.apikey) }
     var isOpenWeather by remember { mutableStateOf(configdata.isOpenWeather) }
     var ftp by remember { mutableStateOf(configdata.ftp) }
+    var surface by remember { mutableStateOf(configdata.surface) }
 
 
     fun getUpdatedConfigData(): ConfigData = ConfigData(
-        configdata.id, title, isActive, bikeMass, rollingResistanceCoefficient, dragCoefficient, frontalArea, powerLoss, headwind, isOpenWeather, apikey,ftp
+        configdata.id, title, isActive, bikeMass, rollingResistanceCoefficient, dragCoefficient, frontalArea, powerLoss, headwind, isOpenWeather, apikey,ftp,surface
     )
 
     Column(modifier = Modifier
@@ -68,6 +70,21 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 singleLine = true
             )
+
+            apply {
+                val dropdownOptions = KarooSurface.entries.toList()
+                    .map { unit -> DropdownOption(unit.factor.toString(), unit.surface) }
+                val dropdownInitialSelection by remember(surface) {
+                    mutableStateOf(dropdownOptions.find { option -> option.id == surface.factor.toString() }!!)
+                }
+                KarooKeyDropdown(
+                    remotekey = "Surface", options = dropdownOptions, selectedOption = dropdownInitialSelection
+                ) { selectedOption ->
+                    surface =
+                        KarooSurface.entries.find { unit -> unit.factor.toString() == selectedOption.id }!!
+                }
+            }
+
             OutlinedTextField(value = dragCoefficient, modifier = Modifier.fillMaxWidth(),
                 onValueChange = { dragCoefficient = it },
                 label = { Text("Cdr") },
