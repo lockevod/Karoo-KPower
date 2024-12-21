@@ -129,7 +129,7 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                     if (it) isOpenWeather = false
                 })
                 Spacer(modifier = Modifier.width(10.dp))
-                Text("Headwind automatic?")
+                Text("OpenMeteo automatic?")
             }
 
             OutlinedTextField(value = apikey.toString(), modifier = Modifier.fillMaxWidth(),

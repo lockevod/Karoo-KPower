@@ -11,6 +11,7 @@ import com.enderthor.kpower.data.OpenMeteoCurrentWeatherResponse
 import com.enderthor.kpower.data.OpenWeatherCurrentWeatherResponse
 import com.enderthor.kpower.data.HeadwindStats
 import com.enderthor.kpower.data.ConfigData
+import com.enderthor.kpower.data.KarooSurface
 import com.enderthor.kpower.data.OpenMeteoData
 import com.enderthor.kpower.data.defaultConfigData
 
@@ -112,7 +113,10 @@ fun Context.loadPreferencesFlow(): Flow<List<ConfigData>> {
         try {
             jsonWithUnknownKeys.decodeFromString<List<ConfigData>>(
                 settingsJson[preferencesKey] ?: defaultConfigData
-            )
+            ).map { configData ->
+                configData.copy(surface = configData.surface ?: KarooSurface.STANDARD)
+            }
+
         } catch(e: Throwable){
             Timber.tag("kpower").e(e, "Failed to read preferences Flow Extension")
             jsonWithUnknownKeys.decodeFromString<List<ConfigData>>(defaultConfigData)

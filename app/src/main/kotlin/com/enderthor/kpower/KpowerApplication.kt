@@ -8,6 +8,7 @@ class KpowerApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+
         if (BuildConfig.DEBUG) {
            /* if (!Environment.isExternalStorageManager()) {
                 val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
@@ -22,9 +23,7 @@ class KpowerApplication : Application() {
             //Timber.plant(FileLoggingTree(logfile))*/
             Timber.plant(Timber.DebugTree())
 
-         } else {
-            Timber.plant(Timber.DebugTree())
-        }
+         }
 
         Timber.d("Starting KPower App")
     }
