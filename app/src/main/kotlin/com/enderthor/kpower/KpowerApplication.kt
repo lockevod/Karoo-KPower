@@ -24,7 +24,7 @@ class KpowerApplication : Application() {
             Timber.plant(Timber.DebugTree())
 
          }
-
+        //Timber.plant(Timber.DebugTree())
         Timber.d("Starting KPower App")
     }
 }

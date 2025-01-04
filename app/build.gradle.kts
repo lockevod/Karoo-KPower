@@ -11,10 +11,10 @@ android {
 
     defaultConfig {
         applicationId = "com.enderthor.kpower"
-        minSdk = 26
+        minSdk = 23
         targetSdk = 34
-        versionCode = 12351
-        versionName = "1.8"
+        versionCode = 202501041
+        versionName = "1.9"
     }
 
     buildTypes {
@@ -25,11 +25,11 @@ android {
         }
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
     }
     kotlinOptions {
-        jvmTarget = "11"
+        jvmTarget = "1.8"
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.14"

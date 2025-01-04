@@ -26,7 +26,7 @@ class CyclingWattageEstimator(
 ) {
 
     fun smoothPower(estimatedPower: Double): Double {
-        if (cadence < 15 && slope <= 1.0) {
+        if (cadence < 25 ) {
             return 0.0
         }
 
@@ -37,7 +37,7 @@ class CyclingWattageEstimator(
             else -> 1.7
         }
 
-        return minOf(estimatedPower, maxOf(factor*ftp,450.0))
+        return minOf(estimatedPower, maxOf(factor*ftp,790.0))
     }
 
     fun calculateCyclingWattage(): Double {

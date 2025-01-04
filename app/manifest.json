@@ -3,9 +3,9 @@
   "packageName": "com.enderthor.kpower",
   "latestApkUrl": "https://github.com/lockevod/Karoo-KPower/releases/latest/download/kpower.apk",
   "iconUrl": "https://github.com/lockevod/Karoo-KPower/releases/latest/download/karoo-power_hr.png",
-  "latestVersion": "1.7",
-  "latestVersionCode": 12350,
+  "latestVersion": "1.9",
+  "latestVersionCode": 202501041,
   "developer": "Enderthor",
   "description": "This extension for Karoo devices adds a device simulates a virtual power meter.",
-  "releaseNotes": "Improve power calculation to use surface type in rolling resistance calculation."
+  "releaseNotes": "Bug fixes and improvements with wind estimation. Fixes low cadence and slope < 1 "
 }

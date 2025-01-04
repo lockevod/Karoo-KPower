@@ -114,7 +114,7 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                 singleLine = true
             )
 
-            OutlinedTextField(value = headwind, modifier = Modifier.fillMaxWidth(),
+            /*OutlinedTextField(value = headwind, modifier = Modifier.fillMaxWidth(),
                 onValueChange = { headwind = it },
                 label = { Text("Headwind") },
                 suffix = { Text("m/s") },
@@ -131,7 +131,7 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                 Spacer(modifier = Modifier.width(10.dp))
                 Text("OpenMeteo automatic?")
             }
-
+            */
             OutlinedTextField(value = apikey.toString(), modifier = Modifier.fillMaxWidth(),
                 onValueChange = { apikey = it },
                 label = { Text("API OpenWeather") },
@@ -142,10 +142,10 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Switch(checked = isOpenWeather, onCheckedChange = {
                     isOpenWeather = it
-                    if (it) isActive = false
+                   // if (it) isActive = false
                 })
                 Spacer(modifier = Modifier.width(10.dp))
-                Text("OpenWeather API?")
+                Text("OpenMeteo or OpenWeather(checked)?")
             }
 
             FilledTonalButton(modifier = Modifier

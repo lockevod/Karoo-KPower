@@ -40,7 +40,7 @@ class HeadwindSpeedDataType(
                    // Timber.d("Wind speed: $windSpeed, wind direction: $windDirection, bearing: $bearing")
                    // val headwindSpeed = cos( (windDirection + 180) * Math.PI / 180.0) * windSpeed
                     val headwindSpeed = if (windSpeed.isNaN() || windDirection.isNaN() || bearing.isNaN()) 0.0 else (cos(Math.toRadians(windDirection - bearing + 180)) * windSpeed) // headwind positive if opposite to bearing
-                    Timber.d("Headwind speed: $headwindSpeed windSpeed: $windSpeed windDirection: $windDirection bearing: $bearing")
+                    //Timber.d("Headwind speed: $headwindSpeed windSpeed: $windSpeed windDirection: $windDirection bearing: $bearing")
 
                     emitter.onNext(StreamState.Streaming(DataPoint(dataTypeId, mapOf(DataType.Field.SINGLE to headwindSpeed))))
                 }

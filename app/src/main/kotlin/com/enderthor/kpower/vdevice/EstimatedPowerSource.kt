@@ -171,8 +171,9 @@ class EstimatedPowerSource(extension: String,  private val hr: Int ,private val 
 
                     }
                     Timber.d("Init data: windorig is " + powerconfigs[0].isActive)
-                    var finalHeadwind = if (powerconfigs[0].isActive || powerconfigs[0].isOpenWeather)
-                    {
+                    var finalHeadwind =
+                        //if (powerconfigs[0].isActive || powerconfigs[0].isOpenWeather)
+                    //{
                        if (state.value.headwind is StreamState.Streaming)
                        {
                            (state.value.headwind as StreamState.Streaming).dataPoint.singleValue
@@ -180,9 +181,9 @@ class EstimatedPowerSource(extension: String,  private val hr: Int ,private val 
                        }else {
                                0.0
                        }
-                    } else {
+                    /*} else {
                         powerconfigs[0].headwindconf.toDouble()
-                    }
+                    }*/
 
                     Timber.d("Init data: Speed is $speed, Slope is $slope, Elevation is $elevation, Windspeed is $finalHeadwind")
 
