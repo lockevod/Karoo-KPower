@@ -1,11 +1,8 @@
 # Karoo Power Extension
 
-> [!WARNING]  
-> This app is currently in beta stage and its main features might not work fine.
-
 This extension for Karoo devices adds a device simulates a virtual power meter. You only need to add this power meter (settings -> sensors) and you can use all power fields.
 
-Compatible with Karoo 2 and Karoo 3 devices running Karoo OS version 1.524.2003 and later.
+Compatible with Karoo 2 and Karoo 3 devices running Karoo OS version 1.524.2003 and later (only tested with Karoo 3 if you detect issues with Karoo 2, please open an issue)
 
 ## Installation
 
@@ -113,6 +110,8 @@ Wind is a very important parameter to get a good estimation. You can use openmet
 If you want to use openweathermap (better because they use near stations), you need to get an API key from openweathermap (free but you need to create an account) and introduce it in the configuration.
 
 - Power meter use values from Karoo (real), sometimes Karoo has some "delays/lags" or Karoo expose bad information (for example, current slope grade) then Power Meter will estimate not accurate values. Most of times 5-10 seconds later all is fine ;)
+
+- I recommend to use Power3s field.
   
 - Tested only with Karoo 3 and Metric configuration, but can be used with Imperial configuration also (not tested)
 
