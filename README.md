@@ -2,7 +2,7 @@
 
 This extension for Karoo devices adds a device simulates a virtual power meter. You only need to add this power meter (settings -> sensors) and you can use all power fields.
 
-Compatible with Karoo 2 and Karoo 3 devices running Karoo OS version 1.524.2003 and later.
+Compatible with Karoo 2 and Karoo 3 devices running Karoo OS version 1.524.2003 and later (only tested with Karoo 3 if you detect issues with Karoo 2, please open an issue)
 
 ## Installation
 
