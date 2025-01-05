@@ -26,7 +26,7 @@ class CyclingWattageEstimator(
 ) {
 
     fun smoothPower(estimatedPower: Double): Double {
-        if (cadence < 25 ) {
+        if (cadence < 22 ) {
             return 0.0
         }
 

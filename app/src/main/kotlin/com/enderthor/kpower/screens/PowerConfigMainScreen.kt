@@ -139,7 +139,7 @@ fun ConfigDataAppNavHost(modifier: Modifier = Modifier, navController: NavHostCo
             }, { navController.popBackStack() })
         }
         composable(route = "configDatas") {
-            MainScreen(configDatas, { configdata -> navController.navigate(route = "configdata/${configdata.id}") })
+            MainScreen(configDatas) { configdata -> navController.navigate(route = "configdata/${configdata.id}") }
         }
     }
 }

@@ -1,6 +1,8 @@
 package com.enderthor.kpower.extension
 
 import android.content.Context
+import android.os.Build
+import androidx.annotation.RequiresApi
 
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -66,9 +68,9 @@ suspend fun saveStats(context: Context, stats: HeadwindStats) {
 
 suspend fun saveCurrentData(context: Context, forecast: OpenMeteoCurrentWeatherResponse) {
     context.dataStore.edit { t ->
-        Timber.d("Saving current data forecast" + forecast)
+        Timber.d("Saving current data forecast $forecast")
         t[currentDataKey] = Json.encodeToString(forecast)
-        Timber.d("Saved current data " + t[currentDataKey])
+        Timber.d("Saved current data $t[currentDataKey]")
     }
 }
 
@@ -89,7 +91,7 @@ fun Context.streamCurrentWeatherData(): Flow<OpenMeteoCurrentWeatherResponse> {
             val data = settingsJson[currentDataKey]
             data?.let { d -> jsonWithUnknownKeys.decodeFromString<OpenMeteoCurrentWeatherResponse>(d) }
         } catch (e: Throwable) {
-            Timber.e("Failed to stream current weather data" + e)
+            Timber.e("Failed to stream current weather data $e")
             null
         }
     }.filterNotNull().distinctUntilChanged().filter { it.current.time * 1000 >= System.currentTimeMillis() - (1000 * 60 * 60 ) }
@@ -102,7 +104,7 @@ fun Context.streamStats(): Flow<HeadwindStats> {
                 statsJson[statsKey] ?: HeadwindStats.defaultStats
             )
         } catch(e: Throwable){
-            Timber.e("Failed to read stats" + e)
+            Timber.e("Failed to read stats $e")
             jsonWithUnknownKeys.decodeFromString<HeadwindStats>(HeadwindStats.defaultStats)
         }
     }.distinctUntilChanged()
@@ -211,6 +213,7 @@ fun KarooSystemService.getHeadingFlow(): Flow<Double> {
      .catch { emit(0.0) }*/
 }
 
+@RequiresApi(Build.VERSION_CODES.O)
 @OptIn(FlowPreview::class)
 fun KarooSystemService.getGpsCoordinateFlow(): Flow<GpsCoordinates> {
 
