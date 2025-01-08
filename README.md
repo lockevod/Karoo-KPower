@@ -98,8 +98,7 @@ This release has the following new features:
 - Added wind speed parameter with openmeteo (from Timklge repository headwind).
 - Added FTP to smooth the power estimation.
 - Added wind speed using openweathermap.
-- Added cadence to discard some power estimations (cadence lower than 10 rpm when you don't go uphill ). Cadence is better estimator than speed, but we cannot use directly because we need to know torque (and don't have this value)
-But we can use cadence to discard some bad estimations (when you go down a hill, for example, and you don't pedal).
+- Added cadence to discard some power estimations (cadence lower than 22 rpm ). Cadence is better estimator than speed, but we cannot use directly because we need to know torque (and don't have this value) but we can use cadence to discard some bad estimations (when you go down a hill, for example, and you don't pedal). There is an option (v1.9.1) to force power calculation in any situation (with low cadences)
   
 ## Known issues
 
