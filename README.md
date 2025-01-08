@@ -34,11 +34,12 @@ To calculate cycling wattage, you need to provide the following parameters:
 - **Aerodynamic Drag Coefficient**: Depends on your position on the bike and your frontal area
 - **Frontal Area**: The area of your body that is exposed to the wind (m2)
 - **Power Losses**: Includes losses due to chain resistance and derailleur pulleys.
-- **Headwind**: The wind speed in the opposite direction of your movement. You can insert a constant headwind or check automatic option.
 - **FTP**: Your Functional Threshold Power (in watts). If you don't know your FTP, you can use the default value of 200 watts.
 - **Wind API Key**: You can use openweathermap to get the wind speed. You need to get an API key from openweathermap (free but you need to create an account) and introduce it in the configuration. Openweathermap is most acurate than Openmeteo
 
-If you select automatic option, the app will get the wind speed from openweathermap (you need to select openweather option also) or openmeteo. 
+Kpower  will get the wind speed from openweathermap (you need to select openweather option also) or openmeteo automatically. 
+
+Kpower virtual sensor gives 0.0 power when your cadence is below 22 rpm, but you can force to ignore it (configuration option).
 
 Here are some typical values for these parameters:
 
@@ -97,17 +98,13 @@ This release has the following new features:
 - Added wind speed parameter with openmeteo (from Timklge repository headwind).
 - Added FTP to smooth the power estimation.
 - Added wind speed using openweathermap.
-- Added cadence to discard some power estimations (cadence lower than 10 rpm when you don't go uphill ). Cadence is better estimator than speed, but we cannot use directly because we need to know torque (and don't have this value)
-But we can use cadence to discard some bad estimations (when you go down a hill, for example, and you don't pedal).
+- Added cadence to discard some power estimations (cadence lower than 22 rpm ). Cadence is better estimator than speed, but we cannot use directly because we need to know torque (and don't have this value) but we can use cadence to discard some bad estimations (when you go down a hill, for example, and you don't pedal). There is an option (v1.9.1) to force power calculation in any situation (with low cadences)
   
 ## Known issues
 
 - Power meter is not 100% accurate, it is only a estimation based in power formula. It is not possible to get the real power data from the Karoo without a power meter.
 There is currently a big important parameter in the power estimation, the wind. The wind can change the power needed to maintain a speed. 
-Now you can use openmeteo, openweathermap and you can introduce, also, the headwind speed manually in the configuration.
-A not very good estimation for this is take the value from this https://headwind.app/ or use 0.0 as default value.
-Wind is a very important parameter to get a good estimation. You can use openmeteo, openweathermap or introduce the headwind speed manually.
-If you want to use openweathermap (better because they use near stations), you need to get an API key from openweathermap (free but you need to create an account) and introduce it in the configuration.
+You can use openmeteo or openweathermap If you want to use openweathermap (better because they use near stations), you need to get an API key from openweathermap (free but you need to create an account) and introduce it in the configuration.
 
 - Power meter use values from Karoo (real), sometimes Karoo has some "delays/lags" or Karoo expose bad information (for example, current slope grade) then Power Meter will estimate not accurate values. Most of times 5-10 seconds later all is fine ;)
 
@@ -116,6 +113,10 @@ If you want to use openweathermap (better because they use near stations), you n
 - Tested only with Karoo 3 and Metric configuration, but can be used with Imperial configuration also (not tested)
 
 - Sometimes it's necessary to rescan virtual power sensor when you update this extension. If you don't see the power meter active, remove current power meter and re-add.
+
+- If your cadence sensor doesn't work fine or you want to have a power value always, check force power option.
+
+- This extension provide a field (headwind) but this field is only for internal use, please if you want a headwind info use Timmklge headwind extension app
 
 ## Credits
 
