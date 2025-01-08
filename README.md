@@ -120,6 +120,8 @@ If you want to use openweathermap (better because they use near stations), you n
 
 - If your cadence sensor doesn't work fine or you want to have a power value always, check force power option.
 
+- This extension provide a field (headwind) but this field is only for internal use, please if you want a headwind info use Timmklge headwind extension app
+
 ## Credits
 
 - Made possible by the generous usage terms of timklge. He has a great development and I use part of his code to create this extension.
