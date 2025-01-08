@@ -4,7 +4,7 @@
   "latestApkUrl": "https://github.com/lockevod/Karoo-KPower/releases/latest/download/kpower.apk",
   "iconUrl": "https://github.com/lockevod/Karoo-KPower/releases/latest/download/karoo-power_hr.png",
   "latestVersion": "1.9.1",
-  "latestVersionCode": 202501081,
+  "latestVersionCode": 202501082,
   "developer": "Enderthor",
   "description": "This extension for Karoo devices adds a device simulates a virtual power meter.",
   "releaseNotes": "Added option to ignore low cadence values. Fix when cadence sensor is not connected."

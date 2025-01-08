@@ -3,6 +3,8 @@ plugins {
     alias(libs.plugins.jetbrains.kotlin.android)
     alias(libs.plugins.compose.compiler)
     id("com.google.gms.google-services")
+    id("com.google.firebase.crashlytics")
+    kotlin("plugin.serialization") version "2.0.20"
 }
 
 android {
@@ -13,7 +15,7 @@ android {
         applicationId = "com.enderthor.kpower"
         minSdk = 23
         targetSdk = 34
-        versionCode = 202501081
+        versionCode = 202501082
         versionName = "1.9.1"
     }
 
@@ -46,6 +48,8 @@ dependencies {
 
     implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
     implementation("com.google.firebase:firebase-analytics")
+    implementation("com.google.firebase:firebase-crashlytics")
+    implementation("com.google.firebase:firebase-perf")
     implementation(libs.hammerhead.karoo.ext)
     implementation(libs.hammerhead.karoo.ext)
     implementation(libs.androidx.core.ktx)

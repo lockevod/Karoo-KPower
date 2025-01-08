@@ -3,8 +3,10 @@ package com.enderthor.kpower.activity
 import android.annotation.SuppressLint
 import android.content.Context
 import android.os.Bundle
+import android.view.ViewGroup
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import android.widget.Button
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
