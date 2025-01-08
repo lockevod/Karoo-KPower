@@ -34,11 +34,12 @@ To calculate cycling wattage, you need to provide the following parameters:
 - **Aerodynamic Drag Coefficient**: Depends on your position on the bike and your frontal area
 - **Frontal Area**: The area of your body that is exposed to the wind (m2)
 - **Power Losses**: Includes losses due to chain resistance and derailleur pulleys.
-- **Headwind**: The wind speed in the opposite direction of your movement. You can insert a constant headwind or check automatic option.
 - **FTP**: Your Functional Threshold Power (in watts). If you don't know your FTP, you can use the default value of 200 watts.
 - **Wind API Key**: You can use openweathermap to get the wind speed. You need to get an API key from openweathermap (free but you need to create an account) and introduce it in the configuration. Openweathermap is most acurate than Openmeteo
 
-If you select automatic option, the app will get the wind speed from openweathermap (you need to select openweather option also) or openmeteo. 
+Kpower  will get the wind speed from openweathermap (you need to select openweather option also) or openmeteo automatically. 
+
+Kpower virtual sensor gives 0.0 power when your cadence is below 22 rpm, but you can force to ignore it (configuration option).
 
 Here are some typical values for these parameters:
 
@@ -116,6 +117,8 @@ If you want to use openweathermap (better because they use near stations), you n
 - Tested only with Karoo 3 and Metric configuration, but can be used with Imperial configuration also (not tested)
 
 - Sometimes it's necessary to rescan virtual power sensor when you update this extension. If you don't see the power meter active, remove current power meter and re-add.
+
+- If your cadence sensor doesn't work fine or you want to have a power value always, check force power option.
 
 ## Credits
 
