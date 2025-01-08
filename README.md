@@ -105,10 +105,7 @@ But we can use cadence to discard some bad estimations (when you go down a hill,
 
 - Power meter is not 100% accurate, it is only a estimation based in power formula. It is not possible to get the real power data from the Karoo without a power meter.
 There is currently a big important parameter in the power estimation, the wind. The wind can change the power needed to maintain a speed. 
-Now you can use openmeteo, openweathermap and you can introduce, also, the headwind speed manually in the configuration.
-A not very good estimation for this is take the value from this https://headwind.app/ or use 0.0 as default value.
-Wind is a very important parameter to get a good estimation. You can use openmeteo, openweathermap or introduce the headwind speed manually.
-If you want to use openweathermap (better because they use near stations), you need to get an API key from openweathermap (free but you need to create an account) and introduce it in the configuration.
+You can use openmeteo or openweathermap If you want to use openweathermap (better because they use near stations), you need to get an API key from openweathermap (free but you need to create an account) and introduce it in the configuration.
 
 - Power meter use values from Karoo (real), sometimes Karoo has some "delays/lags" or Karoo expose bad information (for example, current slope grade) then Power Meter will estimate not accurate values. Most of times 5-10 seconds later all is fine ;)
 
