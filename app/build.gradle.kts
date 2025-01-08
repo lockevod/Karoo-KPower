@@ -1,8 +1,8 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.jetbrains.kotlin.android)
-    alias(libs.plugins.jetbrains.kotlin.serialization)
-    alias(libs.plugins.jetbrains.kotlin.compose)
+    alias(libs.plugins.compose.compiler)
+    id("com.google.gms.google-services")
 }
 
 android {
@@ -13,8 +13,8 @@ android {
         applicationId = "com.enderthor.kpower"
         minSdk = 23
         targetSdk = 34
-        versionCode = 202501041
-        versionName = "1.9"
+        versionCode = 202501081
+        versionName = "1.9.1"
     }
 
     buildTypes {
@@ -44,53 +44,26 @@ android {
 
 dependencies {
 
-
+    implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
+    implementation("com.google.firebase:firebase-analytics")
     implementation(libs.hammerhead.karoo.ext)
-
-    // Other dependencies
-    implementation(libs.timber)
-
-    // Core android
-    implementation(libs.androidx.lifecycle.viewmodel.ktx)
-    implementation(libs.androidx.activity.ktx)
+    implementation(libs.hammerhead.karoo.ext)
     implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.appcompat)
-    implementation(libs.androidx.constraintlayout)
-    implementation(libs.kotlinx.serialization.json)
-
-    // compose
-    implementation(platform(libs.androidx.compose.bom))
-    implementation(libs.androidx.ui)
-    implementation(libs.androidx.ui.graphics)
-    implementation(libs.androidx.ui.tooling.preview)
-    implementation(libs.androidx.material3)
-    implementation(libs.color)
-    debugImplementation(libs.androidx.ui.tooling)
-
+    implementation(libs.bundles.androidx.lifeycle)
     implementation(libs.androidx.activity.compose)
+    implementation(libs.bundles.compose.ui)
+    implementation(libs.androidx.navigation.runtime.ktx)
     implementation(libs.androidx.navigation.compose)
-
-    // glance for extension views
+    implementation(libs.kotlinx.serialization.json)
+    implementation(libs.color)
+    implementation(libs.androidx.datastore.preferences)
+    implementation(libs.androidx.cardview)
+    implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.glance.appwidget)
     implementation(libs.androidx.glance.preview)
     implementation(libs.androidx.glance.appwidget.preview)
-
-    implementation(libs.androidx.lifecycle.runtime.ktx)
-    // allows retrieving viewmodels from within a composable
-    implementation(libs.androidx.lifecycle.viewmodel.compose)
-    // allows usage of `StateFlow#collectAsStateWithLifecycle()`
-    implementation(libs.androidx.lifecycle.runtime.compose)
-
-    // coroutines
-    implementation(libs.kotlinx.coroutines.android)
-    implementation(libs.kotlinx.coroutines.rx2)
-
-
-    testImplementation(libs.junit)
-    androidTestImplementation(libs.androidx.junit)
+    implementation(libs.timber)
+    implementation(libs.androidx.foundation.android)
+    implementation(libs.androidx.foundation.layout.android)
 }
-java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(17)
-    }
-}
+

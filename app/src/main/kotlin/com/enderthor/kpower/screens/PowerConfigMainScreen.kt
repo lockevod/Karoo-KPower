@@ -50,7 +50,6 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.enderthor.kpower.activity.dataStore
 import com.enderthor.kpower.data.ConfigData
-import com.enderthor.kpower.data.KarooSurface
 import com.enderthor.kpower.data.defaultConfigData
 
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -84,7 +83,7 @@ fun ConfigDataAppNavHost(modifier: Modifier = Modifier, navController: NavHostCo
                 val entries = Json.decodeFromString<MutableList<ConfigData>>(
                     t[preferencesKey] ?: defaultConfigData
                 ).map { configData ->
-                    configData.copy(surface = configData.surface ?: KarooSurface.STANDARD)
+                    configData.copy(surface = configData.surface)
                 }
                 configDatas.addAll(entries)
             } catch(e: Throwable){

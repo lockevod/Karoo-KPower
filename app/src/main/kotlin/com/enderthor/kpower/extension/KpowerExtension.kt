@@ -1,6 +1,8 @@
 package com.enderthor.kpower.extension
 
 
+import android.os.Build
+import androidx.annotation.RequiresApi
 import io.hammerhead.karooext.KarooSystemService
 import io.hammerhead.karooext.extension.KarooExtension
 import io.hammerhead.karooext.internal.Emitter
@@ -31,7 +33,7 @@ import timber.log.Timber
 import kotlin.time.Duration.Companion.minutes
 
 
-class KpowerExtension : KarooExtension("kpower", "1.2")
+class KpowerExtension : KarooExtension("kpower", "1.9.1")
 {
 
     lateinit var karooSystem: KarooSystemService
@@ -43,6 +45,7 @@ class KpowerExtension : KarooExtension("kpower", "1.2")
         )
     }
 
+    @RequiresApi(Build.VERSION_CODES.O)
     @OptIn(ExperimentalCoroutinesApi::class)
     override fun onCreate() {
         super.onCreate()
@@ -74,7 +77,7 @@ class KpowerExtension : KarooExtension("kpower", "1.2")
                     val lastKnownStats = try {
                         streamStats().first()
                     } catch(e: Exception){
-                        Timber.e("Failed to read stats")
+                        Timber.e("Failed to read stats $e")
                         HeadwindStats()
                     }
 
@@ -84,7 +87,7 @@ class KpowerExtension : KarooExtension("kpower", "1.2")
                             val stats = lastKnownStats.copy(failedWeatherRequest = System.currentTimeMillis())
                             launch { saveStats(this@KpowerExtension, stats) }
                         } catch(e: Exception){
-                            Timber.e( "Failed to write stats")
+                            Timber.e( "Failed to write stats $e")
                         }
                         error("HTTP request failed: ${response.error}")
                     } else {
@@ -95,7 +98,7 @@ class KpowerExtension : KarooExtension("kpower", "1.2")
                             )
                             launch { saveStats(this@KpowerExtension, stats) }
                         } catch(e: Exception){
-                            Timber.e("Failed to write stats")
+                            Timber.e("Failed to write stats $e")
                         }
                     }
 
@@ -110,7 +113,7 @@ class KpowerExtension : KarooExtension("kpower", "1.2")
                             //jsonWithUnknownKeys.decodeFromString<OpenMeteoCurrentWeatherResponse>(responseString)
                         saveCurrentData(applicationContext, data)
                     } catch(e: Exception){
-                        Timber.e("Failed to read current weather data %s", e)
+                        Timber.e("Failed to read current weather data $e")
                     }
                 }
 

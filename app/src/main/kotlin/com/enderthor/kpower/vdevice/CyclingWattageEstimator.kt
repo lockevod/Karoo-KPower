@@ -22,11 +22,13 @@ class CyclingWattageEstimator(
     private val elevation: Double,
     private val ftp: Double,
     private val cadence: Double,
-    private val surface: Double
+    private val surface: Double,
+    private val isforcepower: Boolean
 ) {
 
     fun smoothPower(estimatedPower: Double): Double {
-        if (cadence < 22 ) {
+
+        if (!isforcepower && cadence < 22) {
             return 0.0
         }
 

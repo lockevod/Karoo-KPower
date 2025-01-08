@@ -41,10 +41,11 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
     var isOpenWeather by remember { mutableStateOf(configdata.isOpenWeather) }
     var ftp by remember { mutableStateOf(configdata.ftp) }
     var surface by remember { mutableStateOf(configdata.surface) }
+    var isforcepower by remember { mutableStateOf(configdata.isforcepower) }
 
 
     fun getUpdatedConfigData(): ConfigData = ConfigData(
-        configdata.id, title, isActive, bikeMass, rollingResistanceCoefficient, dragCoefficient, frontalArea, powerLoss, headwind, isOpenWeather, apikey,ftp,surface
+        configdata.id, title, isActive, bikeMass, rollingResistanceCoefficient, dragCoefficient, frontalArea, powerLoss, headwind, isOpenWeather, apikey,ftp,surface,isforcepower
     )
 
     Column(modifier = Modifier
@@ -114,24 +115,6 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                 singleLine = true
             )
 
-            /*OutlinedTextField(value = headwind, modifier = Modifier.fillMaxWidth(),
-                onValueChange = { headwind = it },
-                label = { Text("Headwind") },
-                suffix = { Text("m/s") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                singleLine = true,
-                enabled = !isActive && !isOpenWeather
-            )
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Switch(checked = isActive, onCheckedChange = {
-                    isActive = it
-                    if (it) isOpenWeather = false
-                })
-                Spacer(modifier = Modifier.width(10.dp))
-                Text("OpenMeteo automatic?")
-            }
-            */
             OutlinedTextField(value = apikey.toString(), modifier = Modifier.fillMaxWidth(),
                 onValueChange = { apikey = it },
                 label = { Text("API OpenWeather") },
@@ -146,6 +129,14 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                 })
                 Spacer(modifier = Modifier.width(10.dp))
                 Text("OpenMeteo or OpenWeather(checked)?")
+            }
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(checked = isforcepower, onCheckedChange = {
+                    isforcepower = it
+                })
+                Spacer(modifier = Modifier.width(10.dp))
+                Text("Ignore low cadence (always calculate power)?")
             }
 
             FilledTonalButton(modifier = Modifier

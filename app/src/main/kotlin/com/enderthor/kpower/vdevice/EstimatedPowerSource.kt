@@ -110,7 +110,6 @@ class EstimatedPowerSource(extension: String,  private val hr: Int ,private val 
                 factorDistance = if (user.preferredUnit.distance == UserProfile.PreferredUnit.UnitType.IMPERIAL) 1.60934 else 1.0
                 factorElevation = if (user.preferredUnit.elevation == UserProfile.PreferredUnit.UnitType.IMPERIAL) 0.3048 else 1.0
             }
-              //  Timber.d("User weight loaded as  ${user.weight} $user")
 
             // Start subscribe data from Karoo events
 
@@ -132,6 +131,9 @@ class EstimatedPowerSource(extension: String,  private val hr: Int ,private val 
             karooSystem.addConsumer(OnStreamState.StartStreaming(DataType.dataTypeId(extension, "powerheadwind"))) { event: OnStreamState ->
                 mutableState.update { currentState -> currentState.copy(headwind = event.state) }
             }
+            var cadence:Double
+            var isforcepower:Boolean
+
             powerConfigsFlow.collect { powerconfigs ->
                 repeat(Int.MAX_VALUE)
                 {
@@ -144,13 +146,15 @@ class EstimatedPowerSource(extension: String,  private val hr: Int ,private val 
 
                     }
 
-                    var cadence = if (state.value.cadence is StreamState.Streaming ) {
-                        (state.value.cadence as StreamState.Streaming).dataPoint.singleValue
-                            ?: 0.0
-                    } else {
-                        0.0
-
+                    if (state.value.cadence is StreamState.Streaming ) {
+                        isforcepower = powerconfigs[0].isforcepower
+                        cadence= (state.value.cadence as StreamState.Streaming).dataPoint.singleValue ?: 0.0
                     }
+                    else {
+                        isforcepower = true
+                        cadence = 0.0
+                    }
+
 
                     var slope = if (state.value.slope is StreamState.Streaming) {
                         (state.value.slope as StreamState.Streaming).dataPoint.singleValue ?: 0.0
@@ -164,16 +168,7 @@ class EstimatedPowerSource(extension: String,  private val hr: Int ,private val 
                         0.0
                     }
 
-                    if (state.value.headwind is StreamState.Streaming) {
-                        Timber.d("Init data: windorig is " + (state.value.headwind as StreamState.Streaming).dataPoint.singleValue)
-                    } else {
-                        Timber.d("Init data: No existe")
-
-                    }
-                    Timber.d("Init data: windorig is " + powerconfigs[0].isActive)
                     var finalHeadwind =
-                        //if (powerconfigs[0].isActive || powerconfigs[0].isOpenWeather)
-                    //{
                        if (state.value.headwind is StreamState.Streaming)
                        {
                            (state.value.headwind as StreamState.Streaming).dataPoint.singleValue
@@ -181,12 +176,8 @@ class EstimatedPowerSource(extension: String,  private val hr: Int ,private val 
                        }else {
                                0.0
                        }
-                    /*} else {
-                        powerconfigs[0].headwindconf.toDouble()
-                    }*/
 
                     Timber.d("Init data: Speed is $speed, Slope is $slope, Elevation is $elevation, Windspeed is $finalHeadwind")
-
 
                     val powerbike = CyclingWattageEstimator(
                         slope = slope / 100, // convert from percentage
@@ -200,7 +191,8 @@ class EstimatedPowerSource(extension: String,  private val hr: Int ,private val 
                         frontalArea = powerconfigs[0].frontalArea.toDouble(),
                         ftp = powerconfigs[0].ftp.toDouble(),
                         cadence = cadence,
-                        surface = powerconfigs[0].surface.factor
+                        surface = powerconfigs[0].surface.factor,
+                        isforcepower = isforcepower
                     )
                     Timber.d("Out Estimated Power is ${powerbike.calculateCyclingWattage()}")
                     emitter.onNext(

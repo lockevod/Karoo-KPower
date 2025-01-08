@@ -1,5 +1,5 @@
 <resources>
     <string name="app_name">KPower</string>
     <string name="extension_name">KPower</string>
-    <string name="headwind_speed">Headwind Speed</string>
+    <string name="headwind_speed">No field. Only for internal use</string>
 </resources>

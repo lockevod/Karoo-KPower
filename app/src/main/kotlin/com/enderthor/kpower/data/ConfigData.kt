@@ -44,6 +44,7 @@ data class ConfigData(
     val apikey: String,
     val ftp: String ,
     val surface: KarooSurface = KarooSurface.STANDARD,
+    val isforcepower: Boolean = false
     )
 
-val defaultConfigData = Json.encodeToString(listOf(ConfigData(0,"default", true, "14.0","0.0095","0.8","0.9","2.2","0.0", false, "","200", KarooSurface.STANDARD)))
+val defaultConfigData = Json.encodeToString(listOf(ConfigData(0,"default", true, "14.0","0.0095","0.8","0.9","2.2","0.0", false, "","200", KarooSurface.STANDARD,false)))
