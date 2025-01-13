@@ -4,7 +4,6 @@ plugins {
     alias(libs.plugins.compose.compiler)
     id("com.google.gms.google-services")
     id("com.google.firebase.crashlytics")
-    id("com.google.firebase.firebase-perf")
     kotlin("plugin.serialization") version "2.0.20"
 }
 
@@ -50,7 +49,6 @@ dependencies {
     implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
     implementation("com.google.firebase:firebase-analytics")
     implementation("com.google.firebase:firebase-crashlytics")
-    implementation("com.google.firebase:firebase-perf")
     implementation(libs.hammerhead.karoo.ext)
     implementation(libs.hammerhead.karoo.ext)
     implementation(libs.androidx.core.ktx)
