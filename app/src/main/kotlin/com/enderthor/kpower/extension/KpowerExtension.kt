@@ -15,13 +15,16 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 import com.enderthor.kpower.vdevice.EstimatedPowerSource
+import com.enderthor.kpower.BuildConfig
 import kotlinx.coroutines.flow.transformLatest
 import com.enderthor.kpower.data.GpsCoordinates
 import com.enderthor.kpower.data.HeadwindStats
-import com.enderthor.kpower.data.HeadwindSpeedDataType
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -30,28 +33,32 @@ import kotlinx.coroutines.flow.retry
 
 
 import timber.log.Timber
+import kotlin.math.absoluteValue
 import kotlin.time.Duration.Companion.minutes
 
+private var updateLastKnownGpsJob: Job? = null
 
-class KpowerExtension : KarooExtension("kpower", "1.9.1")
+class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
 {
 
     lateinit var karooSystem: KarooSystemService
     private var serviceJob: Job? = null
-
+/*
     override val types by lazy {
         listOf(
             HeadwindSpeedDataType(karooSystem, applicationContext,extension),
         )
-    }
+    }*/
 
     @RequiresApi(Build.VERSION_CODES.O)
-    @OptIn(ExperimentalCoroutinesApi::class)
+    @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
     override fun onCreate() {
         super.onCreate()
         karooSystem = KarooSystemService(applicationContext)
 
-
+        updateLastKnownGpsJob = CoroutineScope(Dispatchers.IO).launch {
+            karooSystem.updateLastKnownGps(this@KpowerExtension)
+        }
         Timber.d("Service created")
 
         serviceJob = CoroutineScope(Dispatchers.IO).launch{
@@ -62,8 +69,16 @@ class KpowerExtension : KarooExtension("kpower", "1.9.1")
             }
 
             val gpsFlow = karooSystem
-                .getGpsCoordinateFlow()
-                .transformLatest { value: GpsCoordinates ->
+                .getGpsCoordinateFlow(this@KpowerExtension)
+                .distinctUntilChanged { old, new ->
+                    if (old != null && new != null) {
+                        old.distanceTo(new).absoluteValue < 0.001
+                    } else {
+                        old == new
+                    }
+                }
+                .debounce(5000L)
+                .transformLatest { value: GpsCoordinates? ->
                     while(true){
                         emit(value)
                         delay(15.minutes)
@@ -80,6 +95,11 @@ class KpowerExtension : KarooExtension("kpower", "1.9.1")
                         Timber.e("Failed to read stats $e")
                         HeadwindStats()
                     }
+
+                    if (gps == null){
+                        error("No GPS coordinates available")
+                    }
+
 
                     val response = karooSystem.makeOpenMeteoHttpRequest(gps,preferences[0].isOpenWeather, preferences[0].apikey)
                     if (response.error != null){
@@ -117,13 +137,14 @@ class KpowerExtension : KarooExtension("kpower", "1.9.1")
                     }
                 }
 
+
         }
     }
 
     override fun startScan(emitter: Emitter<Device>) {
         // Find estimated Power source
         val job = CoroutineScope(Dispatchers.IO).launch {
-            delay(2000)
+            delay(2000L)
             Timber.d("Start scan")
             emitter.onNext(EstimatedPowerSource(extension, 2000, karooSystem, applicationContext).source)
         }

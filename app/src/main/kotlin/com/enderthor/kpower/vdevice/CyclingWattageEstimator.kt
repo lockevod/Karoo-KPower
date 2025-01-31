@@ -27,11 +27,12 @@ class CyclingWattageEstimator(
 ) {
 
     fun smoothPower(estimatedPower: Double): Double {
-
-        if (!isforcepower && cadence < 22) {
-            return 0.0
-        }
-
+    Timber.d("Is force power: $isforcepower")
+       if(!isforcepower) {
+           if (cadence < 22) {
+               return 0.0
+           }
+       }
         val factor = when {
             estimatedPower < 210 -> 2.8
             estimatedPower <= 300 -> 2.5

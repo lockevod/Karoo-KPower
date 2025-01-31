@@ -12,7 +12,7 @@ class KpowerApplication : Application() {
         if (BuildConfig.DEBUG) {
             Timber.plant(Timber.DebugTree())
          }
-        Timber.plant(Timber.DebugTree())
+        //Timber.plant(Timber.DebugTree())
         Timber.d("Starting KPower App")
     }
 }

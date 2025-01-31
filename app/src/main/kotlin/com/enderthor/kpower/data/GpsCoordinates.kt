@@ -7,8 +7,9 @@ import kotlin.math.pow
 import kotlin.math.sin
 import kotlin.math.sqrt
 
+
 @Serializable
-data class GpsCoordinates(val lat: Double, val lon: Double){
+data class GpsCoordinates(val lat: Double, val lon: Double, val bearing: Double? = 0.0){
 
     // Haversine formula in kilometers
     fun distanceTo(other: GpsCoordinates): Double {

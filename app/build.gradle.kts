@@ -15,8 +15,8 @@ android {
         applicationId = "com.enderthor.kpower"
         minSdk = 23
         targetSdk = 34
-        versionCode = 202501082
-        versionName = "1.9.1"
+        versionCode = 202501291
+        versionName = "2.0"
     }
 
     buildTypes {
