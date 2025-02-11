@@ -11,6 +11,12 @@ import kotlinx.serialization.json.Json
 
 data class StreamData(val headingResponse: HeadingResponse, val weatherResponse: OpenMeteoCurrentWeatherResponse?)
 
+data class Quadruple<out A, out B, out C, out D>(
+    val first: A,
+    val second: B,
+    val third: C,
+    val fourth: D
+)
 
 @Serializable
 data class RealKarooValues(
@@ -52,5 +58,7 @@ data class ConfigData(
     val isforcepower: Boolean = false
     )
 
+
 //val defaultConfigData = Json.encodeToString(listOf(ConfigData(0,"default", true, "14.0","0.0095","0.8","0.9","2.2","0.0", false, "","200", KarooSurface.STANDARD,false)))
-val defaultConfigData = Json.encodeToString(listOf(ConfigData(0,"Spark", true, "14.0","0.0095","0.8","0.9","2.2","0.0", true, "cde014c2fab1dbabe2387e57f3ecc051","257", KarooSurface.GRAVEL,false)))
+val previewConfigData = listOf(ConfigData(0,"Spark", true, "14.0","0.0095","0.8","0.9","2.2","0.0", true, "cde014c2fab1dbabe2387e57f3ecc051","257", KarooSurface.GRAVEL,false))
+val defaultConfigData = Json.encodeToString(previewConfigData)

@@ -4,10 +4,4 @@
     icon="@drawable/ic_power_hr"
     id="kpower"
     scansDevices="true">
-    <DataType
-        description="@string/headwind_speed"
-        displayName="@string/headwind_speed"
-        graphical="false"
-        icon="@drawable/ic_power_hr"
-        typeId="powerheadwind" />
 </ExtensionInfo>

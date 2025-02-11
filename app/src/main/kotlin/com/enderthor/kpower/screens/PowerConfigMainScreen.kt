@@ -1,7 +1,7 @@
 package com.enderthor.kpower.screens
 
 
-import android.content.Context
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
@@ -17,11 +17,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.CornerSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FabPosition
-
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -40,32 +38,24 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import com.enderthor.kpower.activity.dataStore
+
+import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
+
 import com.enderthor.kpower.data.ConfigData
 import com.enderthor.kpower.data.defaultConfigData
+import com.enderthor.kpower.extension.loadPreferencesFlow
+import com.enderthor.kpower.extension.savePreferences
 
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.launch
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 import timber.log.Timber
 
 
-val preferencesKey = stringPreferencesKey("configdata")
-
-suspend fun saveconfigs(context: Context, configDatas: MutableList<ConfigData>) {
-    context.dataStore.edit { t ->
-        t[preferencesKey] = Json.encodeToString(configDatas)
-    }
-}
 
 @Composable
 fun ConfigDataAppNavHost(modifier: Modifier = Modifier, navController: NavHostController = rememberNavController()){
@@ -76,6 +66,8 @@ fun ConfigDataAppNavHost(modifier: Modifier = Modifier, navController: NavHostCo
 
     val ctx = LocalContext.current
 
+
+/*
     LaunchedEffect(Unit) {
         ctx.dataStore.data.distinctUntilChanged().collect { t ->
             configDatas.clear()
@@ -90,7 +82,15 @@ fun ConfigDataAppNavHost(modifier: Modifier = Modifier, navController: NavHostCo
                 Timber.tag("kpower").e(e, "Failed to read preferences PCM")
             }
         }
+    }*/
+
+    LaunchedEffect(Unit) {
+        ctx.loadPreferencesFlow().collect{
+            configDatas.clear()
+            configDatas.addAll(it)
+        }
     }
+
 
     NavHost(modifier = modifier, navController = navController, startDestination = "configDatas") {
         composable(route = "configData/{id}", arguments = listOf(
@@ -114,7 +114,7 @@ fun ConfigDataAppNavHost(modifier: Modifier = Modifier, navController: NavHostCo
                     }
 
                     scope.launch {
-                        saveconfigs(ctx, configDatas)
+                        savePreferences(ctx, configDatas)
                     }
                     navController.popBackStack()
                 }, { navController.popBackStack() })
@@ -131,7 +131,7 @@ fun ConfigDataAppNavHost(modifier: Modifier = Modifier, navController: NavHostCo
                 }
 
                 scope.launch {
-                    saveconfigs(ctx, configDatas)
+                    savePreferences(ctx, configDatas)
                 }
 
                 navController.popBackStack()

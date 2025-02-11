@@ -100,9 +100,6 @@ This release has the following old  features:
 - Added wind speed using openweathermap.
 - Added cadence to discard some power estimations (cadence lower than 22 rpm ). Cadence is better estimator than speed, but we cannot use directly because we need to know torque (and don't have this value) but we can use cadence to discard some bad estimations (when you go down a hill, for example, and you don't pedal). There is an option (v1.9.1) to force power calculation in any situation (with low cadences)
 
-But this release has the following new features:
-- Added drag fiel. This field is only for real power meters. You can now drag coefficient (estimated) to chose the best position in your bike.
-
 ## Known issues
 
 - Power meter is not 100% accurate, it is only a estimation based in power formula. It is not possible to get the real power data from the Karoo without a power meter.

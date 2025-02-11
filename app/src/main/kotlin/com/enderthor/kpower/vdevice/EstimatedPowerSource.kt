@@ -1,234 +1,168 @@
 package com.enderthor.kpower.vdevice
 
 import android.content.Context
-
 import io.hammerhead.karooext.KarooSystemService
 import io.hammerhead.karooext.internal.Emitter
-import io.hammerhead.karooext.models.BatteryStatus
-import io.hammerhead.karooext.models.ConnectionStatus
-import io.hammerhead.karooext.models.DataPoint
-import io.hammerhead.karooext.models.DataType
-import io.hammerhead.karooext.models.Device
-import io.hammerhead.karooext.models.DeviceEvent
-import io.hammerhead.karooext.models.ManufacturerInfo
-import io.hammerhead.karooext.models.OnBatteryStatus
-import io.hammerhead.karooext.models.OnConnectionStatus
-import io.hammerhead.karooext.models.OnDataPoint
-import io.hammerhead.karooext.models.OnManufacturerInfo
-import io.hammerhead.karooext.models.StreamState
-import io.hammerhead.karooext.models.UserProfile
-
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.awaitCancellation
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
-
+import io.hammerhead.karooext.models.*
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
+import timber.log.Timber
 import com.enderthor.kpower.data.ConfigData
 import com.enderthor.kpower.data.RealKarooValues
-import com.enderthor.kpower.extension.consumerFlow
-import com.enderthor.kpower.extension.headwindFlow
-import com.enderthor.kpower.extension.loadPreferencesFlow
-
-import com.enderthor.kpower.extension.streamDataFlow
-import kotlinx.coroutines.FlowPreview
+import com.enderthor.kpower.data.previewConfigData
+import com.enderthor.kpower.extension.*
 
 
-
-import timber.log.Timber
-
-
-
-class EstimatedPowerSource(extension: String,  private val hr: Int ,private val karooSystem: KarooSystemService, private val context: Context)
-{
+class EstimatedPowerSource(
+    extension: String,
+    private val hr: Int,
+    private val karooSystem: KarooSystemService,
+    private val context: Context
+) {
     val source by lazy {
         Device(
             extension,
             "estimated-power-$hr",
             listOf(DataType.Source.POWER),
-            "Estimated Power $hr Source",
+            "Estimated Power $hr Source"
         )
     }
 
-    private val mutableState = MutableStateFlow(RealKarooValues())
-    val state: StateFlow<RealKarooValues> = mutableState.asStateFlow()
-    private val _powerConfigsFlow = MutableStateFlow<List<ConfigData>>(emptyList())
-    val powerConfigsFlow: StateFlow<List<ConfigData>> = _powerConfigsFlow.asStateFlow()
-
-
-    /**
-     * Connect and start feeding [DeviceEvent]
-     *
-     * @see [DeviceEvent]
-     */
     @OptIn(FlowPreview::class)
     fun connect(emitter: Emitter<DeviceEvent>, extension: String) {
-
         Timber.d("Init Connect Power Estimator")
-        val job = CoroutineScope(Dispatchers.IO).launch {
-            // 2s searching
-            emitter.onNext(OnConnectionStatus(ConnectionStatus.SEARCHING))
-            delay(2000)
-            // Update device is now connected
-            emitter.onNext(OnConnectionStatus(ConnectionStatus.CONNECTED))
-            delay(1000)
-            // Update battery status
-            emitter.onNext(OnBatteryStatus(BatteryStatus.GOOD))
-            delay(1000)
-            // Send manufacturer info
-            emitter.onNext(OnManufacturerInfo(ManufacturerInfo("Enderthor", "1234", "POWER-EXT-1")))
-            delay(1000)
+        val scope = CoroutineScope(Dispatchers.IO)
 
-/*
+        scope.launch {
             try {
-                val preferences = context.dataStore.data.first()
-                val entries = Json.decodeFromString<MutableList<ConfigData>>(
-                    preferences[preferencesKey] ?: defaultConfigData
-                )
-                _powerConfigsFlow.value = entries
+                // Estados de conexión iniciales
+                emitter.onNext(OnConnectionStatus(ConnectionStatus.SEARCHING))
+                delay(2000)
+                emitter.onNext(OnConnectionStatus(ConnectionStatus.CONNECTED))
+                delay(1000)
+                emitter.onNext(OnBatteryStatus(BatteryStatus.GOOD))
+                delay(1000)
+                emitter.onNext(OnManufacturerInfo(ManufacturerInfo("Enderthor", "1234", "POWER-EXT-1")))
+                delay(1000)
 
-                Timber.d("Preferences loaded in EstimatedPowerSource")
-            } catch(e: Throwable){
-                Timber.tag("kpower").e(e, "Failed to read preferences")
-            }*/
+                // Obtener el perfil del usuario
+                val userProfile = karooSystem.consumerFlow<UserProfile>().first()
+                val (userMass, factorMass, factorDistance, factorElevation) = getUserProfileFactors(userProfile)
 
-            // Load preferences data from Karoo useprofile
-            var userMass: Double = 0.0
-            var factorMass: Double = 1.0
-            var factorDistance: Double = 1.0
-            var factorElevation: Double = 1.0
-
-
-           /* karooSystem.connect { connected ->
-                Timber.i("Karoo System connected=$connected")
-            }*/
-
-            /*
-            karooSystem.addConsumer { user: UserProfile ->
-                userMass = user.weight.toDouble()
-                factorMass = if (user.preferredUnit.weight == UserProfile.PreferredUnit.UnitType.IMPERIAL) 0.453592 else 1.0
-                factorDistance = if (user.preferredUnit.distance == UserProfile.PreferredUnit.UnitType.IMPERIAL) 1.60934 else 1.0
-                factorElevation = if (user.preferredUnit.elevation == UserProfile.PreferredUnit.UnitType.IMPERIAL) 0.3048 else 1.0
-            }*/
-
-            karooSystem.consumerFlow<UserProfile>().collect { user ->
-                userMass = user.weight.toDouble()
-                factorMass = if (user.preferredUnit.weight == UserProfile.PreferredUnit.UnitType.IMPERIAL) 0.453592 else 1.0
-                factorDistance = if (user.preferredUnit.distance == UserProfile.PreferredUnit.UnitType.IMPERIAL) 1.60934 else 1.0
-                factorElevation = if (user.preferredUnit.elevation == UserProfile.PreferredUnit.UnitType.IMPERIAL) 0.3048 else 1.0
-            }
-
-            context.loadPreferencesFlow().collect { entries ->
-                _powerConfigsFlow.value = entries
-                Timber.d("Preferences loaded in EstimatedPowerSource")
-            }
-
-            // Start subscribe data from Karoo events
-
-            karooSystem.streamDataFlow(DataType.Type.SPEED).collect { state ->
-                mutableState.update { currentState -> currentState.copy(speed = state) }
-            }
-            karooSystem.streamDataFlow(DataType.Type.ELEVATION_GRADE).collect { state ->
-                mutableState.update { currentState -> currentState.copy(slope = state) }
-            }
-            karooSystem.streamDataFlow(DataType.Type.PRESSURE_ELEVATION_CORRECTION).collect { state ->
-                mutableState.update { currentState -> currentState.copy(elevation = state) }
-            }
-            karooSystem.streamDataFlow(DataType.Type.CADENCE).collect { state ->
-                mutableState.update { currentState -> currentState.copy(cadence = state) }
-            }
-            karooSystem.headwindFlow(context).collect { headwindSpeed ->
-                mutableState.update { currentState -> currentState.copy(headwind = headwindSpeed) }
-            }
-
-
-
-            var cadence:Double
-            var isforcepower:Boolean
-
-            powerConfigsFlow.collect { powerconfigs ->
-                repeat(Int.MAX_VALUE)
-                {
-
-                    var speed = if (state.value.speed is StreamState.Streaming ) {
-                        (state.value.speed as StreamState.Streaming).dataPoint.singleValue
-                            ?: 0.0
-                    } else {
-                        0.0
-
+                // Convertir powerConfigFlow en un flujo estable
+                val powerConfigFlow = context.loadPreferencesFlow()
+                    .catch { e ->
+                        Timber.e(e, "Error loading power configs")
+                        emit(previewConfigData)
                     }
+                    .stateIn(
+                        scope = scope,
+                        started = SharingStarted.Eagerly,
+                        initialValue = previewConfigData
+                    )
 
-                    if (state.value.cadence is StreamState.Streaming ) {
-                        isforcepower = powerconfigs[0].isforcepower
-                        cadence= (state.value.cadence as StreamState.Streaming).dataPoint.singleValue ?: 0.0
-                    }
-                    else {
-                        isforcepower = true
-                        cadence = 0.0
-                    }
-
-
-                    var slope = if (state.value.slope is StreamState.Streaming) {
-                        (state.value.slope as StreamState.Streaming).dataPoint.singleValue ?: 0.0
-                    } else {
-                        0.0
-                    }
-
-                    var elevation = if (state.value.elevation is StreamState.Streaming) {
-                        (state.value.elevation as StreamState.Streaming).dataPoint.singleValue ?: 0.0
-                    } else {
-                        0.0
-                    }
-
-                    var finalHeadwind =
-                       if (state.value.headwind is StreamState.Streaming)
-                       {
-                           (state.value.headwind as StreamState.Streaming).dataPoint.singleValue
-                               ?: 0.0
-                       }else {
-                               0.0
-                       }
-
-                    Timber.d("Init data: Speed is $speed, Slope is $slope, Elevation is $elevation, Windspeed is $finalHeadwind")
-
-                    val powerbike = CyclingWattageEstimator(
-                        slope = slope / 100, // convert from percentage
-                        totalMass = (userMass + powerconfigs[0].bikeMass.toDouble()) * factorMass, // in kg
-                        rollingResistanceCoefficient = powerconfigs[0].rollingResistanceCoefficient.toDouble(),
-                        dragCoefficient = powerconfigs[0].dragCoefficient.toDouble(),
-                        speed = speed * factorDistance, // in m/s
-                        elevation = elevation * factorElevation, // in m
-                        windSpeed = finalHeadwind , // in m/s
-                        powerLoss = powerconfigs[0].powerLoss.toDouble() / 100,
-                        frontalArea = powerconfigs[0].frontalArea.toDouble(),
-                        ftp = powerconfigs[0].ftp.toDouble(),
+                combine(
+                    karooSystem.streamDataFlow(DataType.Type.SPEED),
+                    karooSystem.streamDataFlow(DataType.Type.ELEVATION_GRADE),
+                    karooSystem.streamDataFlow(DataType.Type.PRESSURE_ELEVATION_CORRECTION),
+                    karooSystem.streamDataFlow(DataType.Type.CADENCE),
+                    karooSystem.headwindFlow(context),
+                    powerConfigFlow
+                ) { streams: Array<*> ->
+                    Timber.d("Streams: ${streams.joinToString { it.toString() }}")
+                    val speed = streams[0] as StreamState
+                    val slope = streams[1] as StreamState
+                    val elevation = streams[2] as StreamState
+                    val cadence = streams[3] as StreamState
+                    val headwind = streams[4] as StreamState
+                    Timber.d("Speed: $speed, Slope: $slope, Elevation: $elevation, Cadence: $cadence, Headwind: $headwind")
+                    @Suppress("UNCHECKED_CAST")
+                    val configs = streams[5] as List<ConfigData>
+                    val karooValues = RealKarooValues(
+                        speed = speed,
+                        slope = slope,
+                        elevation = elevation,
                         cadence = cadence,
-                        surface = powerconfigs[0].surface.factor,
-                        isforcepower = isforcepower
+                        headwind = headwind
                     )
-                    Timber.d("Out Estimated Power is ${powerbike.calculateCyclingWattage()}")
-                    emitter.onNext(
-                        OnDataPoint(
-                            DataPoint(
-                                source.dataTypes.first(),
-                                values = mapOf(DataType.Field.POWER to powerbike.calculateCyclingWattage()),
-                                sourceId = source.uid,
-                            ),
-                        ),
-                    )
-                    delay(2000)
+                    Pair(karooValues, configs)
                 }
+                    .throttle(2000)
+                    .collect { (karooValues, configs) ->
+                        if (configs.isNotEmpty()) {
+                            val powerBike = calculatePowerBike(
+                                userMass,
+                                factorMass,
+                                factorDistance,
+                                factorElevation,
+                                configs,
+                                karooValues
+                            )
+
+                            val powerValue = powerBike.calculateCyclingWattage()
+                            emitter.onNext(
+                                OnDataPoint(
+                                    DataPoint(
+                                        source.dataTypes.first(),
+                                        values = mapOf(DataType.Field.POWER to powerValue),
+                                        sourceId = source.uid
+                                    )
+                                )
+                            )
+                        }
+                    }
+
+                awaitCancellation()
+            } catch (e: CancellationException) {
+                Timber.d("Connect coroutine was cancelled")
+            } catch (e: Exception) {
+                Timber.e(e, "Error in connect function")
+                emitter.onError(e)
             }
-            awaitCancellation()
         }
+
         emitter.setCancellable {
-            job.cancel()
+            Timber.d("Stopping connect coroutine")
+            scope.cancel()
         }
     }
+
+
+
+    private fun calculatePowerBike(
+        userMass: Double,
+        factorMass: Double,
+        factorDistance: Double,
+        factorElevation: Double,
+        powerConfigs: List<ConfigData>,
+        values: RealKarooValues
+    ): CyclingWattageEstimator {
+        val speed = values.speed.getValueOrDefault()
+        val cadence = values.cadence.getValueOrDefault()
+        val slope = values.slope.getValueOrDefault()
+        val elevation = values.elevation.getValueOrDefault()
+        val finalHeadwind = values.headwind.getValueOrDefault()
+
+        Timber.d("IN calculated Speed: $speed, Cadence: $cadence, Slope: $slope, Elevation: $elevation, Headwind: $finalHeadwind")
+
+        return CyclingWattageEstimator(
+            slope = slope / 100,
+            totalMass = (userMass + powerConfigs[0].bikeMass.toDoubleLocale()) * factorMass,
+            rollingResistanceCoefficient = powerConfigs[0].rollingResistanceCoefficient.toDoubleLocale(),
+            dragCoefficient = powerConfigs[0].dragCoefficient.toDoubleLocale(),
+            speed = speed * factorDistance,
+            elevation = elevation * factorElevation,
+            windSpeed = finalHeadwind,
+            powerLoss = powerConfigs[0].powerLoss.toDoubleLocale() / 100,
+            frontalArea = powerConfigs[0].frontalArea.toDoubleLocale(),
+            ftp = powerConfigs[0].ftp.toDoubleLocale(),
+            cadence = cadence,
+            surface = powerConfigs[0].surface.factor,
+            isforcepower = powerConfigs[0].isforcepower
+        )
+    }
+
+
 
     companion object {
         fun fromUid(extension: String, uid: String, karooSystem: KarooSystemService, context: Context): EstimatedPowerSource? {
@@ -238,3 +172,5 @@ class EstimatedPowerSource(extension: String,  private val hr: Int ,private val 
         }
     }
 }
+
+

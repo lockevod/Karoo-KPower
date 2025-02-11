@@ -3,9 +3,9 @@
   "packageName": "com.enderthor.kpower",
   "latestApkUrl": "https://github.com/lockevod/Karoo-KPower/releases/latest/download/kpower.apk",
   "iconUrl": "https://github.com/lockevod/Karoo-KPower/releases/latest/download/karoo-power_hr.png",
-  "latestVersion": "2.0",
-  "latestVersionCode": 2025012921,
+  "latestVersion": "1.9.2",
+  "latestVersionCode": 202502051,
   "developer": "Enderthor",
   "description": "This extension for Karoo devices adds a device simulates a virtual power meter.",
-  "releaseNotes": "Added field to calculate drag fields. Only  valuable if you've a real power meter."
+  "releaseNotes": "Code improvement. Fix some random crashes when locale isn't english."
 }

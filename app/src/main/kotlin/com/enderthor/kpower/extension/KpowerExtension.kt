@@ -30,8 +30,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.retry
 
-
-
 import timber.log.Timber
 import kotlin.math.absoluteValue
 import kotlin.time.Duration.Companion.minutes
@@ -43,12 +41,7 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
 
     lateinit var karooSystem: KarooSystemService
     private var serviceJob: Job? = null
-/*
-    override val types by lazy {
-        listOf(
-            HeadwindSpeedDataType(karooSystem, applicationContext,extension),
-        )
-    }*/
+
 
     @RequiresApi(Build.VERSION_CODES.O)
     @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)

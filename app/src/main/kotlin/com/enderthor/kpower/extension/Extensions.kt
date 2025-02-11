@@ -69,8 +69,16 @@ val jsonWithUnknownKeys = Json { ignoreUnknownKeys = true }
 
 val currentDataKey = stringPreferencesKey("current")
 val statsKey = stringPreferencesKey("stats")
-val preferencesKey = stringPreferencesKey("configdata")
 val lastKnownPositionKey = stringPreferencesKey("lastKnownPosition")
+
+val preferencesKey = stringPreferencesKey("configdata")
+
+suspend fun savePreferences(context: Context, configDatas: MutableList<ConfigData>) {
+    context.dataStore.edit { t ->
+        t[preferencesKey] = Json.encodeToString(configDatas)
+    }
+}
+
 
 
 suspend fun saveStats(context: Context, stats: HeadwindStats) {
@@ -122,7 +130,6 @@ fun Context.streamStats(): Flow<HeadwindStats> {
         }
     }.distinctUntilChanged()
 }
-
 fun Context.loadPreferencesFlow(): Flow<List<ConfigData>> {
     return dataStore.data.map { settingsJson ->
         try {
@@ -138,6 +145,7 @@ fun Context.loadPreferencesFlow(): Flow<List<ConfigData>> {
         }
     }.distinctUntilChanged()
 }
+
 
 
 fun Context.parseWeatherResponse(responseString: String): OpenMeteoCurrentWeatherResponse {

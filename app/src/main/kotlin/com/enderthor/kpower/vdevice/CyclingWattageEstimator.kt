@@ -27,7 +27,7 @@ class CyclingWattageEstimator(
 ) {
 
     fun smoothPower(estimatedPower: Double): Double {
-    Timber.d("Is force power: $isforcepower")
+   // Timber.d("Is force power: $isforcepower")
        if(!isforcepower) {
            if (cadence < 22) {
                return 0.0
@@ -39,18 +39,19 @@ class CyclingWattageEstimator(
             estimatedPower <= 400 -> 2.2
             else -> 1.7
         }
-
+       // Timber.d("Estimated power is $estimatedPower")
         return minOf(estimatedPower, maxOf(factor*ftp,790.0))
     }
 
     fun calculateCyclingWattage(): Double {
+
 
         val gravityForce = calculateGravityForce()
         val rollingResistanceForce = calculateRollingResistanceForce()
         val aerodynamicDragForce = calculateAerodynamicDragForce()
         val estimatedPower = ((gravityForce + rollingResistanceForce + aerodynamicDragForce + calculateDynamicRollingResistanceForce()) * speed * (1 - powerLoss).pow(-1))
 
-        Timber.d("Force cycling calculation: gravityForce is $gravityForce, rollingResistance is $rollingResistanceForce,aerodynamicDrag is $aerodynamicDragForce")
+        Timber.d("Force cycling calculation: estimatedPower is $estimatedPower, gravityForce is $gravityForce, rollingResistance is $rollingResistanceForce,aerodynamicDrag is $aerodynamicDragForce")
 
 
         return smoothPower(estimatedPower)
