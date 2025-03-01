@@ -116,7 +116,6 @@ You can use openmeteo or openweathermap If you want to use openweathermap (bette
 
 - If your cadence sensor doesn't work fine or you want to have a power value always, check force power option.
 
-- This extension provide a field (headwind) but this field is only for internal use, please if you want a headwind info use Timmklge headwind extension app
 
 ## Credits
 
