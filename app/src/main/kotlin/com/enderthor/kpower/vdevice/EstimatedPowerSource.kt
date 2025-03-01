@@ -62,20 +62,23 @@ class EstimatedPowerSource(
                     )
 
                 combine(
-                    karooSystem.streamDataFlow(DataType.Type.SPEED),
-                    karooSystem.streamDataFlow(DataType.Type.ELEVATION_GRADE),
-                    karooSystem.streamDataFlow(DataType.Type.PRESSURE_ELEVATION_CORRECTION),
-                    karooSystem.streamDataFlow(DataType.Type.CADENCE),
+                    karooSystem.streamDataMonitorFlow(DataType.Type.SPEED),
+                    karooSystem.streamDataMonitorFlow(DataType.Type.ELEVATION_GRADE),
+                    karooSystem.streamDataMonitorFlow(DataType.Type.PRESSURE_ELEVATION_CORRECTION),
+                    karooSystem.streamDataMonitorFlow(DataType.Type.CADENCE,true),
                     karooSystem.headwindFlow(context),
                     powerConfigFlow
                 ) { streams: Array<*> ->
                     Timber.d("Streams: ${streams.joinToString { it.toString() }}")
+
                     val speed = streams[0] as StreamState
                     val slope = streams[1] as StreamState
                     val elevation = streams[2] as StreamState
                     val cadence = streams[3] as StreamState
                     val headwind = streams[4] as StreamState
-                    Timber.d("Speed: $speed, Slope: $slope, Elevation: $elevation, Cadence: $cadence, Headwind: $headwind")
+
+                    Timber.w(" Despues del FLOW COMBINE Speed: $speed, Slope: $slope, Elevation: $elevation, Cadence: $cadence, Headwind: $headwind")
+
                     @Suppress("UNCHECKED_CAST")
                     val configs = streams[5] as List<ConfigData>
                     val karooValues = RealKarooValues(
@@ -86,8 +89,7 @@ class EstimatedPowerSource(
                         headwind = headwind
                     )
                     Pair(karooValues, configs)
-                }
-                    .throttle(2000)
+                }.throttle(900L)
                     .collect { (karooValues, configs) ->
                         if (configs.isNotEmpty()) {
                             val powerBike = calculatePowerBike(
@@ -114,7 +116,7 @@ class EstimatedPowerSource(
 
                 awaitCancellation()
             } catch (e: CancellationException) {
-                Timber.d("Connect coroutine was cancelled")
+                Timber.w("Connect coroutine was cancelled")
             } catch (e: Exception) {
                 Timber.e(e, "Error in connect function")
                 emitter.onError(e)
@@ -122,12 +124,10 @@ class EstimatedPowerSource(
         }
 
         emitter.setCancellable {
-            Timber.d("Stopping connect coroutine")
+            Timber.w("Stopping connect coroutine")
             scope.cancel()
         }
     }
-
-
 
     private fun calculatePowerBike(
         userMass: Double,
@@ -138,12 +138,19 @@ class EstimatedPowerSource(
         values: RealKarooValues
     ): CyclingWattageEstimator {
         val speed = values.speed.getValueOrDefault()
-        val cadence = values.cadence.getValueOrDefault()
+
         val slope = values.slope.getValueOrDefault()
         val elevation = values.elevation.getValueOrDefault()
         val finalHeadwind = values.headwind.getValueOrDefault()
 
-        Timber.d("IN calculated Speed: $speed, Cadence: $cadence, Slope: $slope, Elevation: $elevation, Headwind: $finalHeadwind")
+        var cadence = 0.0
+        var isforcepower = powerConfigs[0].isforcepower
+
+        if( values.cadence is StreamState.Streaming) cadence = values.cadence.getValueOrDefault()
+        else isforcepower = true
+
+
+        Timber.w("VALUES  Speed: $speed, Cadence: $cadence, Slope: $slope, Elevation: $elevation, Headwind: $finalHeadwind")
 
         return CyclingWattageEstimator(
             slope = slope / 100,
@@ -158,10 +165,9 @@ class EstimatedPowerSource(
             ftp = powerConfigs[0].ftp.toDoubleLocale(),
             cadence = cadence,
             surface = powerConfigs[0].surface.factor,
-            isforcepower = powerConfigs[0].isforcepower
+            isforcepower = isforcepower
         )
     }
-
 
 
     companion object {

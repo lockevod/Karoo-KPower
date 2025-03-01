@@ -1,6 +1,5 @@
 package com.enderthor.kpower.vdevice
 
-import timber.log.Timber
 import kotlin.math.atan
 import kotlin.math.sin
 import kotlin.math.cos
@@ -28,11 +27,8 @@ class CyclingWattageEstimator(
 
     fun smoothPower(estimatedPower: Double): Double {
    // Timber.d("Is force power: $isforcepower")
-       if(!isforcepower) {
-           if (cadence < 22) {
-               return 0.0
-           }
-       }
+        if (!isforcepower && cadence < 22) return 0.0
+
         val factor = when {
             estimatedPower < 210 -> 2.8
             estimatedPower <= 300 -> 2.5
@@ -51,7 +47,7 @@ class CyclingWattageEstimator(
         val aerodynamicDragForce = calculateAerodynamicDragForce()
         val estimatedPower = ((gravityForce + rollingResistanceForce + aerodynamicDragForce + calculateDynamicRollingResistanceForce()) * speed * (1 - powerLoss).pow(-1))
 
-        Timber.d("Force cycling calculation: estimatedPower is $estimatedPower, gravityForce is $gravityForce, rollingResistance is $rollingResistanceForce,aerodynamicDrag is $aerodynamicDragForce")
+        //Timber.d("Force cycling calculation: estimatedPower is $estimatedPower, gravityForce is $gravityForce, rollingResistance is $rollingResistanceForce,aerodynamicDrag is $aerodynamicDragForce")
 
 
         return smoothPower(estimatedPower)

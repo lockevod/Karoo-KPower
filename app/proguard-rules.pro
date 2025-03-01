@@ -51,6 +51,8 @@
 -keep class com.enderthor.kpower.data.** { *; }
 -keep class com.enderthor.kpower.extension.** { *; }
 -keep class com.enderthor.kpower.vdevice.** { *; }
+-keep class com.enderthor.kpower.activity.** { *; }
+-keep class com.enderthor.kpower.screens.** { *; }
 
 # Reglas para Timber
 -dontwarn org.jetbrains.annotations.**

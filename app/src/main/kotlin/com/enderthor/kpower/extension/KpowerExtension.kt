@@ -1,8 +1,7 @@
 package com.enderthor.kpower.extension
 
 
-import android.os.Build
-import androidx.annotation.RequiresApi
+
 import io.hammerhead.karooext.KarooSystemService
 import io.hammerhead.karooext.extension.KarooExtension
 import io.hammerhead.karooext.internal.Emitter
@@ -34,32 +33,36 @@ import timber.log.Timber
 import kotlin.math.absoluteValue
 import kotlin.time.Duration.Companion.minutes
 
-private var updateLastKnownGpsJob: Job? = null
+
 
 class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
 {
 
     lateinit var karooSystem: KarooSystemService
     private var serviceJob: Job? = null
+    private var updateLastKnownGpsJob: Job? = null
 
 
-    @RequiresApi(Build.VERSION_CODES.O)
+
     @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
     override fun onCreate() {
         super.onCreate()
+
+        Timber.d("Service created")
         karooSystem = KarooSystemService(applicationContext)
+
+        karooSystem.connect { connected ->
+            if (connected) {
+                Timber.d("Connected to Karoo system")
+            }
+        }
 
         updateLastKnownGpsJob = CoroutineScope(Dispatchers.IO).launch {
             karooSystem.updateLastKnownGps(this@KpowerExtension)
         }
-        Timber.d("Service created")
+
 
         serviceJob = CoroutineScope(Dispatchers.IO).launch{
-            karooSystem.connect { connected ->
-                if (connected) {
-                    Timber.d("Connected to Karoo system")
-                }
-            }
 
             val gpsFlow = karooSystem
                 .getGpsCoordinateFlow(this@KpowerExtension)
@@ -70,7 +73,7 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                         old == new
                     }
                 }
-                .debounce(5000L)
+                .debounce(10000L)
                 .transformLatest { value: GpsCoordinates? ->
                     while(true){
                         emit(value)
@@ -129,7 +132,6 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                         Timber.e("Failed to read current weather data $e")
                     }
                 }
-
 
         }
     }

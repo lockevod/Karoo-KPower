@@ -9,6 +9,13 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 
+
+const val RETRY_CHECK_STREAMS = 4
+const val WAIT_STREAMS_LONG = 120000L // 120 seconds
+const val WAIT_STREAMS_MEDIUM = 10000L // 10 seconds
+const val WAIT_STREAMS_SHORT = 3000L // 3 seconds
+const val STREAM_TIMEOUT = 20000L // 20 seconds
+
 data class StreamData(val headingResponse: HeadingResponse, val weatherResponse: OpenMeteoCurrentWeatherResponse?)
 
 data class Quadruple<out A, out B, out C, out D>(
@@ -58,8 +65,6 @@ data class ConfigData(
     val isforcepower: Boolean = false
     )
 
-
-//val defaultConfigData = Json.encodeToString(listOf(ConfigData(0,"default", true, "14.0","0.0095","0.8","0.9","2.2","0.0", false, "","200", KarooSurface.STANDARD,false)))
 
 val previewConfigData = listOf(ConfigData(0,"default", true, "14.0","0.0095","0.8","0.9","2.2","0.0", false, "","200", KarooSurface.STANDARD,false))
 val defaultConfigData = Json.encodeToString(previewConfigData)

@@ -6,6 +6,7 @@ import android.content.Context
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 
+
 import com.enderthor.kpower.activity.dataStore
 import com.enderthor.kpower.data.GpsCoordinates
 import com.enderthor.kpower.data.OpenMeteoCurrentWeatherResponse
@@ -13,7 +14,12 @@ import com.enderthor.kpower.data.OpenWeatherCurrentWeatherResponse
 import com.enderthor.kpower.data.HeadwindStats
 import com.enderthor.kpower.data.ConfigData
 import com.enderthor.kpower.data.OpenMeteoData
+import com.enderthor.kpower.data.RETRY_CHECK_STREAMS
+import com.enderthor.kpower.data.STREAM_TIMEOUT
 import com.enderthor.kpower.data.StreamData
+import com.enderthor.kpower.data.WAIT_STREAMS_LONG
+import com.enderthor.kpower.data.WAIT_STREAMS_MEDIUM
+import com.enderthor.kpower.data.WAIT_STREAMS_SHORT
 import com.enderthor.kpower.data.defaultConfigData
 
 
@@ -27,10 +33,13 @@ import io.hammerhead.karooext.models.OnLocationChanged
 import io.hammerhead.karooext.models.OnStreamState
 import io.hammerhead.karooext.models.StreamState
 
+
+
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.channels.trySendBlocking
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -45,16 +54,23 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 
+
+
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
+
 import kotlinx.coroutines.flow.single
 import kotlinx.coroutines.flow.timeout
+import kotlinx.coroutines.isActive
 
 
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import timber.log.Timber
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.abs
 import kotlin.math.cos
+import kotlin.time.Duration.Companion.milliseconds
 
 import kotlin.time.Duration.Companion.seconds
 
@@ -78,8 +94,6 @@ suspend fun savePreferences(context: Context, configDatas: MutableList<ConfigDat
         t[preferencesKey] = Json.encodeToString(configDatas)
     }
 }
-
-
 
 suspend fun saveStats(context: Context, stats: HeadwindStats) {
     context.dataStore.edit { t ->
@@ -220,17 +234,18 @@ fun KarooSystemService.getRelativeHeadingFlow(context: Context): Flow<HeadingRes
     return getHeadingFlow(context)
         .combine(currentWeatherData) { bearing, data -> bearing to data }
         .map { (bearing, data) ->
-            when {
-                bearing is HeadingResponse.Value && data != null -> {
+            when (bearing) {
+                is HeadingResponse.Value -> {
                     val windBearing = data.current.windDirection + 180
                     val diff = signedAngleDifference(bearing.diff, windBearing)
 
-                  Timber.d("Wind bearing: $bearing vs $windBearing => $diff")
+                    Timber.d("Wind bearing: $bearing vs $windBearing => $diff")
 
                     HeadingResponse.Value(diff)
                 }
-                bearing is HeadingResponse.NoGps -> HeadingResponse.NoGps
-                bearing is HeadingResponse.NoWeatherData || data == null -> HeadingResponse.NoWeatherData
+
+                is HeadingResponse.NoGps -> HeadingResponse.NoGps
+                is HeadingResponse.NoWeatherData -> HeadingResponse.NoWeatherData
                 else -> bearing
             }
         }
@@ -382,18 +397,103 @@ inline fun <reified T : KarooEvent> KarooSystemService.consumerFlow(): Flow<T> {
     }
 }
 
-@OptIn(FlowPreview::class)
-fun KarooSystemService.headwindFlow(context: Context): Flow<StreamState> = flow {
-    getRelativeHeadingFlow(context)
-        .combine(context.streamCurrentWeatherData()) { value, data -> StreamData(value, data) }
-        .filter { it.weatherResponse != null }
-        .collect { streamData ->
-            val windSpeed = streamData.weatherResponse?.current?.windSpeed ?: 0.0
-            val windDirection = (streamData.headingResponse as? HeadingResponse.Value)?.diff ?: 0.0
-            val headwindSpeed = cos((windDirection + 180) * Math.PI / 180.0) * windSpeed
 
-            emit(StreamState.Streaming(DataPoint("headwindspeed", mapOf(DataType.Field.SINGLE to headwindSpeed))))
-            delay(1000L)
+
+@OptIn(FlowPreview::class)
+fun KarooSystemService.streamDataMonitorFlow(
+    dataTypeID: String,
+    noCheck: Boolean = false
+): Flow<StreamState> = flow {
+
+    if (noCheck) {
+        streamDataFlow(dataTypeID).collect { emit(it) }
+        return@flow
+    }
+
+    var retryAttempt = 0
+    val initialState = StreamState.Streaming(
+        DataPoint(
+            dataTypeId = dataTypeID,
+            values = mapOf(DataType.Field.SINGLE to 0.0)
+        )
+    )
+
+    while (currentCoroutineContext().isActive) {
+        try {
+            streamDataFlow(dataTypeID)
+                .onStart { emit(initialState) }
+                .distinctUntilChanged()
+                .timeout(STREAM_TIMEOUT.milliseconds)
+                .collect { state ->
+                    when (state) {
+                        is StreamState.Idle, is StreamState.NotAvailable -> {
+                            Timber.w("Stream estado inactivo: $dataTypeID, esperando...")
+                            emit(initialState)
+                            delay(WAIT_STREAMS_SHORT)
+                        }
+                        is StreamState.Searching -> {
+                            Timber.w("Stream estado searching: $dataTypeID, esperando...")
+                            emit(initialState)
+                            delay(WAIT_STREAMS_SHORT/2)
+                        }
+                        else -> {
+                            retryAttempt = 0
+                            Timber.d("Stream estado: $state")
+                            emit(state)
+                        }
+                    }
+                }
+
+        } catch (e: Exception) {
+            when (e) {
+                is TimeoutCancellationException, is CancellationException -> {
+                    if (retryAttempt++ < RETRY_CHECK_STREAMS) {
+                        val backoffDelay = (1000L * (1 shl retryAttempt))
+                            .coerceAtMost(WAIT_STREAMS_MEDIUM)
+                        Timber.w("Timeout/Cancel en stream $dataTypeID, reintento $retryAttempt en ${backoffDelay}ms. Motivo $e")
+                        delay(backoffDelay)
+                    } else {
+                        Timber.e("Máximo de reintentos alcanzado")
+                        retryAttempt = 0
+                        delay(WAIT_STREAMS_LONG)
+                    }
+                }
+                else -> {
+                    Timber.e(e, "Error en stream")
+                    delay(WAIT_STREAMS_LONG)
+                }
+            }
         }
+    }
+}
+
+
+
+fun KarooSystemService.headwindFlow(context: Context): Flow<StreamState> = flow {
+    try {
+        getRelativeHeadingFlow(context)
+            .combine(context.streamCurrentWeatherData()) { value, data -> StreamData(value, data) }
+            .filter { it.weatherResponse != null }
+            .onStart {
+                emit(StreamState.Streaming(
+                    DataPoint("headwindspeed", mapOf(DataType.Field.SINGLE to 0.0))
+                ))
+            }
+            .collect { streamData ->
+                val windSpeed = streamData.weatherResponse?.current?.windSpeed ?: 0.0
+                val windDirection = (streamData.headingResponse as? HeadingResponse.Value)?.diff ?: 0.0
+                val headwindSpeed = cos((windDirection + 180) * Math.PI / 180.0) * windSpeed
+
+                emit(StreamState.Streaming(DataPoint("headwindspeed", mapOf(DataType.Field.SINGLE to headwindSpeed))))
+                delay(1000L)
+            }
+    } catch (e: Exception) {
+        Timber.e(e, "Error en headwindFlow")
+        emit(StreamState.Streaming(
+            DataPoint("headwindspeed", mapOf(DataType.Field.SINGLE to 0.0))
+        ))
+        delay(WAIT_STREAMS_SHORT/2)
+        // No lanzamos la excepción para permitir que el flujo continúe
+    }
 }
 
