@@ -4,6 +4,8 @@ This extension for Karoo devices adds a device simulates a virtual power meter. 
 
 Compatible with Karoo 2 and Karoo 3 devices running Karoo OS version 1.524.2003 and later (only tested with Karoo 3 if you detect issues with Karoo 2, please open an issue)
 
+<a href="https://www.buymeacoffee.com/enderthor" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/default-orange.png" alt="Buy Me A Coffee" height="41" width="174"></a>
+
 ## Installation
 
 You can sideload the app using the following steps for Karoo 2
