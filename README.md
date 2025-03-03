@@ -125,7 +125,7 @@ You can use openmeteo or openweathermap If you want to use openweathermap (bette
   https://github.com/timklge?tab=repositories
 - Power estimation https://www.gribble.org/cycling/power_v_speed.html
 - SRAM and Hammerhead coypyright are describer in Karoo file.
-- KPower doesn't save or share any information, but it use firebase crashlytics service only for crashes in app. I only use this information to prevent new crashes in the app. Please if you isn't agree with Firebase use (this conditions are in firebase web and can change, please read it), please you cannot use kpower app. If you use kpower you are agree with all conditions and copyrights.
+- KPower doesn't save or share any information for it's use, but it use firebase crashlytics service only for crashes in app (and firebase use this crash information). I only use this information to prevent new crashes in the app. Please if you isn't agree with Firebase use (this conditions are in firebase web and can change, please read it), please you cannot use kpower app. If you use kpower you are agree with all conditions and copyrights.
 
 ## Links
 
