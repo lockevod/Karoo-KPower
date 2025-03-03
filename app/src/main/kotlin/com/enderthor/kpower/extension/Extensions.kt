@@ -346,7 +346,7 @@ suspend fun Context.getLastKnownPosition(): GpsCoordinates? {
 
         return lastKnownPosition
     } catch(e: Throwable){
-       Timber.e( "Failed to read last known position")
+       Timber.e( "Failed to read last known position $e")
         return null
     }
 }
@@ -382,7 +382,7 @@ suspend fun saveLastKnownPosition(context: Context, gpsCoordinates: GpsCoordinat
             t[lastKnownPositionKey] = Json.encodeToString(gpsCoordinates)
         }
     } catch(e: Throwable){
-       Timber.e( "Failed to save last known position")
+       Timber.e( "Failed to save last known position $e")
     }
 
 }
@@ -411,6 +411,8 @@ fun KarooSystemService.streamDataMonitorFlow(
     }
 
     var retryAttempt = 0
+
+
     val initialState = StreamState.Streaming(
         DataPoint(
             dataTypeId = dataTypeID,
@@ -418,18 +420,24 @@ fun KarooSystemService.streamDataMonitorFlow(
         )
     )
 
+    emit(initialState)
+
     while (currentCoroutineContext().isActive) {
         try {
             streamDataFlow(dataTypeID)
-                .onStart { emit(initialState) }
                 .distinctUntilChanged()
                 .timeout(STREAM_TIMEOUT.milliseconds)
                 .collect { state ->
                     when (state) {
-                        is StreamState.Idle, is StreamState.NotAvailable -> {
+                        is StreamState.Idle -> {
                             Timber.w("Stream estado inactivo: $dataTypeID, esperando...")
-                            emit(initialState)
+                            if (dataTypeID == DataType.Type.SPEED) emit(initialState)
                             delay(WAIT_STREAMS_SHORT)
+                        }
+                        is StreamState.NotAvailable -> {
+                            Timber.w("Stream estado NotAvailable: $dataTypeID, esperando...")
+                            emit(initialState)
+                            delay(WAIT_STREAMS_SHORT * 2)
                         }
                         is StreamState.Searching -> {
                             Timber.w("Stream estado searching: $dataTypeID, esperando...")
@@ -446,7 +454,7 @@ fun KarooSystemService.streamDataMonitorFlow(
 
         } catch (e: Exception) {
             when (e) {
-                is TimeoutCancellationException, is CancellationException -> {
+                is TimeoutCancellationException -> {
                     if (retryAttempt++ < RETRY_CHECK_STREAMS) {
                         val backoffDelay = (1000L * (1 shl retryAttempt))
                             .coerceAtMost(WAIT_STREAMS_MEDIUM)
@@ -457,6 +465,9 @@ fun KarooSystemService.streamDataMonitorFlow(
                         retryAttempt = 0
                         delay(WAIT_STREAMS_LONG)
                     }
+                }
+                is CancellationException -> {
+                    Timber.d("Cancelación ignorada en streamDataFlow")
                 }
                 else -> {
                     Timber.e(e, "Error en stream")

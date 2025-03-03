@@ -35,7 +35,7 @@ class EstimatedPowerSource(
 
         scope.launch {
             try {
-                // Estados de conexión iniciales
+
                 emitter.onNext(OnConnectionStatus(ConnectionStatus.SEARCHING))
                 delay(2000)
                 emitter.onNext(OnConnectionStatus(ConnectionStatus.CONNECTED))
@@ -45,7 +45,7 @@ class EstimatedPowerSource(
                 emitter.onNext(OnManufacturerInfo(ManufacturerInfo("Enderthor", "1234", "POWER-EXT-1")))
                 delay(1000)
 
-                // Obtener el perfil del usuario
+
                 val userProfile = karooSystem.consumerFlow<UserProfile>().first()
                 val (userMass, factorMass, factorDistance, factorElevation) = getUserProfileFactors(userProfile)
 
@@ -150,7 +150,7 @@ class EstimatedPowerSource(
         else isforcepower = true
 
 
-        Timber.w("VALUES  Speed: $speed, Cadence: $cadence, Slope: $slope, Elevation: $elevation, Headwind: $finalHeadwind")
+        //Timber.w("VALUES  Speed: $speed, Cadence: $cadence, Slope: $slope, Elevation: $elevation, Headwind: $finalHeadwind")
 
         return CyclingWattageEstimator(
             slope = slope / 100,

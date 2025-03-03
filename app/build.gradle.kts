@@ -15,8 +15,8 @@ android {
         applicationId = "com.enderthor.kpower"
         minSdk = 23
         targetSdk = 34
-        versionCode = 202502051
-        versionName = "1.9.2"
+        versionCode = 202503031
+        versionName = "1.9.3"
     }
 
     buildTypes {
@@ -46,7 +46,7 @@ android {
 
 dependencies {
 
-    implementation(platform("com.google.firebase:firebase-bom:33.9.0"))
+    implementation(platform("com.google.firebase:firebase-bom:33.10.0"))
     implementation("com.google.firebase:firebase-analytics")
     implementation("com.google.firebase:firebase-crashlytics")
     implementation(libs.hammerhead.karoo.ext)
