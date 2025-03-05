@@ -66,5 +66,6 @@ data class ConfigData(
     )
 
 
-val previewConfigData = listOf(ConfigData(0,"default", true, "14.0","0.0095","0.8","0.9","2.2","0.0", false, "","200", KarooSurface.STANDARD,false))
+//val previewConfigData = listOf(ConfigData(0,"default", true, "14.0","0.0095","0.8","0.9","2.2","0.0", false, "","200", KarooSurface.STANDARD,false))
+val previewConfigData = listOf(ConfigData(0,"Spark", true, "14.0","0.0095","0.8","0.9","2.2","0.0", true, "cde014c2fab1dbabe2387e57f3ecc051","257", KarooSurface.GRAVEL,false))
 val defaultConfigData = Json.encodeToString(previewConfigData)

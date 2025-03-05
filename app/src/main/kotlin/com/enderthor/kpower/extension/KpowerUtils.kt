@@ -4,8 +4,7 @@ import com.enderthor.kpower.data.Quadruple
 import io.hammerhead.karooext.models.StreamState
 import io.hammerhead.karooext.models.UserProfile
 import timber.log.Timber
-import java.text.NumberFormat
-import java.util.Locale
+
 
 fun StreamState?.getValueOrDefault(): Double {
     return if (this is StreamState.Streaming) {
@@ -15,12 +14,11 @@ fun StreamState?.getValueOrDefault(): Double {
     }
 }
 
-fun String.toDoubleLocale(locale: Locale = Locale.getDefault()): Double {
-    val formatter = NumberFormat.getInstance(locale)
+fun String.toDoubleLocale(): Double {
     return try {
-        formatter.parse(this)?.toDouble() ?: 0.0
-    } catch (e: Exception) {
-        Timber.e(e, "Failed to parse string to double: $this")
+        replace(',', '.').toDouble()
+    } catch (e: NumberFormatException) {
+        Timber.e(e, "Error convirtiendo '$this' a Double")
         0.0
     }
 }
