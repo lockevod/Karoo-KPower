@@ -40,28 +40,27 @@ class CyclingWattageEstimator(
     }
 
     fun calculateCyclingWattage(): Double {
+        val slopeAngle = atan(slope)
 
-
-        val gravityForce = calculateGravityForce()
-        val rollingResistanceForce = calculateRollingResistanceForce()
+        val gravityForce = calculateGravityForce(slopeAngle)
+        val rollingResistanceForce = calculateRollingResistanceForce(slopeAngle)
         val aerodynamicDragForce = calculateAerodynamicDragForce()
-        val estimatedPower = ((gravityForce + rollingResistanceForce + aerodynamicDragForce + calculateDynamicRollingResistanceForce()) * speed * (1 - powerLoss).pow(-1))
+        val estimatedPower = ((gravityForce + rollingResistanceForce + aerodynamicDragForce + calculateDynamicRollingResistanceForce(slopeAngle)) * speed * (1 - powerLoss).pow(-1))
 
         //Timber.d("Force cycling calculation: estimatedPower is $estimatedPower, gravityForce is $gravityForce, rollingResistance is $rollingResistanceForce,aerodynamicDrag is $aerodynamicDragForce")
-
 
         return smoothPower(estimatedPower)
     }
 
-    private fun calculateDynamicRollingResistanceForce(): Double {
-        return 0.1 * cos(atan(slope))
+    private fun calculateDynamicRollingResistanceForce(slopeAngle: Double): Double {
+        return 0.1 * cos(slopeAngle)
     }
-    private fun calculateGravityForce(): Double {
-        return gravity * sin(atan(slope)) * totalMass
+    private fun calculateGravityForce(slopeAngle: Double): Double {
+        return gravity * sin(slopeAngle) * totalMass
     }
 
-    private fun calculateRollingResistanceForce(): Double {
-        return gravity * cos(atan(slope)) * totalMass * rollingResistanceCoefficient * surface
+    private fun calculateRollingResistanceForce(slopeAngle: Double): Double {
+        return gravity * cos(slopeAngle) * totalMass * rollingResistanceCoefficient * surface
     }
 
     private fun calculateAerodynamicDragForce(): Double {

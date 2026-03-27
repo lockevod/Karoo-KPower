@@ -28,6 +28,22 @@ class EstimatedPowerSource(
         )
     }
 
+    private var lastRandomPowerTime = 0L
+    private var currentRandomPower = 150.0  // Valor inicial
+    private val randomPowerUpdateInterval = 5000L  // Cambiar
+
+    private fun getRandomPower(): Double {
+        val currentTime = System.currentTimeMillis()
+
+        // Si han pasado más de X segundos desde la última actualización, generar un nuevo valor
+        if (currentTime - lastRandomPowerTime > randomPowerUpdateInterval) {
+            currentRandomPower = (100..259).random().toDouble()
+            lastRandomPowerTime = currentTime
+        }
+
+        return currentRandomPower
+    }
+
     @OptIn(FlowPreview::class)
     fun connect(emitter: Emitter<DeviceEvent>, extension: String) {
         Timber.d("Init Connect Power Estimator")
@@ -49,7 +65,7 @@ class EstimatedPowerSource(
                 val userProfile = karooSystem.consumerFlow<UserProfile>().first()
                 val (userMass, factorMass, factorDistance, factorElevation) = getUserProfileFactors(userProfile)
 
-                // Convertir powerConfigFlow en un flujo estable
+
                 val powerConfigFlow = context.loadPreferencesFlow()
                     .catch { e ->
                         Timber.e(e, "Error loading power configs")
@@ -102,6 +118,7 @@ class EstimatedPowerSource(
                             )
 
                             val powerValue = powerBike.calculateCyclingWattage()
+                            //val powerValue = getRandomPower()
                             emitter.onNext(
                                 OnDataPoint(
                                     DataPoint(
