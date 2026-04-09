@@ -7,6 +7,6 @@
   "latestVersionCode": 202603261,
   "developer": "Enderthor",
   "description": "This extension for Karoo devices adds a device simulates a virtual power meter.",
-  "releaseNotes": "Bump extensions to 1.1.9.Minor improvements.",
+  "releaseNotes": "Break change: You need to uninstall current version (if it's < 1.9.5) and install the new one. Bump extensions to 1.1.9.Minor improvements.",
   "tags": "Performance,Health"
 }
