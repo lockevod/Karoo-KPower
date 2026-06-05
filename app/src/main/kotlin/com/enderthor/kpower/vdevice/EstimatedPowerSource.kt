@@ -15,6 +15,14 @@ import com.enderthor.kpower.extension.*
 import kotlin.time.Duration.Companion.milliseconds
 
 
+private data class EnvAndConfig(
+    val values: RealKarooValues,
+    val configs: List<ConfigData>,
+    val weatherTempC: Double?,
+    val weatherPressureHpa: Double?,
+    val karooTemp: StreamState,
+)
+
 class EstimatedPowerSource(
     extension: String,
     private val hr: Int,
@@ -35,6 +43,8 @@ class EstimatedPowerSource(
     // background work doesn't accumulate.
     @Volatile
     private var activeScope: CoroutineScope? = null
+
+    private val accelerationTracker = AccelerationTracker()
 
     @OptIn(FlowPreview::class)
     fun connect(emitter: Emitter<DeviceEvent>, extension: String) {
@@ -60,6 +70,7 @@ class EstimatedPowerSource(
 
                 val userProfile = karooSystem.consumerFlow<UserProfile>().first()
                 val (userMass, factorMass, factorDistance, factorElevation) = getUserProfileFactors(userProfile)
+                val userFtp = userProfile.ftp
 
 
                 val powerConfigFlow = context.loadPreferencesFlow()
@@ -73,13 +84,22 @@ class EstimatedPowerSource(
                         initialValue = previewConfigData
                     )
 
+                val weatherEnvFlow = context.streamCurrentWeatherData()
+                    .map { (it.current.temperature) to (it.current.surfacePressure) }
+                    .onStart { emit(null to null) }
+
+                val karooTempFlow = karooSystem.streamDataMonitorFlow(DataType.Type.TEMPERATURE, noCheck = true)
+                    .onStart { emit(StreamState.NotAvailable) }
+
                 combine(
                     karooSystem.speedStreamWithStaleness(),
                     karooSystem.streamDataMonitorFlow(DataType.Type.ELEVATION_GRADE),
                     karooSystem.streamDataMonitorFlow(DataType.Type.PRESSURE_ELEVATION_CORRECTION),
                     karooSystem.streamDataMonitorFlow(DataType.Type.CADENCE, noCheck = true),
                     karooSystem.headwindFlow(context),
-                    powerConfigFlow
+                    powerConfigFlow,
+                    weatherEnvFlow,
+                    karooTempFlow
                 ) { streams: Array<*> ->
                     val speed = streams[0] as StreamState
                     val slope = streams[1] as StreamState
@@ -89,6 +109,11 @@ class EstimatedPowerSource(
 
                     @Suppress("UNCHECKED_CAST")
                     val configs = streams[5] as List<ConfigData>
+
+                    @Suppress("UNCHECKED_CAST")
+                    val env = streams[6] as Pair<Double?, Double?>
+                    val karooTemp = streams[7] as StreamState
+
                     val karooValues = RealKarooValues(
                         speed = speed,
                         slope = slope,
@@ -96,21 +121,37 @@ class EstimatedPowerSource(
                         cadence = cadence,
                         headwind = headwind
                     )
-                    karooValues to configs
+                    EnvAndConfig(karooValues, configs, env.first, env.second, karooTemp)
                 }
-                    // Rate-limit BEFORE the expensive compute. combine() of 6 streams
-                    // can fire up to ~6x/s under staggered emissions; sample() keeps
+                    // Rate-limit BEFORE the expensive compute. combine() of 8 streams
+                    // can fire up to ~8x/s under staggered emissions; sample() keeps
                     // only the latest value per 900 ms window.
                     .sample(900.milliseconds)
-                    .collect { (karooValues, configs) ->
+                    .collect { bundle ->
+                        val configs = bundle.configs
                         if (configs.isNotEmpty()) {
+                            val config = configs[0]
+                            val speedMs = bundle.values.speed.getValueOrDefault()
+                            val acceleration = accelerationTracker.update(speedMs, System.currentTimeMillis())
+
+                            val tempC: Double? = bundle.weatherTempC ?: run {
+                                if (config.useKarooTemp && bundle.karooTemp is StreamState.Streaming) {
+                                    bundle.karooTemp.getValueOrDefault() - 5.0
+                                } else null
+                            }
+                            val pressurePa: Double? = bundle.weatherPressureHpa?.times(100.0)
+
                             val powerBike = calculatePowerBike(
                                 userMass,
                                 factorMass,
                                 factorDistance,
                                 factorElevation,
                                 configs,
-                                karooValues
+                                bundle.values,
+                                tempC,
+                                pressurePa,
+                                acceleration,
+                                userFtp
                             )
 
                             val powerValue = powerBike.calculateCyclingWattage()
@@ -148,7 +189,11 @@ class EstimatedPowerSource(
         factorDistance: Double,
         factorElevation: Double,
         powerConfigs: List<ConfigData>,
-        values: RealKarooValues
+        values: RealKarooValues,
+        temperatureC: Double?,
+        pressurePa: Double?,
+        acceleration: Double,
+        userFtp: Int
     ): CyclingWattageEstimator {
         val speed = values.speed.getValueOrDefault()
         val slope = values.slope.getValueOrDefault()
@@ -161,6 +206,9 @@ class EstimatedPowerSource(
         if (values.cadence is StreamState.Streaming) cadence = values.cadence.getValueOrDefault()
         else isforcepower = true
 
+        val ftp = if (powerConfigs[0].useProfileFtp && userFtp > 0) userFtp.toDouble()
+        else powerConfigs[0].ftp.toDoubleLocale()
+
         return CyclingWattageEstimator(
             slope = slope / 100,
             totalMass = (userMass + powerConfigs[0].bikeMass.toDoubleLocale()) * factorMass,
@@ -171,10 +219,13 @@ class EstimatedPowerSource(
             windSpeed = finalHeadwind,
             powerLoss = powerConfigs[0].powerLoss.toDoubleLocale() / 100,
             frontalArea = powerConfigs[0].frontalArea.toDoubleLocale(),
-            ftp = powerConfigs[0].ftp.toDoubleLocale(),
+            ftp = ftp,
             cadence = cadence,
             surface = powerConfigs[0].surface.factor,
-            isforcepower = isforcepower
+            isforcepower = isforcepower,
+            temperatureC = temperatureC,
+            pressurePa = pressurePa,
+            acceleration = acceleration
         )
     }
 
