@@ -37,7 +37,7 @@ class CyclingWattageEstimator(
             else -> 1.7
         }
        // Timber.d("Estimated power is $estimatedPower")
-        return minOf(estimatedPower, maxOf(factor*ftp,790.0))
+        return minOf(estimatedPower, minOf(factor*ftp,790.0))
     }
 
     fun calculateCyclingWattage(): Double {

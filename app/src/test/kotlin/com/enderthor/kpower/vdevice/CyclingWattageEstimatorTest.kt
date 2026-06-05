@@ -13,6 +13,7 @@ class CyclingWattageEstimatorTest {
         pressurePa: Double? = 101325.0,
         cadence: Double = 90.0,
         isforce: Boolean = true,
+        ftp: Double = 250.0,
     ) = CyclingWattageEstimator(
         slope = slope,
         totalMass = 80.0,
@@ -23,7 +24,7 @@ class CyclingWattageEstimatorTest {
         windSpeed = 0.0,
         powerLoss = 0.03,
         elevation = 0.0,
-        ftp = 250.0,
+        ftp = ftp,
         cadence = cadence,
         surface = 0.75,
         isforcepower = isforce,
@@ -56,6 +57,15 @@ class CyclingWattageEstimatorTest {
     fun `hard braking never yields negative power (floor at 0W)`() {
         val p = estimator(slope = 0.0, acceleration = -2.0, speed = 5.0).calculateCyclingWattage()
         assert(p >= 0.0) { "power=$p must be >= 0" }
+    }
+
+    @Test
+    fun `cap scales with FTP for a low-FTP rider (no 790 floor)`() {
+        // Pendiente fuerte → cálculo bruto >1000 W. Con FTP 200 el tope debe escalar a
+        // 1.7*200 = 340 W (banda de cálculo alto), NO quedarse en el suelo de 790 W.
+        val p = estimator(ftp = 200.0, slope = 0.20, speed = 8.33).calculateCyclingWattage()
+        assertEquals(340.0, p, 1.0)
+        assert(p < 790.0) { "power=$p must be well below the old 790 floor" }
     }
 
     @Test
