@@ -1,7 +1,6 @@
 package com.enderthor.kpower.extension
 
 
-
 import io.hammerhead.karooext.KarooSystemService
 import io.hammerhead.karooext.extension.KarooExtension
 import io.hammerhead.karooext.internal.Emitter
@@ -10,41 +9,35 @@ import io.hammerhead.karooext.models.DeviceEvent
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-
-import com.enderthor.kpower.vdevice.EstimatedPowerSource
-import com.enderthor.kpower.BuildConfig
-import kotlinx.coroutines.flow.transformLatest
-import com.enderthor.kpower.data.GpsCoordinates
-import com.enderthor.kpower.data.HeadwindStats
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.debounce
-import kotlinx.coroutines.flow.distinctUntilChanged
-
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.retry
+import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlin.coroutines.coroutineContext
+
+import com.enderthor.kpower.BuildConfig
+import com.enderthor.kpower.data.HeadwindStats
+import com.enderthor.kpower.data.WEATHER_CHECK_INTERVAL_MS
+import com.enderthor.kpower.data.WEATHER_MAX_AGE_MS
+import com.enderthor.kpower.data.WEATHER_MIN_MOVE_KM
+import com.enderthor.kpower.data.WEATHER_RETRY_DELAY_MS
+import com.enderthor.kpower.vdevice.EstimatedPowerSource
 
 import timber.log.Timber
-import kotlin.math.absoluteValue
-import kotlin.time.Duration.Companion.minutes
-
 
 
 class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
 {
 
     lateinit var karooSystem: KarooSystemService
-    private var serviceJob: Job? = null
-    private var updateLastKnownGpsJob: Job? = null
 
+    private val supervisor = SupervisorJob()
+    private val serviceScope = CoroutineScope(Dispatchers.IO + supervisor)
 
-
-    @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
     override fun onCreate() {
         super.onCreate()
 
@@ -57,88 +50,100 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
             }
         }
 
-        updateLastKnownGpsJob = CoroutineScope(Dispatchers.IO).launch {
+        serviceScope.launch {
             karooSystem.updateLastKnownGps(this@KpowerExtension)
         }
 
+        serviceScope.launch {
+            weatherRefreshLoop()
+        }
+    }
 
-        serviceJob = CoroutineScope(Dispatchers.IO).launch{
-
-            val gpsFlow = karooSystem
-                .getGpsCoordinateFlow(this@KpowerExtension)
-                .distinctUntilChanged { old, new ->
-                    if (old != null && new != null) {
-                        old.distanceTo(new).absoluteValue < 0.001
-                    } else {
-                        old == new
-                    }
+    /**
+     * Weather refresh policy (Headwind-style):
+     *  - tick every WEATHER_CHECK_INTERVAL_MS
+     *  - only fetch when GPS moved >= WEATHER_MIN_MOVE_KM from the last successful
+     *    fetch position OR the last fetch is >= WEATHER_MAX_AGE_MS old (or there
+     *    is no previous fetch)
+     *  - on HTTP error, wait WEATHER_RETRY_DELAY_MS before next attempt
+     *
+     * Replaces the previous distinctUntilChanged(1m) + debounce(10s) + 15-min
+     * timer pipeline, which under continuous riding produced 0 weather updates
+     * because debounce never expired.
+     */
+    private suspend fun weatherRefreshLoop() {
+        while (coroutineContext.isActive) {
+            try {
+                val preferences = loadPreferencesFlow().first()
+                if (preferences.isEmpty()) {
+                    delay(WEATHER_CHECK_INTERVAL_MS)
+                    continue
                 }
-                .debounce(10000L)
-                .transformLatest { value: GpsCoordinates? ->
-                    while(true){
-                        emit(value)
-                        delay(15.minutes)
-                    }
+                val cfg = preferences[0]
+                val gps = karooSystem.getGpsCoordinateFlow(this@KpowerExtension)
+                    .firstOrNull()
+                if (gps == null) {
+                    delay(WEATHER_CHECK_INTERVAL_MS)
+                    continue
                 }
+                val stats = try { streamStats().first() } catch (_: Throwable) { HeadwindStats() }
 
-            loadPreferencesFlow()
-                .combine(gpsFlow) { preferences, gps -> preferences to gps }
-                .map { (preferences,gps) ->
+                val now = System.currentTimeMillis()
+                val lastPos = stats.lastSuccessfulWeatherPosition
+                val lastMs = stats.lastSuccessfulWeatherRequest ?: 0L
+                val movedFarEnough = lastPos == null ||
+                    gps.distanceTo(lastPos) >= WEATHER_MIN_MOVE_KM
+                val tooOld = lastMs == 0L || (now - lastMs) >= WEATHER_MAX_AGE_MS
 
-                    val lastKnownStats = try {
-                        streamStats().first()
-                    } catch(e: Exception){
-                        Timber.e("Failed to read stats $e")
-                        HeadwindStats()
-                    }
-
-                    if (gps == null){
-                        error("No GPS coordinates available")
-                    }
-
-
-                    val response = karooSystem.makeOpenMeteoHttpRequest(gps,preferences[0].isOpenWeather, preferences[0].apikey)
-                    if (response.error != null){
-                        try {
-                            val stats = lastKnownStats.copy(failedWeatherRequest = System.currentTimeMillis())
-                            launch { saveStats(this@KpowerExtension, stats) }
-                        } catch(e: Exception){
-                            Timber.e( "Failed to write stats $e")
-                        }
-                        error("HTTP request failed: ${response.error}")
-                    } else {
-                        try {
-                            val stats = lastKnownStats.copy(
-                                lastSuccessfulWeatherRequest = System.currentTimeMillis(),
-                                lastSuccessfulWeatherPosition = gps
-                            )
-                            launch { saveStats(this@KpowerExtension, stats) }
-                        } catch(e: Exception){
-                            Timber.e("Failed to write stats $e")
-                        }
-                    }
-
-                    response
-                }
-                .retry(Long.MAX_VALUE) { delay(1.minutes); true }
-                .collect { response ->
-                    try {
-                        val responseString = String(response.body ?: ByteArray(0))
-                        Timber.d("Got response: $responseString")
-                        val data = parseWeatherResponse(responseString)
-                            //jsonWithUnknownKeys.decodeFromString<OpenMeteoCurrentWeatherResponse>(responseString)
-                        saveCurrentData(applicationContext, data)
-                    } catch(e: Exception){
-                        Timber.e("Failed to read current weather data $e")
-                    }
+                if (!movedFarEnough && !tooOld) {
+                    delay(WEATHER_CHECK_INTERVAL_MS)
+                    continue
                 }
 
+                val response = karooSystem.makeOpenMeteoHttpRequest(
+                    gps,
+                    cfg.isOpenWeather,
+                    cfg.apikey,
+                )
+
+                if (response.error != null) {
+                    runCatching {
+                        saveStats(
+                            this@KpowerExtension,
+                            stats.copy(failedWeatherRequest = now),
+                        )
+                    }.onFailure { Timber.e(it, "Failed to write failed-stats") }
+                    delay(WEATHER_RETRY_DELAY_MS)
+                    continue
+                }
+
+                try {
+                    val body = String(response.body ?: ByteArray(0))
+                    val data = parseWeatherResponse(body)
+                    saveCurrentData(applicationContext, data)
+                    saveStats(
+                        this@KpowerExtension,
+                        stats.copy(
+                            lastSuccessfulWeatherRequest = now,
+                            lastSuccessfulWeatherPosition = gps,
+                        ),
+                    )
+                } catch (e: Throwable) {
+                    Timber.e(e, "Failed to parse/save weather data")
+                }
+
+                delay(WEATHER_CHECK_INTERVAL_MS)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                Timber.e(e, "weatherRefreshLoop error")
+                delay(WEATHER_CHECK_INTERVAL_MS)
+            }
         }
     }
 
     override fun startScan(emitter: Emitter<Device>) {
-        // Find estimated Power source
-        val job = CoroutineScope(Dispatchers.IO).launch {
+        val job: Job = serviceScope.launch {
             delay(2000L)
             Timber.d("Start scan")
             emitter.onNext(EstimatedPowerSource(extension, 2000, karooSystem, applicationContext).source)
@@ -150,10 +155,12 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
 
     override fun connectDevice(uid: String, emitter: Emitter<DeviceEvent>) {
         Timber.d("Connect Device")
-        EstimatedPowerSource.Companion.fromUid(extension, uid, karooSystem,  applicationContext)?.connect(emitter,extension)
+        EstimatedPowerSource.fromUid(extension, uid, karooSystem, applicationContext)
+            ?.connect(emitter, extension)
     }
 
     override fun onDestroy() {
+        runCatching { serviceScope.cancel() }
         karooSystem.disconnect()
         super.onDestroy()
     }

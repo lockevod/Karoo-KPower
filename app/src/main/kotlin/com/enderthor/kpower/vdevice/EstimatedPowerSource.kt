@@ -7,10 +7,12 @@ import io.hammerhead.karooext.models.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import timber.log.Timber
+import com.enderthor.kpower.BuildConfig
 import com.enderthor.kpower.data.ConfigData
 import com.enderthor.kpower.data.RealKarooValues
 import com.enderthor.kpower.data.previewConfigData
 import com.enderthor.kpower.extension.*
+import kotlin.time.Duration.Companion.milliseconds
 
 
 class EstimatedPowerSource(
@@ -28,26 +30,20 @@ class EstimatedPowerSource(
         )
     }
 
-    private var lastRandomPowerTime = 0L
-    private var currentRandomPower = 150.0  // Valor inicial
-    private val randomPowerUpdateInterval = 5000L  // Cambiar
-
-    private fun getRandomPower(): Double {
-        val currentTime = System.currentTimeMillis()
-
-        // Si han pasado más de X segundos desde la última actualización, generar un nuevo valor
-        if (currentTime - lastRandomPowerTime > randomPowerUpdateInterval) {
-            currentRandomPower = (100..259).random().toDouble()
-            lastRandomPowerTime = currentTime
-        }
-
-        return currentRandomPower
-    }
+    // Re-entrancy guard: if Karoo re-invokes connect() during the same ride
+    // (data field change, source restart), we cancel the previous scope so
+    // background work doesn't accumulate.
+    @Volatile
+    private var activeScope: CoroutineScope? = null
 
     @OptIn(FlowPreview::class)
     fun connect(emitter: Emitter<DeviceEvent>, extension: String) {
         Timber.d("Init Connect Power Estimator")
-        val scope = CoroutineScope(Dispatchers.IO)
+
+        // Cancel any previously-attached scope before installing the new one.
+        activeScope?.cancel()
+        val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        activeScope = scope
 
         scope.launch {
             try {
@@ -78,22 +74,18 @@ class EstimatedPowerSource(
                     )
 
                 combine(
-                    karooSystem.streamDataMonitorFlow(DataType.Type.SPEED),
+                    karooSystem.speedStreamWithStaleness(),
                     karooSystem.streamDataMonitorFlow(DataType.Type.ELEVATION_GRADE),
                     karooSystem.streamDataMonitorFlow(DataType.Type.PRESSURE_ELEVATION_CORRECTION),
-                    karooSystem.streamDataMonitorFlow(DataType.Type.CADENCE,true),
+                    karooSystem.streamDataMonitorFlow(DataType.Type.CADENCE, noCheck = true),
                     karooSystem.headwindFlow(context),
                     powerConfigFlow
                 ) { streams: Array<*> ->
-                    Timber.d("Streams: ${streams.joinToString { it.toString() }}")
-
                     val speed = streams[0] as StreamState
                     val slope = streams[1] as StreamState
                     val elevation = streams[2] as StreamState
                     val cadence = streams[3] as StreamState
                     val headwind = streams[4] as StreamState
-
-                    Timber.w(" Despues del FLOW COMBINE Speed: $speed, Slope: $slope, Elevation: $elevation, Cadence: $cadence, Headwind: $headwind")
 
                     @Suppress("UNCHECKED_CAST")
                     val configs = streams[5] as List<ConfigData>
@@ -104,8 +96,12 @@ class EstimatedPowerSource(
                         cadence = cadence,
                         headwind = headwind
                     )
-                    Pair(karooValues, configs)
-                }.throttle(900L)
+                    karooValues to configs
+                }
+                    // Rate-limit BEFORE the expensive compute. combine() of 6 streams
+                    // can fire up to ~6x/s under staggered emissions; sample() keeps
+                    // only the latest value per 900 ms window.
+                    .sample(900.milliseconds)
                     .collect { (karooValues, configs) ->
                         if (configs.isNotEmpty()) {
                             val powerBike = calculatePowerBike(
@@ -118,7 +114,6 @@ class EstimatedPowerSource(
                             )
 
                             val powerValue = powerBike.calculateCyclingWattage()
-                            //val powerValue = getRandomPower()
                             emitter.onNext(
                                 OnDataPoint(
                                     DataPoint(
@@ -133,7 +128,7 @@ class EstimatedPowerSource(
 
                 awaitCancellation()
             } catch (e: CancellationException) {
-                Timber.w("Connect coroutine was cancelled")
+                if (BuildConfig.DEBUG) Timber.w("Connect coroutine was cancelled")
             } catch (e: Exception) {
                 Timber.e(e, "Error in connect function")
                 emitter.onError(e)
@@ -141,8 +136,9 @@ class EstimatedPowerSource(
         }
 
         emitter.setCancellable {
-            Timber.w("Stopping connect coroutine")
+            if (BuildConfig.DEBUG) Timber.w("Stopping connect coroutine")
             scope.cancel()
+            if (activeScope === scope) activeScope = null
         }
     }
 
@@ -155,7 +151,6 @@ class EstimatedPowerSource(
         values: RealKarooValues
     ): CyclingWattageEstimator {
         val speed = values.speed.getValueOrDefault()
-
         val slope = values.slope.getValueOrDefault()
         val elevation = values.elevation.getValueOrDefault()
         val finalHeadwind = values.headwind.getValueOrDefault()
@@ -163,11 +158,8 @@ class EstimatedPowerSource(
         var cadence = 0.0
         var isforcepower = powerConfigs[0].isforcepower
 
-        if( values.cadence is StreamState.Streaming) cadence = values.cadence.getValueOrDefault()
+        if (values.cadence is StreamState.Streaming) cadence = values.cadence.getValueOrDefault()
         else isforcepower = true
-
-
-        //Timber.w("VALUES  Speed: $speed, Cadence: $cadence, Slope: $slope, Elevation: $elevation, Headwind: $finalHeadwind")
 
         return CyclingWattageEstimator(
             slope = slope / 100,
@@ -195,5 +187,3 @@ class EstimatedPowerSource(
         }
     }
 }
-
-

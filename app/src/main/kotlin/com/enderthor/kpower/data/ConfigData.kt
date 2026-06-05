@@ -16,6 +16,13 @@ const val WAIT_STREAMS_MEDIUM = 10000L // 10 seconds
 const val WAIT_STREAMS_SHORT = 3000L // 3 seconds
 const val STREAM_TIMEOUT = 20000L // 20 seconds
 
+// Weather refresh policy (Headwind pattern): fetch when rider moved >= MIN_KM
+// OR the last successful fetch is >= MAX_AGE_MS old.
+const val WEATHER_MIN_MOVE_KM = 3.0
+const val WEATHER_MAX_AGE_MS = 30L * 60L * 1000L     // 30 minutes
+const val WEATHER_CHECK_INTERVAL_MS = 60L * 1000L    // tick every minute
+const val WEATHER_RETRY_DELAY_MS = 5L * 60L * 1000L  // 5 min after a failure
+
 data class StreamData(val headingResponse: HeadingResponse, val weatherResponse: OpenMeteoCurrentWeatherResponse?)
 
 data class Quadruple<out A, out B, out C, out D>(

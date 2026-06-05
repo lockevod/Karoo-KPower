@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 
 
+import com.enderthor.kpower.BuildConfig
 import com.enderthor.kpower.activity.dataStore
 import com.enderthor.kpower.data.GpsCoordinates
 import com.enderthor.kpower.data.OpenMeteoCurrentWeatherResponse
@@ -81,7 +82,11 @@ sealed class HeadingResponse {
 }
 
 
-val jsonWithUnknownKeys = Json { ignoreUnknownKeys = true }
+val jsonWithUnknownKeys = Json {
+    ignoreUnknownKeys = true
+    coerceInputValues = true
+    isLenient = true
+}
 
 val currentDataKey = stringPreferencesKey("current")
 val statsKey = stringPreferencesKey("stats")
@@ -103,9 +108,7 @@ suspend fun saveStats(context: Context, stats: HeadwindStats) {
 
 suspend fun saveCurrentData(context: Context, forecast: OpenMeteoCurrentWeatherResponse) {
     context.dataStore.edit { t ->
-        Timber.d("Saving current data forecast $forecast")
         t[currentDataKey] = Json.encodeToString(forecast)
-        Timber.d("Saved current data $t[currentDataKey]")
     }
 }
 
@@ -149,10 +152,7 @@ fun Context.loadPreferencesFlow(): Flow<List<ConfigData>> {
         try {
             jsonWithUnknownKeys.decodeFromString<List<ConfigData>>(
                 settingsJson[preferencesKey] ?: defaultConfigData
-            ).map { configData ->
-                configData.copy(surface = configData.surface)
-            }
-
+            )
         } catch(e: Throwable){
             Timber.tag("kpower").e(e, "Failed to read preferences Flow Extension")
             jsonWithUnknownKeys.decodeFromString<List<ConfigData>>(defaultConfigData)
@@ -163,14 +163,11 @@ fun Context.loadPreferencesFlow(): Flow<List<ConfigData>> {
 
 
 fun Context.parseWeatherResponse(responseString: String): OpenMeteoCurrentWeatherResponse {
-    Timber.d("Decoded weather: $responseString")
-
     val decoded = try {
         if (responseString.contains("\"current\"")) {
             jsonWithUnknownKeys.decodeFromString<OpenMeteoCurrentWeatherResponse>(responseString)
         } else {
             val weather = jsonWithUnknownKeys.decodeFromString<OpenWeatherCurrentWeatherResponse>(responseString)
-            Timber.d("Decoded weather: $weather")
             OpenMeteoCurrentWeatherResponse(
                 current = OpenMeteoData(
                     windSpeed = weather.wind.speed,
@@ -201,7 +198,7 @@ suspend fun KarooSystemService.makeOpenMeteoHttpRequest(gpsCoordinates: GpsCoord
         val url = if(isOpenWeather && api.trim().isNotEmpty())  "https://api.openweathermap.org/data/2.5/weather?lat=${gpsCoordinates.lat}&lon=${gpsCoordinates.lon}&appid=$api"
         else "https://api.open-meteo.com/v1/forecast?latitude=${gpsCoordinates.lat}&longitude=${gpsCoordinates.lon}&current=wind_speed_10m,wind_direction_10m&timeformat=unixtime&wind_speed_unit=ms"
 
-        Timber.d("Http request to ${url}...")
+        if (BuildConfig.DEBUG) Timber.d("Http request to %s", url)
 
         val listenerId = addConsumer(
             OnHttpResponse.MakeHttpRequest(
@@ -210,7 +207,6 @@ suspend fun KarooSystemService.makeOpenMeteoHttpRequest(gpsCoordinates: GpsCoord
                 waitForConnection = false,
             ),
         ) { event: OnHttpResponse ->
-            Timber.d("Http response event $event")
             if (event.state is HttpResponseState.Complete){
                 trySend(event.state as HttpResponseState.Complete)
                 close()
@@ -238,9 +234,6 @@ fun KarooSystemService.getRelativeHeadingFlow(context: Context): Flow<HeadingRes
                 is HeadingResponse.Value -> {
                     val windBearing = data.current.windDirection + 180
                     val diff = signedAngleDifference(bearing.diff, windBearing)
-
-                    Timber.d("Wind bearing: $bearing vs $windBearing => $diff")
-
                     HeadingResponse.Value(diff)
                 }
 
@@ -259,10 +252,7 @@ fun KarooSystemService.getHeadingFlow(context: Context): Flow<HeadingResponse> {
     return getGpsCoordinateFlow(context)
         .map { coords ->
             val heading = coords?.bearing
-                Timber.d( "Updated gps bearing: $heading")
-            val headingValue = heading?.let { HeadingResponse.Value(it) }
-
-            headingValue ?: HeadingResponse.NoGps
+            heading?.let { HeadingResponse.Value(it) } ?: HeadingResponse.NoGps
         }
         .distinctUntilChanged()
 }
@@ -324,15 +314,12 @@ fun KarooSystemService.getGpsCoordinateFlow(context: Context): Flow<GpsCoordinat
 }
 
 suspend fun KarooSystemService.updateLastKnownGps(context: Context) {
-    while (true) {
-        getGpsCoordinateFlow(context)
-            .filterNotNull()
-            .throttle(60 * 1_000) // Only update last known gps position once every minute
-            .collect { gps ->
-                saveLastKnownPosition(context, gps)
-            }
-        delay(1_000)
-    }
+    getGpsCoordinateFlow(context)
+        .filterNotNull()
+        .throttle(60 * 1_000) // Only update last known gps position once every minute
+        .collect { gps ->
+            saveLastKnownPosition(context, gps)
+        }
 }
 
 suspend fun Context.getLastKnownPosition(): GpsCoordinates? {
@@ -399,10 +386,18 @@ inline fun <reified T : KarooEvent> KarooSystemService.consumerFlow(): Flow<T> {
 
 
 
+/**
+ * Stream-state monitor con timeout y back-off exponencial.
+ *
+ * - applyDistinct=false para SPEED (necesario para detección de GPS-stale aguas abajo:
+ *   ver `speedStreamWithStaleness`). Para slope/elevation/cadence se filtran duplicados.
+ * - noCheck=true se salta el back-off y delega directo en streamDataFlow.
+ */
 @OptIn(FlowPreview::class)
 fun KarooSystemService.streamDataMonitorFlow(
     dataTypeID: String,
-    noCheck: Boolean = false
+    noCheck: Boolean = false,
+    applyDistinct: Boolean = true
 ): Flow<StreamState> = flow {
 
     if (noCheck) {
@@ -411,7 +406,6 @@ fun KarooSystemService.streamDataMonitorFlow(
     }
 
     var retryAttempt = 0
-
 
     val initialState = StreamState.Streaming(
         DataPoint(
@@ -424,29 +418,26 @@ fun KarooSystemService.streamDataMonitorFlow(
 
     while (currentCoroutineContext().isActive) {
         try {
-            streamDataFlow(dataTypeID)
-                .distinctUntilChanged()
+            val base = streamDataFlow(dataTypeID)
+            val source = if (applyDistinct) base.distinctUntilChanged() else base
+            source
                 .timeout(STREAM_TIMEOUT.milliseconds)
                 .collect { state ->
                     when (state) {
                         is StreamState.Idle -> {
-                            Timber.w("Stream estado inactivo: $dataTypeID, esperando...")
                             if (dataTypeID == DataType.Type.SPEED) emit(initialState)
                             delay(WAIT_STREAMS_SHORT)
                         }
                         is StreamState.NotAvailable -> {
-                            Timber.w("Stream estado NotAvailable: $dataTypeID, esperando...")
                             emit(initialState)
                             delay(WAIT_STREAMS_SHORT * 2)
                         }
                         is StreamState.Searching -> {
-                            Timber.w("Stream estado searching: $dataTypeID, esperando...")
                             emit(initialState)
-                            delay(WAIT_STREAMS_SHORT/2)
+                            delay(WAIT_STREAMS_SHORT / 2)
                         }
                         else -> {
                             retryAttempt = 0
-                            Timber.d("Stream estado: $state")
                             emit(state)
                         }
                     }
@@ -458,22 +449,61 @@ fun KarooSystemService.streamDataMonitorFlow(
                     if (retryAttempt++ < RETRY_CHECK_STREAMS) {
                         val backoffDelay = (1000L * (1 shl retryAttempt))
                             .coerceAtMost(WAIT_STREAMS_MEDIUM)
-                        Timber.w("Timeout/Cancel en stream $dataTypeID, reintento $retryAttempt en ${backoffDelay}ms. Motivo $e")
                         delay(backoffDelay)
                     } else {
-                        Timber.e("Máximo de reintentos alcanzado")
                         retryAttempt = 0
                         delay(WAIT_STREAMS_LONG)
                     }
                 }
-                is CancellationException -> {
-                    Timber.d("Cancelación ignorada en streamDataFlow")
-                }
+                is CancellationException -> { /* propagated by collect, ignore */ }
                 else -> {
-                    Timber.e(e, "Error en stream")
+                    Timber.e(e, "Error en stream $dataTypeID")
                     delay(WAIT_STREAMS_LONG)
                 }
             }
+        }
+    }
+}
+
+/**
+ * Speed stream con detección de GPS-stale.
+ *
+ * Cuando el GPS se pierde el SDK reemite el ÚLTIMO valor conocido en vez de cero.
+ * Si el valor no cambia durante [staleThresholdMs] y es > 0, lo tratamos como
+ * stale y emitimos 0.0 para que el cálculo de potencia no produzca lecturas
+ * fantasma en túneles/puentes.
+ *
+ * NOTA: no aplicar distinctUntilChanged aguas arriba (rompería la detección,
+ * por eso `streamDataMonitorFlow` se llama con applyDistinct=false para SPEED).
+ */
+fun KarooSystemService.speedStreamWithStaleness(
+    staleThresholdMs: Long = 5_000L
+): Flow<StreamState> = flow {
+    var lastValue = Double.NaN
+    var lastChangeMs = 0L
+
+    streamDataMonitorFlow(DataType.Type.SPEED, applyDistinct = false).collect { state ->
+        if (state is StreamState.Streaming) {
+            val v = state.dataPoint.singleValue ?: 0.0
+            val now = System.currentTimeMillis()
+            if (v != lastValue || lastChangeMs == 0L) {
+                lastChangeMs = now
+                lastValue = v
+            }
+            val stale = (now - lastChangeMs) > staleThresholdMs && v > 0.0
+            if (stale) {
+                emit(
+                    StreamState.Streaming(
+                        DataPoint(DataType.Type.SPEED, mapOf(DataType.Field.SINGLE to 0.0))
+                    )
+                )
+            } else {
+                emit(state)
+            }
+        } else {
+            lastValue = Double.NaN
+            lastChangeMs = 0L
+            emit(state)
         }
     }
 }
