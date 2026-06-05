@@ -96,12 +96,19 @@ data class ConfigData(
     val tyreWidth: String = "28",
     val tyrePressure: String = "5.0",
     val treadType: TreadType = TreadType.SLICK,
-    val useProfileFtp: Boolean = true,
-    val simpleMode: Boolean = true,
+    // Defaults pensados para RETROCOMPATIBILIDAD: una config antigua (sin estos
+    // campos en el JSON) se deserializa con useProfileFtp=false (sigue usando el
+    // FTP que el usuario configuró) y simpleMode=false (se muestran TODOS los campos
+    // como antes, sin esconder Crr/Cd/área). Las configs NUEVAS se crean desde
+    // previewConfigData, que sí activa simpleMode/useProfileFtp.
+    val useProfileFtp: Boolean = false,
+    val simpleMode: Boolean = false,
     val useKarooTemp: Boolean = false
 )
 
 
 //val previewConfigData = listOf(ConfigData(0,"default", true, "14.0","0.0095","0.8","0.9","2.2","0.0", false, "","200", KarooSurface.STANDARD,false))
-val previewConfigData = listOf(ConfigData(0,"Spark", true, "14.0","0.008","0.85","0.42","2.5","0.0", false, "","257", KarooSurface.GRAVEL,false))
+// Plantilla para configs NUEVAS: estrena modo simple y FTP del perfil (las configs
+// antiguas migradas usan los defaults retrocompatibles del data class).
+val previewConfigData = listOf(ConfigData(0,"Spark", true, "14.0","0.008","0.85","0.42","2.5","0.0", false, "","257", KarooSurface.GRAVEL, false, simpleMode = true, useProfileFtp = true))
 val defaultConfigData = Json.encodeToString(previewConfigData)
