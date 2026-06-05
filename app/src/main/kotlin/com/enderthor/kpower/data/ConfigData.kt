@@ -53,6 +53,14 @@ enum class KarooSurface(
     SAND("Mountain Off Road/Sand", 2.20), //2.50
 }
 
+enum class BikePosition(val areaFactor: Double) {
+    ROAD_HOODS(0.24),
+    ROAD_DROPS(0.20),
+    TT(0.18),
+    GRAVEL(0.25),
+    MTB(0.28),
+}
+
 
 @Serializable
 data class ConfigData(

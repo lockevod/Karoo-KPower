@@ -1,5 +1,6 @@
 package com.enderthor.kpower.vdevice
 
+import com.enderthor.kpower.data.BikePosition
 import kotlin.math.exp
 import kotlin.math.pow
 
@@ -21,4 +22,15 @@ fun airDensity(pressurePa: Double?, tempC: Double?, elevation: Double): Double {
     val pressure = pressurePa ?: (101325.0 * exp(-0.00011856 * elevation))
     val tempK = (tempC ?: DEFAULT_TEMP_C) + 273.15
     return pressure / (R_AIR * tempK)
+}
+
+/**
+ * Área frontal (m²) estimada desde antropometría y posición.
+ * BSA por DuBois; el área frontal es una fracción de la BSA según la posición.
+ * Devuelve 0.0 si la altura no es válida (el llamante conserva el valor guardado).
+ */
+fun estimateFrontalArea(heightCm: Double, weightKg: Double, position: BikePosition): Double {
+    if (heightCm <= 0.0 || weightKg <= 0.0) return 0.0
+    val bsa = 0.007184 * heightCm.pow(0.725) * weightKg.pow(0.425)
+    return position.areaFactor * bsa
 }

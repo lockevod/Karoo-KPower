@@ -31,4 +31,23 @@ class PhysicsModelsTest {
         val explicit15 = airDensity(pressurePa = 101325.0, tempC = 15.0, elevation = 0.0)
         assertEquals(explicit15, withDefault, 1e-9)
     }
+
+    @Test
+    fun `frontal area for 175cm 70kg in hoods is in realistic band`() {
+        // BSA = 0.007184 * 175^0.725 * 70^0.425 ≈ 1.847 m2 ; area = 0.24 * 1.847 ≈ 0.44 m2
+        val area = estimateFrontalArea(heightCm = 175.0, weightKg = 70.0, position = com.enderthor.kpower.data.BikePosition.ROAD_HOODS)
+        assertEquals(0.44, area, 0.05)
+    }
+
+    @Test
+    fun `aero position gives smaller frontal area than MTB`() {
+        val aero = estimateFrontalArea(175.0, 70.0, com.enderthor.kpower.data.BikePosition.TT)
+        val mtb = estimateFrontalArea(175.0, 70.0, com.enderthor.kpower.data.BikePosition.MTB)
+        assert(aero < mtb) { "aero=$aero should be < mtb=$mtb" }
+    }
+
+    @Test
+    fun `non-positive height returns zero (caller keeps stored value)`() {
+        assertEquals(0.0, estimateFrontalArea(0.0, 70.0, com.enderthor.kpower.data.BikePosition.ROAD_HOODS), 1e-9)
+    }
 }
