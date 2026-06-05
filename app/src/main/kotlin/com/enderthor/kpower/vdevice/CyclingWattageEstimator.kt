@@ -5,8 +5,6 @@ import kotlin.math.sin
 import kotlin.math.cos
 import kotlin.math.pow
 
-import kotlin.math.exp
-
 
 class CyclingWattageEstimator(
     private val gravity: Double = 9.80665,
@@ -22,7 +20,10 @@ class CyclingWattageEstimator(
     private val ftp: Double,
     private val cadence: Double,
     private val surface: Double,
-    private val isforcepower: Boolean
+    private val isforcepower: Boolean,
+    private val temperatureC: Double? = null,
+    private val pressurePa: Double? = null,
+    private val acceleration: Double = 0.0
 ) {
 
     fun smoothPower(estimatedPower: Double): Double {
@@ -45,11 +46,11 @@ class CyclingWattageEstimator(
         val gravityForce = calculateGravityForce(slopeAngle)
         val rollingResistanceForce = calculateRollingResistanceForce(slopeAngle)
         val aerodynamicDragForce = calculateAerodynamicDragForce()
-        val estimatedPower = ((gravityForce + rollingResistanceForce + aerodynamicDragForce + calculateDynamicRollingResistanceForce(slopeAngle)) * speed * (1 - powerLoss).pow(-1))
+        val inertiaForce = totalMass * acceleration
+        val estimatedPower = ((gravityForce + rollingResistanceForce + aerodynamicDragForce +
+                calculateDynamicRollingResistanceForce(slopeAngle) + inertiaForce) * speed * (1 - powerLoss).pow(-1))
 
-        //Timber.d("Force cycling calculation: estimatedPower is $estimatedPower, gravityForce is $gravityForce, rollingResistance is $rollingResistanceForce,aerodynamicDrag is $aerodynamicDragForce")
-
-        return smoothPower(estimatedPower)
+        return maxOf(0.0, smoothPower(estimatedPower))
     }
 
     private fun calculateDynamicRollingResistanceForce(slopeAngle: Double): Double {
@@ -64,8 +65,7 @@ class CyclingWattageEstimator(
     }
 
     private fun calculateAerodynamicDragForce(): Double {
-        val airDensity = 1.225 * exp(-0.00011856 * elevation)
-
-        return (0.5 * dragCoefficient * frontalArea * airDensity * (speed + windSpeed).pow(2))   // windspeed is positive because it is a headwind
+        val airDensity = airDensity(pressurePa, temperatureC, elevation)
+        return (0.5 * dragCoefficient * frontalArea * airDensity * (speed + windSpeed).pow(2))
     }
 }
