@@ -3,10 +3,10 @@
   "packageName": "com.enderthor.kpower",
   "latestApkUrl": "https://github.com/lockevod/Karoo-KPower/releases/latest/download/kpower.apk",
   "iconUrl": "https://github.com/lockevod/Karoo-KPower/releases/latest/download/karoo-power_hr.png",
-  "latestVersion": "1.9.6",
-  "latestVersionCode": 202604092,
+  "latestVersion": "2.0.0",
+  "latestVersionCode": 202606051,
   "developer": "Enderthor",
   "description": "This extension for Karoo devices adds a device simulates a virtual power meter.",
-  "releaseNotes": "Bump extensions to 1.1.9.Minor improvements. Breaking change: if you cannot update,please uninstall and install again",
+  "releaseNotes": "Air density from real temperature/pressure, acceleration term and FTP-scaled power cap. New Simple/Advanced setup with bike presets, tyre-based Crr and frontal area from height. Existing profiles keep working unchanged.",
   "tags": ["entertainment","health","performance"]
 }
