@@ -15,9 +15,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.enderthor.kpower.data.BikePosition
 import com.enderthor.kpower.data.ConfigData
 import com.enderthor.kpower.data.KarooSurface
+import com.enderthor.kpower.data.TreadType
+import com.enderthor.kpower.extension.consumerFlow
+import com.enderthor.kpower.extension.toDoubleLocale
+import com.enderthor.kpower.vdevice.estimateCrr
+import com.enderthor.kpower.vdevice.estimateFrontalArea
 import io.hammerhead.karooext.KarooSystemService
+import io.hammerhead.karooext.models.UserProfile
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -43,9 +50,50 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
     var surface by remember { mutableStateOf(configdata.surface) }
     var isforcepower by remember { mutableStateOf(configdata.isforcepower) }
 
+    var bikePosition by remember { mutableStateOf(configdata.bikePosition) }
+    var riderHeight by remember { mutableStateOf(configdata.riderHeight) }
+    var tyreWidth by remember { mutableStateOf(configdata.tyreWidth) }
+    var tyrePressure by remember { mutableStateOf(configdata.tyrePressure) }
+    var treadType by remember { mutableStateOf(configdata.treadType) }
+    var useProfileFtp by remember { mutableStateOf(configdata.useProfileFtp) }
+    var simpleMode by remember { mutableStateOf(configdata.simpleMode) }
+    var useKarooTemp by remember { mutableStateOf(configdata.useKarooTemp) }
+
+    var riderWeightKg by remember { mutableStateOf(0.0) }
+    LaunchedEffect(Unit) {
+        karooSystem.consumerFlow<UserProfile>().collect { riderWeightKg = it.weight.toDouble() }
+    }
+
+    fun recomputeCrr() {
+        val w = tyreWidth.toDoubleLocale()
+        val p = tyrePressure.toDoubleLocale()
+        if (w > 0 && p > 0) {
+            rollingResistanceCoefficient = String.format(java.util.Locale.US, "%.4f", estimateCrr(w, p, treadType))
+        }
+    }
+
+    fun recomputeArea() {
+        val h = riderHeight.toDoubleLocale()
+        if (h > 0 && riderWeightKg > 0) {
+            frontalArea = String.format(java.util.Locale.US, "%.3f", estimateFrontalArea(h, riderWeightKg, bikePosition))
+        }
+    }
+
+    fun applyPreset(p: BikePosition) {
+        bikePosition = p
+        dragCoefficient = String.format(java.util.Locale.US, "%.2f", p.cd)
+        surface = p.defaultSurface
+        tyreWidth = p.defaultTyreWidth
+        tyrePressure = p.defaultTyrePressure
+        treadType = p.defaultTread
+        recomputeCrr()
+        recomputeArea()
+    }
 
     fun getUpdatedConfigData(): ConfigData = ConfigData(
-        configdata.id, title, isActive, bikeMass, rollingResistanceCoefficient, dragCoefficient, frontalArea, powerLoss, headwind, isOpenWeather, apikey,ftp,surface,isforcepower
+        configdata.id, title, isActive, bikeMass, rollingResistanceCoefficient, dragCoefficient,
+        frontalArea, powerLoss, headwind, isOpenWeather, apikey, ftp, surface, isforcepower,
+        bikePosition, riderHeight, tyreWidth, tyrePressure, treadType, useProfileFtp, simpleMode, useKarooTemp
     )
 
     Column(modifier = Modifier
@@ -58,16 +106,59 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
             .fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Title") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
 
+            apply {
+                val positionOptions = BikePosition.entries.toList().map { DropdownOption(it.name, it.name) }
+                val selected by remember(bikePosition) {
+                    mutableStateOf(positionOptions.first { it.id == bikePosition.name })
+                }
+                KarooKeyDropdown(remotekey = "Position", options = positionOptions, selectedOption = selected) { opt ->
+                    applyPreset(BikePosition.valueOf(opt.id))
+                }
+            }
+
+            OutlinedTextField(value = riderHeight, modifier = Modifier.fillMaxWidth(),
+                onValueChange = { riderHeight = it; recomputeArea() },
+                label = { Text("Rider height") }, suffix = { Text("cm") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true
+            )
+
+            OutlinedTextField(value = tyreWidth, modifier = Modifier.fillMaxWidth(),
+                onValueChange = { tyreWidth = it; recomputeCrr() },
+                label = { Text("Tyre width") }, suffix = { Text("mm") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true
+            )
+
+            OutlinedTextField(value = tyrePressure, modifier = Modifier.fillMaxWidth(),
+                onValueChange = { tyrePressure = it; recomputeCrr() },
+                label = { Text("Tyre pressure") }, suffix = { Text("bar") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true
+            )
+
+            apply {
+                val treadOptions = TreadType.entries.toList().map { DropdownOption(it.name, it.name) }
+                val selectedTread by remember(treadType) {
+                    mutableStateOf(treadOptions.first { it.id == treadType.name })
+                }
+                KarooKeyDropdown(remotekey = "Tread", options = treadOptions, selectedOption = selectedTread) { opt ->
+                    treadType = TreadType.valueOf(opt.id); recomputeCrr()
+                }
+            }
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(checked = useProfileFtp, onCheckedChange = { useProfileFtp = it })
+                Spacer(modifier = Modifier.width(10.dp))
+                Text("Use FTP from Karoo profile?")
+            }
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(checked = simpleMode, onCheckedChange = { simpleMode = it })
+                Spacer(modifier = Modifier.width(10.dp))
+                Text("Simple mode (hide advanced)")
+            }
+
             OutlinedTextField(value = bikeMass, modifier = Modifier.fillMaxWidth(),
                 onValueChange = { bikeMass = it },
                 label = { Text("Bike Mass") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                singleLine = true
-            )
-
-            OutlinedTextField(value = rollingResistanceCoefficient, modifier = Modifier.fillMaxWidth(),
-                onValueChange = { rollingResistanceCoefficient = it },
-                label = { Text("Crr") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 singleLine = true
             )
@@ -86,26 +177,43 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                 }
             }
 
-            OutlinedTextField(value = dragCoefficient, modifier = Modifier.fillMaxWidth(),
-                onValueChange = { dragCoefficient = it },
-                label = { Text("Cdr") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                singleLine = true
-            )
-            OutlinedTextField(value = frontalArea, modifier = Modifier.fillMaxWidth(),
-                onValueChange = { frontalArea = it },
-                label = { Text("Frontal Area") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                singleLine = true,
-                suffix = { Text("m2") },
-            )
-            OutlinedTextField(value = powerLoss, modifier = Modifier.fillMaxWidth(),
-                onValueChange = { powerLoss = it },
-                label = { Text("Power Loss") },
-                suffix = { Text("%") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                singleLine = true
-            )
+            if (!simpleMode) {
+                OutlinedTextField(value = rollingResistanceCoefficient, modifier = Modifier.fillMaxWidth(),
+                    onValueChange = { rollingResistanceCoefficient = it },
+                    label = { Text("Crr") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true
+                )
+
+                OutlinedTextField(value = dragCoefficient, modifier = Modifier.fillMaxWidth(),
+                    onValueChange = { dragCoefficient = it },
+                    label = { Text("Cdr") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true
+                )
+
+                OutlinedTextField(value = frontalArea, modifier = Modifier.fillMaxWidth(),
+                    onValueChange = { frontalArea = it },
+                    label = { Text("Frontal Area") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    suffix = { Text("m2") },
+                )
+
+                OutlinedTextField(value = powerLoss, modifier = Modifier.fillMaxWidth(),
+                    onValueChange = { powerLoss = it },
+                    label = { Text("Power Loss") },
+                    suffix = { Text("%") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true
+                )
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Switch(checked = useKarooTemp, onCheckedChange = { useKarooTemp = it })
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text("Use Karoo temperature sensor as fallback?")
+                }
+            }
 
             OutlinedTextField(value = ftp, modifier = Modifier.fillMaxWidth(),
                 onValueChange = { ftp = it },
