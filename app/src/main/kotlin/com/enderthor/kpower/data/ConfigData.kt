@@ -61,6 +61,12 @@ enum class BikePosition(val areaFactor: Double) {
     MTB(0.28),
 }
 
+enum class TreadType(val baseCrr: Double) {
+    SLICK(0.004),
+    SEMI_SLICK(0.007),
+    KNOBBY(0.015),
+}
+
 
 @Serializable
 data class ConfigData(

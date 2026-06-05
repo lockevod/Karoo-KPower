@@ -1,6 +1,8 @@
 package com.enderthor.kpower.vdevice
 
 import com.enderthor.kpower.data.BikePosition
+import com.enderthor.kpower.data.TreadType
+import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.pow
 
@@ -33,4 +35,20 @@ fun estimateFrontalArea(heightCm: Double, weightKg: Double, position: BikePositi
     if (heightCm <= 0.0 || weightKg <= 0.0) return 0.0
     val bsa = 0.007184 * heightCm.pow(0.725) * weightKg.pow(0.425)
     return position.areaFactor * bsa
+}
+
+/**
+ * Crr aproximado a partir del neumático, sobre firme de referencia.
+ * - base por dibujo del neumático.
+ * - penalización suave por desviarse de una presión "de referencia" que
+ *   escala con el ancho (anchos mayores → menor presión óptima).
+ * El factor de superficie del perfil escala este Crr en el modelo físico.
+ */
+fun estimateCrr(widthMm: Double, pressureBar: Double, treadType: TreadType): Double {
+    val base = treadType.baseCrr
+    val w = widthMm.coerceIn(18.0, 70.0)
+    val refPressure = (6.5 - (w - 25.0) * 0.07).coerceIn(1.5, 7.0)
+    val p = pressureBar.coerceIn(1.0, 9.0)
+    val penalty = 1.0 + 0.06 * abs(p - refPressure)
+    return base * penalty
 }
