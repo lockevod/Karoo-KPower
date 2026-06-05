@@ -70,4 +70,17 @@ class PhysicsModelsTest {
         val normal = estimateCrr(28.0, 6.0, com.enderthor.kpower.data.TreadType.SLICK)
         assert(low > normal) { "low=$low should be > normal=$normal" }
     }
+
+    @Test
+    fun `tyre width in inches is converted to mm`() {
+        assertEquals(58.42, tyreWidthToMm(2.3), 0.01) // 2.3" -> 58.42 mm (MTB)
+        assertEquals(28.0, tyreWidthToMm(28.0), 1e-9) // mm se queda en mm
+    }
+
+    @Test
+    fun `tubeless lowers Crr versus tubed`() {
+        val tubed = estimateCrr(28.0, 5.0, com.enderthor.kpower.data.TreadType.SLICK, tubeless = false)
+        val tubeless = estimateCrr(28.0, 5.0, com.enderthor.kpower.data.TreadType.SLICK, tubeless = true)
+        assert(tubeless < tubed) { "tubeless=$tubeless should be < tubed=$tubed" }
+    }
 }

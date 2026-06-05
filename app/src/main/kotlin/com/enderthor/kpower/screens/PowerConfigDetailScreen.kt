@@ -23,6 +23,7 @@ import com.enderthor.kpower.extension.consumerFlow
 import com.enderthor.kpower.extension.toDoubleLocale
 import com.enderthor.kpower.vdevice.estimateCrr
 import com.enderthor.kpower.vdevice.estimateFrontalArea
+import com.enderthor.kpower.vdevice.tyreWidthToMm
 import io.hammerhead.karooext.KarooSystemService
 import io.hammerhead.karooext.models.UserProfile
 
@@ -58,6 +59,7 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
     var useProfileFtp by remember { mutableStateOf(configdata.useProfileFtp) }
     var simpleMode by remember { mutableStateOf(configdata.simpleMode) }
     var useKarooTemp by remember { mutableStateOf(configdata.useKarooTemp) }
+    var tubeless by remember { mutableStateOf(configdata.tubeless) }
 
     var riderWeightKg by remember { mutableStateOf(0.0) }
 
@@ -65,7 +67,7 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
         val w = tyreWidth.toDoubleLocale()
         val p = tyrePressure.toDoubleLocale()
         if (w > 0 && p > 0) {
-            rollingResistanceCoefficient = String.format(java.util.Locale.US, "%.4f", estimateCrr(w, p, treadType))
+            rollingResistanceCoefficient = String.format(java.util.Locale.US, "%.4f", estimateCrr(tyreWidthToMm(w), p, treadType, tubeless))
         }
     }
 
@@ -100,7 +102,7 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
     fun getUpdatedConfigData(): ConfigData = ConfigData(
         configdata.id, title, isActive, bikeMass, rollingResistanceCoefficient, dragCoefficient,
         frontalArea, powerLoss, headwind, isOpenWeather, apikey, ftp, surface, isforcepower,
-        bikePosition, riderHeight, tyreWidth, tyrePressure, treadType, useProfileFtp, simpleMode, useKarooTemp
+        bikePosition, riderHeight, tyreWidth, tyrePressure, treadType, useProfileFtp, simpleMode, useKarooTemp, tubeless
     )
 
     Column(modifier = Modifier
@@ -118,7 +120,7 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
             // (abajo, bajo `if (!simpleMode)`), sin que nada los recalcule.
             if (simpleMode) {
                 apply {
-                    val positionOptions = BikePosition.entries.toList().map { DropdownOption(it.name, it.name) }
+                    val positionOptions = BikePosition.entries.toList().map { DropdownOption(it.name, it.label) }
                     val selected by remember(bikePosition) {
                         mutableStateOf(positionOptions.first { it.id == bikePosition.name })
                     }
@@ -135,7 +137,7 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
 
                 OutlinedTextField(value = tyreWidth, modifier = Modifier.fillMaxWidth(),
                     onValueChange = { tyreWidth = it; recomputeCrr() },
-                    label = { Text("Tyre width") }, suffix = { Text("mm") },
+                    label = { Text("Tyre width (mm / inch)") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true
                 )
 
@@ -146,13 +148,19 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                 )
 
                 apply {
-                    val treadOptions = TreadType.entries.toList().map { DropdownOption(it.name, it.name) }
+                    val treadOptions = TreadType.entries.toList().map { DropdownOption(it.name, it.label) }
                     val selectedTread by remember(treadType) {
                         mutableStateOf(treadOptions.first { it.id == treadType.name })
                     }
                     KarooKeyDropdown(remotekey = "Tread", options = treadOptions, selectedOption = selectedTread) { opt ->
                         treadType = TreadType.valueOf(opt.id); recomputeCrr()
                     }
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Switch(checked = tubeless, onCheckedChange = { tubeless = it; recomputeCrr() })
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text("Tubeless tyres?")
                 }
             }
 

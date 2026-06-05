@@ -44,7 +44,7 @@ Pick the things you actually know and let the app derive the rest:
 
 - **Bike preset / position**: Road (hoods), Road (drops), Time trial, Gravel or MTB. Sets a sensible aerodynamic drag and a default tyre/surface.
 - **Rider height** (cm): used together with your weight (from the Karoo profile) to estimate your **frontal area** (Bassett et al. regression).
-- **Tyre**: width (mm), pressure (bar) and tread (slick / semi-slick / knobby). The app derives the **rolling resistance (Crr)** from these.
+- **Tyre**: width (mm for road/gravel, or inches for MTB — e.g. `2.3`), pressure (bar), tread (road slick / gravel / MTB knobby) and whether it is **tubeless**. The app derives the **rolling resistance (Crr)** from these (tubeless saving based on bicyclerollingresistance.com data).
 - **Surface**: the terrain you ride (asphalt, mix, gravel, off-road/sand). It scales the rolling resistance. Pick the one that matches your usual route.
 - **FTP**: taken from your Karoo profile automatically (you can turn this off and type it).
 - **Weight of Bike** (kg): bike plus any extra gear.

@@ -53,10 +53,13 @@ enum class KarooSurface(
     SAND("Mountain Off Road/Sand", 2.20),
 }
 
-enum class TreadType(val baseCrr: Double) {
-    SLICK(0.005),
-    SEMI_SLICK(0.008),
-    KNOBBY(0.012),
+// tubelessFactor: reducción de Crr al montar tubeless vs cámara, según datos de
+// bicyclerollingresistance.com (mismo neumático, 42.5 kg / ~29 km/h):
+//   carretera 0.2–3.8 W (~10%), gravel media 5.1 W (~13%), MTB 10–15 W (~20%).
+enum class TreadType(val baseCrr: Double, val label: String, val tubelessFactor: Double) {
+    SLICK(0.005, "Road (slick)", 0.90),
+    SEMI_SLICK(0.008, "Gravel (semi-slick)", 0.87),
+    KNOBBY(0.012, "MTB (knobby)", 0.80),
 }
 
 enum class BikePosition(
@@ -66,12 +69,13 @@ enum class BikePosition(
     val defaultTyreWidth: String,
     val defaultTyrePressure: String,
     val defaultTread: TreadType,
+    val label: String,
 ) {
-    ROAD_HOODS(1.09, 0.80, KarooSurface.ASPHALT, "28", "5.0", TreadType.SLICK),
-    ROAD_DROPS(1.00, 0.80, KarooSurface.ASPHALT, "28", "5.0", TreadType.SLICK),
-    TT(0.84, 0.72, KarooSurface.ASPHALT, "25", "6.0", TreadType.SLICK),
-    GRAVEL(1.12, 0.85, KarooSurface.STANDARD, "40", "3.0", TreadType.SEMI_SLICK),
-    MTB(1.45, 0.90, KarooSurface.GRAVEL, "54", "2.0", TreadType.KNOBBY),
+    ROAD_HOODS(1.09, 0.80, KarooSurface.ASPHALT, "28", "5.0", TreadType.SLICK, "Road – hoods"),
+    ROAD_DROPS(1.00, 0.80, KarooSurface.ASPHALT, "28", "5.0", TreadType.SLICK, "Road – drops"),
+    TT(0.84, 0.72, KarooSurface.ASPHALT, "25", "6.0", TreadType.SLICK, "Time trial"),
+    GRAVEL(1.12, 0.85, KarooSurface.STANDARD, "40", "3.0", TreadType.SEMI_SLICK, "Gravel"),
+    MTB(1.45, 0.90, KarooSurface.GRAVEL, "2.3", "2.0", TreadType.KNOBBY, "MTB"),
 }
 
 
@@ -103,7 +107,8 @@ data class ConfigData(
     // previewConfigData, que sí activa simpleMode/useProfileFtp.
     val useProfileFtp: Boolean = false,
     val simpleMode: Boolean = false,
-    val useKarooTemp: Boolean = false
+    val useKarooTemp: Boolean = false,
+    val tubeless: Boolean = false
 )
 
 

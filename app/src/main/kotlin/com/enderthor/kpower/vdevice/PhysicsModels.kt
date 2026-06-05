@@ -45,13 +45,24 @@ fun estimateFrontalArea(heightCm: Double, weightKg: Double, position: BikePositi
  *   escala con el ancho (anchos mayores → menor presión óptima).
  * El factor de superficie del perfil escala este Crr en el modelo físico.
  */
-fun estimateCrr(widthMm: Double, pressureBar: Double, treadType: TreadType): Double {
+/**
+ * Normaliza el ancho de neumático a mm. Las ruedas de carretera/gravel se dan en mm
+ * (23–50) y las de MTB en pulgadas (1.9–2.6). Un valor ≤ 5 se interpreta como pulgadas
+ * y se convierte (×25.4); en caso contrario se asume que ya está en mm.
+ */
+fun tyreWidthToMm(width: Double): Double =
+    if (width > 0.0 && width <= 5.0) width * 25.4 else width
+
+fun estimateCrr(widthMm: Double, pressureBar: Double, treadType: TreadType, tubeless: Boolean = false): Double {
     val base = treadType.baseCrr
     val w = widthMm.coerceIn(18.0, 70.0)
     val refPressure = (6.5 - (w - 25.0) * 0.07).coerceIn(1.5, 7.0)
     val p = pressureBar.coerceIn(1.0, 9.0)
     val penalty = 1.0 + 0.06 * abs(p - refPressure)
-    return base * penalty
+    // Tubeless rueda mejor que con cámara; el ahorro depende del tipo de neumático
+    // (ver TreadType.tubelessFactor, basado en bicyclerollingresistance.com).
+    val tubelessFactor = if (tubeless) treadType.tubelessFactor else 1.0
+    return base * penalty * tubelessFactor
 }
 
 /**
