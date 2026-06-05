@@ -1,8 +1,19 @@
 # Karoo Power Extension
 
-This extension for Karoo devices adds a device simulates a virtual power meter. You only need to add this power meter (settings -> sensors) and you can use all power fields.
+This extension for Karoo devices adds a virtual power meter. You only need to add this power meter (settings -> sensors) and you can use all power fields.
+
+Power is an **estimation** from a physics model: gravity (slope) + rolling resistance (surface and tyres) + aerodynamic drag (now using real air temperature and pressure) + acceleration/inertia, with drivetrain losses. It is not a real power meter, but with the right parameters it gets close.
 
 Compatible with Karoo 2 and Karoo 3 devices running Karoo OS version 1.524.2003 and later (only tested with Karoo 3 if you detect issues with Karoo 2, please open an issue)
+
+## What's new
+
+- **Simple / Advanced configuration.** New profiles start in a **Simple** mode: pick a bike **preset** (road hoods/drops, TT, gravel, MTB), your **height**, and your **tyre** (width, pressure, tread), and the app derives the aerodynamic and rolling values for you. Advanced mode still lets you fine-tune Crr, Cd, frontal area and power loss by hand.
+- **Better air drag.** Air density is now computed from real **temperature and pressure** (from Open-Meteo/OpenWeather, with the Karoo barometer/sensor as fallback) instead of altitude only — colder/denser air now correctly needs more power.
+- **Acceleration/inertia term.** Accelerations and surges are accounted for, not just steady-state riding.
+- **FTP from your Karoo profile.** New profiles can take your FTP automatically from the Karoo user profile.
+- **Literature-calibrated coefficients** (Bassett frontal-area model, Crr from tyre/surface, drivetrain losses).
+- **Existing profiles keep working unchanged** — see *Upgrading* below.
 
 
 ## Installation
@@ -27,16 +38,30 @@ If you've Karoo 3 and v > 1.527 you can sideload the app using the following ste
 Please read the Help tab in configuration, there are some useful information because it's very important to configure with correct parameters.
 Power is an estimation and you need this parameters correct to get a good estimation.
 
-To calculate cycling wattage, you need to provide the following parameters:
+### Simple mode (recommended for most users)
 
-- **Weight of Bike**: Include the weight of your bike along with any additional gear (in kg).
-- **Rolling Resistance Coefficient**: Depends on the type of surface and the tires you are using. You can use info from here https://www.bicyclerollingresistance.com/ 
-- **Surfaces**: You can select the surface you are riding on. The app will adapt the rolling resistance coefficient for this type of surface (if you don't know, or if you want to use only the value in rolling coefficient, use standard surface ).
-- **Aerodynamic Drag Coefficient**: Depends on your position on the bike and your frontal area
-- **Frontal Area**: The area of your body that is exposed to the wind (m2)
-- **Power Losses**: Includes losses due to chain resistance and derailleur pulleys.
-- **FTP**: Your Functional Threshold Power (in watts). If you don't know your FTP, you can use the default value of 200 watts.
-- **Wind API Key**: You can use openweathermap to get the wind speed. You need to get an API key from openweathermap (free but you need to create an account) and introduce it in the configuration. Openweathermap is most acurate than Openmeteo
+Pick the things you actually know and let the app derive the rest:
+
+- **Bike preset / position**: Road (hoods), Road (drops), Time trial, Gravel or MTB. Sets a sensible aerodynamic drag and a default tyre/surface.
+- **Rider height** (cm): used together with your weight (from the Karoo profile) to estimate your **frontal area** (Bassett et al. regression).
+- **Tyre**: width (mm), pressure (bar) and tread (slick / semi-slick / knobby). The app derives the **rolling resistance (Crr)** from these.
+- **Surface**: the terrain you ride (asphalt, mix, gravel, off-road/sand). It scales the rolling resistance. Pick the one that matches your usual route.
+- **FTP**: taken from your Karoo profile automatically (you can turn this off and type it).
+- **Weight of Bike** (kg): bike plus any extra gear.
+
+### Advanced mode
+
+Toggle Advanced to set the physics values directly. The preset/height/tyre still pre-fill them, but you can override:
+
+- **Rolling Resistance Coefficient (Crr)**: depends on tyres and surface — see https://www.bicyclerollingresistance.com/
+- **Aerodynamic Drag Coefficient (Cd)**: depends on your position on the bike.
+- **Frontal Area** (m²): the area of your body exposed to the wind.
+- **Power Losses** (%): drivetrain losses (chain, pulleys).
+- **Use Karoo temperature sensor**: fallback temperature source for air density when no weather data is available (the Karoo internal sensor reads a few °C high, so a small offset is applied).
+
+### Wind and weather
+
+- **Wind API Key**: you can use OpenWeatherMap for wind/temperature/pressure (free, requires an account and an API key). It is usually more accurate (nearby stations) than Open-Meteo. Otherwise KPower uses Open-Meteo automatically.
 
 Kpower  will get the wind speed from openweathermap (you need to select openweather option also) or openmeteo automatically. 
 
@@ -92,9 +117,29 @@ Start scan and  you'll see a new category (looks like a puzzle piece), select th
 3- Kpower will show you the power estimation in the power fields. You can use the power fields in the data screens, in the workout builder, etc. It's like a real power meter.
 
 
+## Upgrading from a previous version
+
+Your existing profiles keep working **without changes**:
+
+- All your stored values (Crr, Cd, frontal area, power loss, FTP, surface) are preserved and used exactly as before.
+- Upgraded profiles open in **Advanced** mode showing every field (nothing is hidden) and keep using the **FTP you configured** (not the Karoo profile one). The new Simple mode and "FTP from profile" apply only to **newly created** profiles.
+- Surface factors are unchanged, and air density falls back to the previous behaviour when no temperature/pressure is available — so a steady ride estimates the same as before.
+
+The new behaviour you will notice on existing profiles is only the genuine model improvements: the acceleration term during surges, real temperature/pressure when weather is available, and a power cap that now scales with your FTP (see below). If you want the new Simple mode / tyre-based Crr on an old profile, just create a new one.
+
+> Note: if you manually edit the new tyre or height fields on a profile, the app will recompute Crr / frontal area from them and overwrite those values — that is intended.
+
 ## Features
 
-This release has the following old  features:
+New in this release:
+- **Air density from real temperature and pressure** (ideal-gas law) using Open-Meteo / OpenWeather, with Karoo barometer/sensor and altitude as fallbacks.
+- **Acceleration / inertia term** (mass × acceleration), smoothed and clamped, so surges and stops are modelled more realistically.
+- **Simple / Advanced configuration** with bike presets, height-based frontal area (Bassett et al.), and tyre-based rolling resistance (width / pressure / tread).
+- **FTP from the Karoo user profile** (optional, on by default for new profiles).
+- **FTP-scaled power cap**: the maximum estimated power now scales with your FTP instead of a fixed ceiling — e.g. an FTP-200 rider no longer sees implausible 700 W+ spikes on a wrong (MTB/dirt) profile.
+- Literature-calibrated coefficients (frontal area, Crr, drivetrain losses).
+
+Previous features:
 - Updated power estimation formula.
 - Added wind speed parameter with openmeteo (from Timklge repository headwind).
 - Added FTP to smooth the power estimation.
