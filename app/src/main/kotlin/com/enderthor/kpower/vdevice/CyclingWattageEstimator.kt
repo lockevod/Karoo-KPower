@@ -5,6 +5,10 @@ import kotlin.math.sin
 import kotlin.math.cos
 import kotlin.math.pow
 
+// Techo absoluto de potencia (W): backstop de cordura para un estimador sin medidor.
+// El tope real escala con el FTP (factor·FTP); esto solo limita FTPs muy altos o el
+// caso de FTP inválido. Subir/bajar aquí si se quiere otro límite.
+private const val MAX_POWER_CAP_W = 600.0
 
 class CyclingWattageEstimator(
     private val gravity: Double = 9.80665,
@@ -38,8 +42,8 @@ class CyclingWattageEstimator(
         }
        // Timber.d("Estimated power is $estimatedPower")
         // Si el FTP no es válido (0 o vacío), no se puede escalar el tope con él:
-        // se cae al techo absoluto de 790 W en vez de clavar toda la potencia a 0.
-        val cap = if (ftp > 0.0) minOf(factor * ftp, 790.0) else 790.0
+        // se cae al techo absoluto en vez de clavar toda la potencia a 0.
+        val cap = if (ftp > 0.0) minOf(factor * ftp, MAX_POWER_CAP_W) else MAX_POWER_CAP_W
         return minOf(estimatedPower, cap)
     }
 
