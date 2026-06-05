@@ -51,13 +51,15 @@ Pick the things you actually know and let the app derive the rest:
 
 ### Advanced mode
 
-Toggle Advanced to set the physics values directly. The preset/height/tyre still pre-fill them, but you can override:
+Toggle Advanced to set the physics values **directly by hand**. In Advanced the preset / height / tyre inputs are hidden, so nothing recalculates your values — what you type is what is used:
 
 - **Rolling Resistance Coefficient (Crr)**: depends on tyres and surface — see https://www.bicyclerollingresistance.com/
 - **Aerodynamic Drag Coefficient (Cd)**: depends on your position on the bike.
 - **Frontal Area** (m²): the area of your body exposed to the wind.
 - **Power Losses** (%): drivetrain losses (chain, pulleys).
 - **Use Karoo temperature sensor**: fallback temperature source for air density when no weather data is available (the Karoo internal sensor reads a few °C high, so a small offset is applied).
+
+> Simple mode derives these from the preset/height/tyre; Advanced mode is for typing them in manually. Switch to Advanced if you want full manual control with no recalculation.
 
 ### Wind and weather
 

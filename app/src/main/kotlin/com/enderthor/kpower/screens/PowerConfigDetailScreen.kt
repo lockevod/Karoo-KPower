@@ -106,41 +106,46 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
             .fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Title") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
 
-            apply {
-                val positionOptions = BikePosition.entries.toList().map { DropdownOption(it.name, it.name) }
-                val selected by remember(bikePosition) {
-                    mutableStateOf(positionOptions.first { it.id == bikePosition.name })
+            // Campos "de entrada" que DERIVAN Crr/Cd/área (preset, altura, neumático):
+            // solo en modo Simple. En Avanzado se editan los valores manuales directamente
+            // (abajo, bajo `if (!simpleMode)`), sin que nada los recalcule.
+            if (simpleMode) {
+                apply {
+                    val positionOptions = BikePosition.entries.toList().map { DropdownOption(it.name, it.name) }
+                    val selected by remember(bikePosition) {
+                        mutableStateOf(positionOptions.first { it.id == bikePosition.name })
+                    }
+                    KarooKeyDropdown(remotekey = "Position", options = positionOptions, selectedOption = selected) { opt ->
+                        applyPreset(BikePosition.valueOf(opt.id))
+                    }
                 }
-                KarooKeyDropdown(remotekey = "Position", options = positionOptions, selectedOption = selected) { opt ->
-                    applyPreset(BikePosition.valueOf(opt.id))
-                }
-            }
 
-            OutlinedTextField(value = riderHeight, modifier = Modifier.fillMaxWidth(),
-                onValueChange = { riderHeight = it; recomputeArea() },
-                label = { Text("Rider height") }, suffix = { Text("cm") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true
-            )
+                OutlinedTextField(value = riderHeight, modifier = Modifier.fillMaxWidth(),
+                    onValueChange = { riderHeight = it; recomputeArea() },
+                    label = { Text("Rider height") }, suffix = { Text("cm") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true
+                )
 
-            OutlinedTextField(value = tyreWidth, modifier = Modifier.fillMaxWidth(),
-                onValueChange = { tyreWidth = it; recomputeCrr() },
-                label = { Text("Tyre width") }, suffix = { Text("mm") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true
-            )
+                OutlinedTextField(value = tyreWidth, modifier = Modifier.fillMaxWidth(),
+                    onValueChange = { tyreWidth = it; recomputeCrr() },
+                    label = { Text("Tyre width") }, suffix = { Text("mm") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true
+                )
 
-            OutlinedTextField(value = tyrePressure, modifier = Modifier.fillMaxWidth(),
-                onValueChange = { tyrePressure = it; recomputeCrr() },
-                label = { Text("Tyre pressure") }, suffix = { Text("bar") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true
-            )
+                OutlinedTextField(value = tyrePressure, modifier = Modifier.fillMaxWidth(),
+                    onValueChange = { tyrePressure = it; recomputeCrr() },
+                    label = { Text("Tyre pressure") }, suffix = { Text("bar") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true
+                )
 
-            apply {
-                val treadOptions = TreadType.entries.toList().map { DropdownOption(it.name, it.name) }
-                val selectedTread by remember(treadType) {
-                    mutableStateOf(treadOptions.first { it.id == treadType.name })
-                }
-                KarooKeyDropdown(remotekey = "Tread", options = treadOptions, selectedOption = selectedTread) { opt ->
-                    treadType = TreadType.valueOf(opt.id); recomputeCrr()
+                apply {
+                    val treadOptions = TreadType.entries.toList().map { DropdownOption(it.name, it.name) }
+                    val selectedTread by remember(treadType) {
+                        mutableStateOf(treadOptions.first { it.id == treadType.name })
+                    }
+                    KarooKeyDropdown(remotekey = "Tread", options = treadOptions, selectedOption = selectedTread) { opt ->
+                        treadType = TreadType.valueOf(opt.id); recomputeCrr()
+                    }
                 }
             }
 
