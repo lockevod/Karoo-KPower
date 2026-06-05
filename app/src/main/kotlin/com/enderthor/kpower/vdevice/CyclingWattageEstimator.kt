@@ -48,14 +48,11 @@ class CyclingWattageEstimator(
         val aerodynamicDragForce = calculateAerodynamicDragForce()
         val inertiaForce = totalMass * acceleration
         val estimatedPower = ((gravityForce + rollingResistanceForce + aerodynamicDragForce +
-                calculateDynamicRollingResistanceForce(slopeAngle) + inertiaForce) * speed * (1 - powerLoss).pow(-1))
+                inertiaForce) * speed * (1 - powerLoss).pow(-1))
 
         return maxOf(0.0, smoothPower(estimatedPower))
     }
 
-    private fun calculateDynamicRollingResistanceForce(slopeAngle: Double): Double {
-        return 0.1 * cos(slopeAngle)
-    }
     private fun calculateGravityForce(slopeAngle: Double): Double {
         return gravity * sin(slopeAngle) * totalMass
     }
