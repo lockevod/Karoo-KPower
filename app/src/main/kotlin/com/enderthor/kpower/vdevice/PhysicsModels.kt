@@ -52,3 +52,47 @@ fun estimateCrr(widthMm: Double, pressureBar: Double, treadType: TreadType): Dou
     val penalty = 1.0 + 0.06 * abs(p - refPressure)
     return base * penalty
 }
+
+/**
+ * Calcula la aceleración (m/s²) a partir de la velocidad muestreada.
+ * - EMA para filtrar ruido del GPS.
+ * - Clamp a ±[maxAccel] (fuera de rango = ruido).
+ * - Velocidad ~0 (parado o GPS stale, que reemite 0.0) → reinicia y devuelve 0,
+ *   evitando un pico de frenada falso.
+ * - dt no positivo o mayor que [maxDtMs] (pausa) → reinicia y devuelve 0.
+ * No usa reloj propio: el llamante pasa [nowMs] (testeable).
+ */
+class AccelerationTracker(
+    private val emaAlpha: Double = 0.3,
+    private val maxAccel: Double = 2.0,
+    private val maxDtMs: Long = 5_000L,
+    private val minSpeedMs: Double = 0.5,
+) {
+    private var prevSpeed = 0.0
+    private var prevTs = 0L
+    private var ema = 0.0
+
+    fun update(speedMs: Double, nowMs: Long): Double {
+        if (speedMs <= minSpeedMs) {
+            prevTs = 0L
+            ema = 0.0
+            return 0.0
+        }
+        if (prevTs == 0L) {
+            prevTs = nowMs
+            prevSpeed = speedMs
+            return 0.0
+        }
+        val dtMs = nowMs - prevTs
+        if (dtMs <= 0L || dtMs > maxDtMs) {
+            prevTs = nowMs
+            prevSpeed = speedMs
+            return 0.0
+        }
+        val raw = ((speedMs - prevSpeed) / (dtMs / 1000.0)).coerceIn(-maxAccel, maxAccel)
+        ema = emaAlpha * raw + (1 - emaAlpha) * ema
+        prevTs = nowMs
+        prevSpeed = speedMs
+        return ema
+    }
+}
