@@ -88,6 +88,7 @@ class AccelerationTracker(
         if (dtMs <= 0L || dtMs > maxDtMs) {
             prevTs = nowMs
             prevSpeed = speedMs
+            ema = 0.0
             return 0.0
         }
         val raw = ((speedMs - prevSpeed) / (dtMs / 1000.0)).coerceIn(-maxAccel, maxAccel)

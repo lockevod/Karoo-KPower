@@ -69,6 +69,13 @@ class CyclingWattageEstimatorTest {
     }
 
     @Test
+    fun `invalid FTP (zero) does not clamp power to zero`() {
+        // Con FTP 0 (campo vacío) el tope debe caer al techo de 790 W, no clavar todo a 0.
+        val p = estimator(ftp = 0.0, slope = 0.20, speed = 8.33).calculateCyclingWattage()
+        assertEquals(790.0, p, 1.0)
+    }
+
+    @Test
     fun `low cadence without force returns zero`() {
         val p = estimator(cadence = 10.0, isforce = false).calculateCyclingWattage()
         assertEquals(0.0, p, 1e-9)

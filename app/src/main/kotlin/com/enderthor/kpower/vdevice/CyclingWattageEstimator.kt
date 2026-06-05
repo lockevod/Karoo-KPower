@@ -37,7 +37,10 @@ class CyclingWattageEstimator(
             else -> 1.7
         }
        // Timber.d("Estimated power is $estimatedPower")
-        return minOf(estimatedPower, minOf(factor*ftp,790.0))
+        // Si el FTP no es válido (0 o vacío), no se puede escalar el tope con él:
+        // se cae al techo absoluto de 790 W en vez de clavar toda la potencia a 0.
+        val cap = if (ftp > 0.0) minOf(factor * ftp, 790.0) else 790.0
+        return minOf(estimatedPower, cap)
     }
 
     fun calculateCyclingWattage(): Double {

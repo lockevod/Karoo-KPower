@@ -60,9 +60,6 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
     var useKarooTemp by remember { mutableStateOf(configdata.useKarooTemp) }
 
     var riderWeightKg by remember { mutableStateOf(0.0) }
-    LaunchedEffect(Unit) {
-        karooSystem.consumerFlow<UserProfile>().collect { riderWeightKg = it.weight.toDouble() }
-    }
 
     fun recomputeCrr() {
         val w = tyreWidth.toDoubleLocale()
@@ -88,6 +85,16 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
         treadType = p.defaultTread
         recomputeCrr()
         recomputeArea()
+    }
+
+    // El peso del ciclista llega del perfil de Karoo de forma asíncrona. Cuando llega,
+    // recalcula el área frontal (es no-op si la altura está vacía, p.ej. modo Avanzado),
+    // para no dejar el área sin calcular si el usuario tecleó la altura antes.
+    LaunchedEffect(Unit) {
+        karooSystem.consumerFlow<UserProfile>().collect {
+            riderWeightKg = it.weight.toDouble()
+            recomputeArea()
+        }
     }
 
     fun getUpdatedConfigData(): ConfigData = ConfigData(

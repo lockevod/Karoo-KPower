@@ -50,4 +50,14 @@ class AccelerationTrackerTest {
         val a = t.update(8.0, 20000L)
         assertEquals(0.0, a, 1e-9)
     }
+
+    @Test
+    fun `EMA is cleared after a long pause (no carryover)`() {
+        val t = AccelerationTracker(emaAlpha = 0.5, maxDtMs = 5000L)
+        t.update(5.0, 1000L)
+        t.update(8.0, 2000L)    // acumula EMA positivo
+        t.update(8.0, 30000L)   // pausa > maxDt → reinicia y limpia el EMA
+        val a = t.update(8.0, 31000L) // estable tras la pausa → 0, sin arrastrar EMA viejo
+        assertEquals(0.0, a, 1e-9)
+    }
 }
