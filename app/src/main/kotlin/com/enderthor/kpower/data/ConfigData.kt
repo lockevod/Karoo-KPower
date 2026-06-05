@@ -53,18 +53,25 @@ enum class KarooSurface(
     SAND("Mountain Off Road/Sand", 2.20), //2.50
 }
 
-enum class BikePosition(val areaFactor: Double) {
-    ROAD_HOODS(0.24),
-    ROAD_DROPS(0.20),
-    TT(0.18),
-    GRAVEL(0.25),
-    MTB(0.28),
-}
-
 enum class TreadType(val baseCrr: Double) {
     SLICK(0.004),
     SEMI_SLICK(0.007),
     KNOBBY(0.015),
+}
+
+enum class BikePosition(
+    val areaFactor: Double,
+    val cd: Double,
+    val defaultSurface: KarooSurface,
+    val defaultTyreWidth: String,
+    val defaultTyrePressure: String,
+    val defaultTread: TreadType,
+) {
+    ROAD_HOODS(0.24, 0.88, KarooSurface.ASPHALT, "28", "5.0", TreadType.SLICK),
+    ROAD_DROPS(0.20, 0.80, KarooSurface.ASPHALT, "28", "5.0", TreadType.SLICK),
+    TT(0.18, 0.70, KarooSurface.ASPHALT, "25", "6.0", TreadType.SLICK),
+    GRAVEL(0.25, 0.90, KarooSurface.STANDARD, "40", "3.0", TreadType.SEMI_SLICK),
+    MTB(0.28, 1.00, KarooSurface.GRAVEL, "54", "2.0", TreadType.KNOBBY),
 }
 
 
@@ -83,8 +90,16 @@ data class ConfigData(
     val apikey: String,
     val ftp: String ,
     val surface: KarooSurface = KarooSurface.STANDARD,
-    val isforcepower: Boolean = false
-    )
+    val isforcepower: Boolean = false,
+    val bikePosition: BikePosition = BikePosition.ROAD_HOODS,
+    val riderHeight: String = "",
+    val tyreWidth: String = "28",
+    val tyrePressure: String = "5.0",
+    val treadType: TreadType = TreadType.SLICK,
+    val useProfileFtp: Boolean = true,
+    val simpleMode: Boolean = true,
+    val useKarooTemp: Boolean = false
+)
 
 
 //val previewConfigData = listOf(ConfigData(0,"default", true, "14.0","0.0095","0.8","0.9","2.2","0.0", false, "","200", KarooSurface.STANDARD,false))
