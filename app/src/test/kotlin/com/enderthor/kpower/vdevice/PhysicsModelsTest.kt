@@ -34,9 +34,9 @@ class PhysicsModelsTest {
 
     @Test
     fun `frontal area for 175cm 70kg in hoods is in realistic band`() {
-        // BSA = 0.007184 * 175^0.725 * 70^0.425 ≈ 1.847 m2 ; area = 0.24 * 1.847 ≈ 0.44 m2
+        // Bassett (1999): A_base = 0.0293*1.75*70^0.425 + 0.0604 ≈ 0.372 m2 ; hoods ×1.09 ≈ 0.405
         val area = estimateFrontalArea(heightCm = 175.0, weightKg = 70.0, position = com.enderthor.kpower.data.BikePosition.ROAD_HOODS)
-        assertEquals(0.44, area, 0.05)
+        assertEquals(0.405, area, 0.02)
     }
 
     @Test

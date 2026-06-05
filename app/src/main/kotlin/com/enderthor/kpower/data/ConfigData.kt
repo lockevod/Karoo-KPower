@@ -47,31 +47,31 @@ enum class KarooSurface(
     val surface: String,
     val factor: Double,
 ) {
-    ASPHALT("Asphalt/Concrete", 0.75),  //0.8
-    STANDARD("Standard/Mix/Gravel", 0.93), //1.0
-    GRAVEL("Mountain Mix", 1.05), //1.17
-    SAND("Mountain Off Road/Sand", 2.20), //2.50
+    ASPHALT("Asphalt/Concrete", 1.0),
+    STANDARD("Standard/Mix/Gravel", 1.5),
+    GRAVEL("Mountain Mix", 2.5),
+    SAND("Mountain Off Road/Sand", 5.0),
 }
 
 enum class TreadType(val baseCrr: Double) {
-    SLICK(0.004),
-    SEMI_SLICK(0.007),
-    KNOBBY(0.015),
+    SLICK(0.005),
+    SEMI_SLICK(0.008),
+    KNOBBY(0.012),
 }
 
 enum class BikePosition(
-    val areaFactor: Double,
+    val areaScale: Double,
     val cd: Double,
     val defaultSurface: KarooSurface,
     val defaultTyreWidth: String,
     val defaultTyrePressure: String,
     val defaultTread: TreadType,
 ) {
-    ROAD_HOODS(0.24, 0.88, KarooSurface.ASPHALT, "28", "5.0", TreadType.SLICK),
-    ROAD_DROPS(0.20, 0.80, KarooSurface.ASPHALT, "28", "5.0", TreadType.SLICK),
-    TT(0.18, 0.70, KarooSurface.ASPHALT, "25", "6.0", TreadType.SLICK),
-    GRAVEL(0.25, 0.90, KarooSurface.STANDARD, "40", "3.0", TreadType.SEMI_SLICK),
-    MTB(0.28, 1.00, KarooSurface.GRAVEL, "54", "2.0", TreadType.KNOBBY),
+    ROAD_HOODS(1.09, 0.80, KarooSurface.ASPHALT, "28", "5.0", TreadType.SLICK),
+    ROAD_DROPS(1.00, 0.80, KarooSurface.ASPHALT, "28", "5.0", TreadType.SLICK),
+    TT(0.84, 0.72, KarooSurface.ASPHALT, "25", "6.0", TreadType.SLICK),
+    GRAVEL(1.12, 0.85, KarooSurface.STANDARD, "40", "3.0", TreadType.SEMI_SLICK),
+    MTB(1.45, 0.90, KarooSurface.GRAVEL, "54", "2.0", TreadType.KNOBBY),
 }
 
 
@@ -103,5 +103,5 @@ data class ConfigData(
 
 
 //val previewConfigData = listOf(ConfigData(0,"default", true, "14.0","0.0095","0.8","0.9","2.2","0.0", false, "","200", KarooSurface.STANDARD,false))
-val previewConfigData = listOf(ConfigData(0,"Spark", true, "14.0","0.0095","0.8","0.9","2.2","0.0", false, "","257", KarooSurface.GRAVEL,false))
+val previewConfigData = listOf(ConfigData(0,"Spark", true, "14.0","0.008","0.85","0.42","2.5","0.0", false, "","257", KarooSurface.GRAVEL,false))
 val defaultConfigData = Json.encodeToString(previewConfigData)

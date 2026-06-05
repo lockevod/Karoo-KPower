@@ -27,14 +27,15 @@ fun airDensity(pressurePa: Double?, tempC: Double?, elevation: Double): Double {
 }
 
 /**
- * Área frontal (m²) estimada desde antropometría y posición.
- * BSA por DuBois; el área frontal es una fracción de la BSA según la posición.
- * Devuelve 0.0 si la altura no es válida (el llamante conserva el valor guardado).
+ * Área frontal (m²) estimada con la regresión de Bassett et al. (1999) para
+ * ciclistas de carretera: A = 0.0293·altura(m)·masa(kg)^0.425 + 0.0604, escalada
+ * por la posición. Devuelve 0.0 si la entrada no es válida.
  */
 fun estimateFrontalArea(heightCm: Double, weightKg: Double, position: BikePosition): Double {
     if (heightCm <= 0.0 || weightKg <= 0.0) return 0.0
-    val bsa = 0.007184 * heightCm.pow(0.725) * weightKg.pow(0.425)
-    return position.areaFactor * bsa
+    val heightM = heightCm / 100.0
+    val aBase = 0.0293 * heightM * weightKg.pow(0.425) + 0.0604
+    return aBase * position.areaScale
 }
 
 /**
