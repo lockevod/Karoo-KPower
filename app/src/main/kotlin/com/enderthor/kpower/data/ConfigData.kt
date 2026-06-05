@@ -47,10 +47,10 @@ enum class KarooSurface(
     val surface: String,
     val factor: Double,
 ) {
-    ASPHALT("Asphalt/Concrete", 1.0),
-    STANDARD("Standard/Mix/Gravel", 1.5),
-    GRAVEL("Mountain Mix", 2.5),
-    SAND("Mountain Off Road/Sand", 5.0),
+    ASPHALT("Asphalt/Concrete", 0.75),
+    STANDARD("Standard/Mix/Gravel", 0.93),
+    GRAVEL("Mountain Mix", 1.05),
+    SAND("Mountain Off Road/Sand", 2.20),
 }
 
 enum class TreadType(val baseCrr: Double) {
