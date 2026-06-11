@@ -20,6 +20,7 @@ import com.enderthor.kpower.data.ConfigData
 import com.enderthor.kpower.data.KarooSurface
 import com.enderthor.kpower.data.TreadType
 import com.enderthor.kpower.extension.consumerFlow
+import com.enderthor.kpower.extension.isHeadwindInstalled
 import com.enderthor.kpower.extension.toDoubleLocale
 import com.enderthor.kpower.vdevice.estimateCrr
 import com.enderthor.kpower.vdevice.estimateFrontalArea
@@ -60,8 +61,11 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
     var simpleMode by remember { mutableStateOf(configdata.simpleMode) }
     var useKarooTemp by remember { mutableStateOf(configdata.useKarooTemp) }
     var tubeless by remember { mutableStateOf(configdata.tubeless) }
+    var preferHeadwind by remember { mutableStateOf(configdata.preferHeadwind) }
+    val headwindInstalled = remember { ctx.isHeadwindInstalled() }
 
     var riderWeightKg by remember { mutableStateOf(0.0) }
+    var riderFtp by remember { mutableStateOf(0) }
 
     fun recomputeCrr() {
         val w = tyreWidth.toDoubleLocale()
@@ -95,6 +99,7 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
     LaunchedEffect(Unit) {
         karooSystem.consumerFlow<UserProfile>().collect {
             riderWeightKg = it.weight.toDouble()
+            riderFtp = it.ftp
             recomputeArea()
         }
     }
@@ -102,7 +107,8 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
     fun getUpdatedConfigData(): ConfigData = ConfigData(
         configdata.id, title, isActive, bikeMass, rollingResistanceCoefficient, dragCoefficient,
         frontalArea, powerLoss, headwind, isOpenWeather, apikey, ftp, surface, isforcepower,
-        bikePosition, riderHeight, tyreWidth, tyrePressure, treadType, useProfileFtp, simpleMode, useKarooTemp, tubeless
+        bikePosition, riderHeight, tyreWidth, tyrePressure, treadType, useProfileFtp, simpleMode, useKarooTemp, tubeless,
+        preferHeadwind
     )
 
     Column(modifier = Modifier
@@ -145,6 +151,12 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                     onValueChange = { tyrePressure = it; recomputeCrr() },
                     label = { Text("Tyre pressure") }, suffix = { Text("bar") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true
+                )
+
+                Text(
+                    text = "If front and rear differ, enter the rear tyre — it carries most of the weight and dominates rolling resistance.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
                 apply {
@@ -235,13 +247,33 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                 }
             }
 
-            OutlinedTextField(value = ftp, modifier = Modifier.fillMaxWidth(),
-                onValueChange = { ftp = it },
-                label = { Text("FTP") },
+            OutlinedTextField(
+                value = if (useProfileFtp && riderFtp > 0) riderFtp.toString() else ftp,
+                modifier = Modifier.fillMaxWidth(),
+                onValueChange = { if (!useProfileFtp) ftp = it },
+                label = { Text(if (useProfileFtp) "FTP (from Karoo profile)" else "FTP") },
                 suffix = { Text("W") },
+                enabled = !useProfileFtp,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 singleLine = true
             )
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(checked = preferHeadwind, onCheckedChange = { preferHeadwind = it })
+                Spacer(modifier = Modifier.width(10.dp))
+                Text("Use Headwind weather if installed")
+            }
+
+            if (preferHeadwind) {
+                Text(
+                    text = if (headwindInstalled)
+                        "Headwind detected: KPower will take temperature, pressure and wind from it and skip its own weather lookups. Wind assumes Headwind's default unit (km/h metric / mph imperial); if you set it to m/s or knots in Headwind, wind will be wrong."
+                    else
+                        "Headwind not installed: KPower will use its own weather (OpenMeteo/OpenWeather below).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
 
             OutlinedTextField(value = apikey.toString(), modifier = Modifier.fillMaxWidth(),
                 onValueChange = { apikey = it },

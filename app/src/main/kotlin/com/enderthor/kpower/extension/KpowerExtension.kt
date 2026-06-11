@@ -6,6 +6,7 @@ import io.hammerhead.karooext.extension.KarooExtension
 import io.hammerhead.karooext.internal.Emitter
 import io.hammerhead.karooext.models.Device
 import io.hammerhead.karooext.models.DeviceEvent
+import io.hammerhead.karooext.models.UserProfile
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -98,6 +99,35 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                 if (!movedFarEnough && !tooOld) {
                     delay(WEATHER_CHECK_INTERVAL_MS)
                     continue
+                }
+
+                // Si Headwind está instalado y el usuario no fuerza la meteo propia,
+                // tomamos sus datos del stream en vez de pedir nuestra propia API HTTP.
+                // Si Headwind no emite datos a tiempo, caemos al HTTP de abajo (fallback).
+                if (cfg.preferHeadwind && isHeadwindInstalled()) {
+                    val isImperial = runCatching {
+                        karooSystem.consumerFlow<UserProfile>().first()
+                            .preferredUnit.distance == UserProfile.PreferredUnit.UnitType.IMPERIAL
+                    }.getOrDefault(false)
+
+                    val hw = karooSystem.fetchHeadwindWeatherSnapshot(gps, isImperial)
+                    if (hw != null) {
+                        try {
+                            saveCurrentData(applicationContext, hw)
+                            saveStats(
+                                this@KpowerExtension,
+                                stats.copy(
+                                    lastSuccessfulWeatherRequest = now,
+                                    lastSuccessfulWeatherPosition = gps,
+                                ),
+                            )
+                        } catch (e: Throwable) {
+                            Timber.e(e, "Failed to save Headwind weather data")
+                        }
+                        delay(WEATHER_CHECK_INTERVAL_MS)
+                        continue
+                    }
+                    Timber.w("Headwind installed but no data; falling back to own weather API")
                 }
 
                 val response = karooSystem.makeOpenMeteoHttpRequest(

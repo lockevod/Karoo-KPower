@@ -11,7 +11,8 @@ Compatible with Karoo 2 and Karoo 3 devices running Karoo OS version 1.524.2003 
 - **Simple / Advanced configuration.** New profiles start in a **Simple** mode: pick a bike **preset** (road hoods/drops, TT, gravel, MTB), your **height**, and your **tyre** (width, pressure, tread), and the app derives the aerodynamic and rolling values for you. Advanced mode still lets you fine-tune Crr, Cd, frontal area and power loss by hand.
 - **Better air drag.** Air density is now computed from real **temperature and pressure** (from Open-Meteo/OpenWeather, with the Karoo barometer/sensor as fallback) instead of altitude only — colder/denser air now correctly needs more power.
 - **Acceleration/inertia term.** Accelerations and surges are accounted for, not just steady-state riding.
-- **FTP from your Karoo profile.** New profiles can take your FTP automatically from the Karoo user profile.
+- **FTP from your Karoo profile.** New profiles can take your FTP automatically from the Karoo user profile (the FTP field becomes read-only while this is on).
+- **Headwind integration.** If the Headwind extension is installed, KPower reuses its temperature, pressure and wind instead of doing its own weather lookups (with automatic fallback, and a switch to opt out).
 - **Literature-calibrated coefficients** (Bassett frontal-area model, Crr from tyre/surface, drivetrain losses).
 - **Existing profiles keep working unchanged** — see *Upgrading* below.
 
@@ -35,8 +36,7 @@ If you've Karoo 3 and v > 1.527 you can sideload the app using the following ste
 ## Usage
 
 1. After installing this app on your Karoo, you need to configure the power extension in the settings.
-Please read the Help tab in configuration, there are some useful information because it's very important to configure with correct parameters.
-Power is an estimation and you need this parameters correct to get a good estimation.
+Power is an estimation and you need these parameters correct to get a good estimation, so it's very important to configure them well (this README is the reference; the in-app help tab has been removed).
 
 ### Simple mode (recommended for most users)
 
@@ -44,9 +44,9 @@ Pick the things you actually know and let the app derive the rest:
 
 - **Bike preset / position**: Road (hoods), Road (drops), Time trial, Gravel or MTB. Sets a sensible aerodynamic drag and a default tyre/surface.
 - **Rider height** (cm): used together with your weight (from the Karoo profile) to estimate your **frontal area** (Bassett et al. regression).
-- **Tyre**: width (mm for road/gravel, or inches for MTB — e.g. `2.3`), pressure (bar), tread (road slick / gravel / MTB knobby) and whether it is **tubeless**. The app derives the **rolling resistance (Crr)** from these (tubeless saving based on bicyclerollingresistance.com data).
+- **Tyre**: width (mm for road/gravel, or inches for MTB — e.g. `2.3`), pressure (bar), tread (road slick / gravel / MTB knobby) and whether it is **tubeless**. The app derives the **rolling resistance (Crr)** from these (tubeless saving based on bicyclerollingresistance.com data). If your front and rear tyres differ (width or pressure), enter the **rear** one — it carries most of the weight and dominates rolling resistance.
 - **Surface**: the terrain you ride (asphalt, mix, gravel, off-road/sand). It scales the rolling resistance. Pick the one that matches your usual route.
-- **FTP**: taken from your Karoo profile automatically (you can turn this off and type it).
+- **FTP**: taken from your Karoo profile automatically. While "Use FTP from Karoo profile" is on, the FTP field is read-only and shows the value from your Karoo profile; turn the switch off to type a manual FTP.
 - **Weight of Bike** (kg): bike plus any extra gear.
 
 ### Advanced mode
@@ -63,7 +63,9 @@ Toggle Advanced to set the physics values **directly by hand**. In Advanced the 
 
 ### Wind and weather
 
-- **Wind API Key**: you can use OpenWeatherMap for wind/temperature/pressure (free, requires an account and an API key). It is usually more accurate (nearby stations) than Open-Meteo. Otherwise KPower uses Open-Meteo automatically.
+- **Use Headwind weather if installed** (on by default): if you also run the [Headwind](https://github.com/timklge/karoo-headwind) extension, KPower reads temperature, pressure and wind from Headwind's stream instead of polling its own weather API — no point in both extensions looking up the weather. If Headwind isn't installed (or it has no data yet), KPower falls back to its own lookup automatically. Turn this switch off to always use KPower's own weather even when Headwind is present.
+  - Note on units: temperature and pressure come from Headwind exactly; for wind, KPower assumes Headwind's **default** wind unit (km/h in metric, mph in imperial) and converts it to m/s. If you changed Headwind's wind unit to m/s or knots, the wind will be wrong — either keep Headwind on its default unit or turn this switch off.
+- **Wind API Key**: you can use OpenWeatherMap for wind/temperature/pressure (free, requires an account and an API key). It is usually more accurate (nearby stations) than Open-Meteo. Otherwise KPower uses Open-Meteo automatically. (Used when Headwind is not providing the data.)
 
 Kpower  will get the wind speed from openweathermap (you need to select openweather option also) or openmeteo automatically. 
 
@@ -137,8 +139,12 @@ New in this release:
 - **Air density from real temperature and pressure** (ideal-gas law) using Open-Meteo / OpenWeather, with Karoo barometer/sensor and altitude as fallbacks.
 - **Acceleration / inertia term** (mass × acceleration), smoothed and clamped, so surges and stops are modelled more realistically.
 - **Simple / Advanced configuration** with bike presets, height-based frontal area (Bassett et al.), and tyre-based rolling resistance (width / pressure / tread).
-- **FTP from the Karoo user profile** (optional, on by default for new profiles).
-- **FTP-scaled power cap**: the maximum estimated power now scales with your FTP instead of a fixed ceiling — e.g. an FTP-200 rider no longer sees implausible 700 W+ spikes on a wrong (MTB/dirt) profile.
+- **FTP from the Karoo user profile** (optional, on by default for new profiles; field is read-only while enabled).
+- **Headwind weather reuse**: consumes temperature/pressure/wind from the Headwind extension when installed, avoiding duplicate weather polling, with automatic fallback to the own API.
+- **FTP-scaled power cap**: the maximum estimated power scales with your FTP instead of a fixed ceiling — e.g. an FTP-200 rider no longer sees implausible 700 W+ spikes on a wrong (MTB/dirt) profile. The cap is now a smooth curve (no hard cut) anchored to realistic peak-over-FTP margins: roughly 1.2×FTP + 130 W (FTP 100 → 250 W, FTP 250 → 430 W, absolute ceiling 600 W), with progressive compression near the top so brief surges register without noise spikes.
+- **3-second power smoothing**: the displayed power is time-smoothed like real power meters' "3s power", and the slope input is filtered too — GPS/barometer noise no longer produces watt spikes. Power still drops to 0 instantly when you stop pedalling.
+- **Cadence gate with hysteresis**: coasting detection switches off below 20 rpm and back on above 25 rpm, so power no longer flickers between 0 and full value when cadence hovers around the cutoff.
+- **Tailwind fix**: a tailwind stronger than your speed now correctly *reduces* the aero term instead of adding drag.
 - Literature-calibrated coefficients (frontal area, Crr, drivetrain losses).
 
 Previous features:

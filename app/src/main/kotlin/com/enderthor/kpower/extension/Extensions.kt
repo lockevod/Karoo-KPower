@@ -2,6 +2,7 @@ package com.enderthor.kpower.extension
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.pm.PackageManager
 
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -63,6 +64,7 @@ import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.single
 import kotlinx.coroutines.flow.timeout
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withTimeoutOrNull
 
 
 import kotlinx.serialization.encodeToString
@@ -71,6 +73,7 @@ import timber.log.Timber
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.abs
 import kotlin.math.cos
+import kotlin.math.round
 import kotlin.time.Duration.Companion.milliseconds
 
 import kotlin.time.Duration.Companion.seconds
@@ -224,6 +227,76 @@ suspend fun KarooSystemService.makeOpenMeteoHttpRequest(gpsCoordinates: GpsCoord
             throw e
         }
     }.single()
+}
+
+const val HEADWIND_PACKAGE = "de.timklge.karooheadwind"
+
+/** Headwind instalado en el Karoo. Requiere <package> en <queries> (Android 11+). */
+fun Context.isHeadwindInstalled(): Boolean = try {
+    packageManager.getPackageInfo(HEADWIND_PACKAGE, 0)
+    true
+} catch (e: PackageManager.NameNotFoundException) {
+    false
+} catch (e: Throwable) {
+    Timber.e(e, "isHeadwindInstalled check failed")
+    false
+}
+
+/**
+ * Toma un snapshot de la meteo publicada por Headwind por el stream system de karoo-ext
+ * (temperatura, presión, viento y dirección) y lo mapea al mismo modelo que la API propia,
+ * para que todo aguas abajo (streamCurrentWeatherData, headwindFlow) funcione sin cambios.
+ *
+ * Unidades: temperatura (°C) y presión (hPa) salen crudas de Headwind. El viento, en cambio,
+ * sale convertido a la unidad de viento que el usuario eligió en Headwind; asumimos su DEFAULT
+ * (km/h métrico / mph imperial, derivable del perfil del Karoo) y lo reconvertimos a m/s. Si el
+ * usuario cambió a mano esa unidad en Headwind a m/s o nudos, el viento saldrá mal (la UI avisa).
+ *
+ * Devuelve null si Headwind no emite datos completos antes del timeout → el caller hace fallback
+ * a su propia API.
+ */
+suspend fun KarooSystemService.fetchHeadwindWeatherSnapshot(
+    gps: GpsCoordinates,
+    isImperial: Boolean,
+): OpenMeteoCurrentWeatherResponse? {
+    // Nombre de la extensión karoo-ext de Headwind (DataTypeImpl("karoo-headwind", ...)),
+    // distinto de su package Android (de.timklge.karooheadwind).
+    fun id(typeId: String) = DataType.dataTypeId("karoo-headwind", typeId)
+    return try {
+        withTimeoutOrNull(STREAM_TIMEOUT) {
+            combine(
+                streamDataFlow(id("temperature")),
+                streamDataFlow(id("surfacePressure")),
+                streamDataFlow(id("windSpeed")),
+                streamDataFlow(id("windDirection")),
+            ) { temp, press, wind, dir ->
+                if (temp is StreamState.Streaming && press is StreamState.Streaming &&
+                    wind is StreamState.Streaming && dir is StreamState.Streaming
+                ) {
+                    val windRaw = wind.dataPoint.singleValue ?: 0.0
+                    val windMs = if (isImperial) windRaw / 2.2369362920544 else windRaw / 3.6
+                    OpenMeteoCurrentWeatherResponse(
+                        current = OpenMeteoData(
+                            time = System.currentTimeMillis() / 1000,
+                            interval = 0,
+                            windSpeed = windMs,
+                            windDirection = dir.dataPoint.singleValue ?: 0.0,
+                            temperature = temp.dataPoint.singleValue,
+                            surfacePressure = press.dataPoint.singleValue,
+                        ),
+                        latitude = gps.lat,
+                        longitude = gps.lon,
+                        timezone = "",
+                        elevation = 0.0,
+                        utfOffsetSeconds = 0,
+                    )
+                } else null
+            }.filterNotNull().first()
+        }
+    } catch (e: Throwable) {
+        Timber.e(e, "fetchHeadwindWeatherSnapshot failed")
+        null
+    }
 }
 
 fun KarooSystemService.getRelativeHeadingFlow(context: Context): Flow<HeadingResponse> {
@@ -512,31 +585,36 @@ fun KarooSystemService.speedStreamWithStaleness(
 
 
 
-fun KarooSystemService.headwindFlow(context: Context): Flow<StreamState> = flow {
-    try {
-        getRelativeHeadingFlow(context)
-            .combine(context.streamCurrentWeatherData()) { value, data -> StreamData(value, data) }
-            .filter { it.weatherResponse != null }
-            .onStart {
-                emit(StreamState.Streaming(
-                    DataPoint("headwindspeed", mapOf(DataType.Field.SINGLE to 0.0))
-                ))
-            }
-            .collect { streamData ->
-                val windSpeed = streamData.weatherResponse?.current?.windSpeed ?: 0.0
-                val windDirection = (streamData.headingResponse as? HeadingResponse.Value)?.diff ?: 0.0
-                val headwindSpeed = cos((windDirection + 180) * Math.PI / 180.0) * windSpeed
-
-                emit(StreamState.Streaming(DataPoint("headwindspeed", mapOf(DataType.Field.SINGLE to headwindSpeed))))
-                delay(1000L)
-            }
-    } catch (e: Exception) {
-        Timber.e(e, "Error en headwindFlow")
-        emit(StreamState.Streaming(
-            DataPoint("headwindspeed", mapOf(DataType.Field.SINGLE to 0.0))
-        ))
-        delay(WAIT_STREAMS_SHORT/2)
-        // No lanzamos la excepción para permitir que el flujo continúe
-    }
-}
+/**
+ * Viento frontal efectivo (m/s, negativo = cola) a partir del heading GPS y la meteo.
+ * Se cuantiza a 0.1 m/s + distinctUntilChanged para no despertar el combine() del
+ * estimador con micro-variaciones de rumbo: solo emite cuando el viento efectivo
+ * cambia de verdad (cambio de rumbo apreciable o meteo nueva).
+ */
+fun KarooSystemService.headwindFlow(context: Context): Flow<StreamState> =
+    getRelativeHeadingFlow(context)
+        .combine(context.streamCurrentWeatherData()) { value, data -> StreamData(value, data) }
+        .filter { it.weatherResponse != null }
+        .map { streamData ->
+            val windSpeed = streamData.weatherResponse?.current?.windSpeed ?: 0.0
+            val windDirection = (streamData.headingResponse as? HeadingResponse.Value)?.diff ?: 0.0
+            round(cos((windDirection + 180) * Math.PI / 180.0) * windSpeed * 10.0) / 10.0
+        }
+        .distinctUntilChanged()
+        .map { headwindSpeed ->
+            StreamState.Streaming(
+                DataPoint("headwindspeed", mapOf(DataType.Field.SINGLE to headwindSpeed))
+            ) as StreamState
+        }
+        .onStart {
+            emit(StreamState.Streaming(
+                DataPoint("headwindspeed", mapOf(DataType.Field.SINGLE to 0.0))
+            ))
+        }
+        .catch { e ->
+            Timber.e(e, "Error en headwindFlow")
+            emit(StreamState.Streaming(
+                DataPoint("headwindspeed", mapOf(DataType.Field.SINGLE to 0.0))
+            ))
+        }
 

@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
+    <!-- Para detectar si Headwind está instalado (Android 11+ oculta el resto de paquetes). -->
+    <queries>
+        <package android:name="de.timklge.karooheadwind" />
+    </queries>
     <application
         android:name=".KpowerApplication"
         android:allowBackup="true"

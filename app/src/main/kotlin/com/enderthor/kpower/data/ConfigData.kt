@@ -25,13 +25,6 @@ const val WEATHER_RETRY_DELAY_MS = 5L * 60L * 1000L  // 5 min after a failure
 
 data class StreamData(val headingResponse: HeadingResponse, val weatherResponse: OpenMeteoCurrentWeatherResponse?)
 
-data class Quadruple<out A, out B, out C, out D>(
-    val first: A,
-    val second: B,
-    val third: C,
-    val fourth: D
-)
-
 @Serializable
 data class RealKarooValues(
     val speed: StreamState? = null,
@@ -108,7 +101,12 @@ data class ConfigData(
     val useProfileFtp: Boolean = false,
     val simpleMode: Boolean = false,
     val useKarooTemp: Boolean = false,
-    val tubeless: Boolean = false
+    val tubeless: Boolean = false,
+    // Si Headwind (de.timklge.karooheadwind) está instalado, KPower toma de su stream
+    // la temperatura, presión y viento en vez de pedir su propia API meteo (evita el
+    // doble polling). Default true = automático; el usuario puede forzar la meteo propia
+    // desde la UI. Retrocompat: una config antigua se deserializa con true (auto).
+    val preferHeadwind: Boolean = true
 )
 
 

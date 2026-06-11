@@ -34,7 +34,7 @@ class EstimatedPowerSource(
             extension,
             "estimated-power-$hr",
             listOf(DataType.Source.POWER),
-            "Estimated Power $hr Source"
+            "KPowerv2"
         )
     }
 
@@ -45,6 +45,13 @@ class EstimatedPowerSource(
     private var activeScope: CoroutineScope? = null
 
     private val accelerationTracker = AccelerationTracker()
+
+    // Suavizado de pendiente (ataca el ruido del grade en origen), suavizado de la
+    // potencia final ("3s power", como los medidores reales) e histéresis del gate
+    // de cadencia (evita el parpadeo 0 W/valor alrededor del corte).
+    private val gradeSmoother = GradeSmoother()
+    private val powerSmoother = PowerSmoother()
+    private val cadenceGate = CadenceGate()
 
     @OptIn(FlowPreview::class)
     fun connect(emitter: Emitter<DeviceEvent>, extension: String) {
@@ -69,7 +76,10 @@ class EstimatedPowerSource(
 
 
                 val userProfile = karooSystem.consumerFlow<UserProfile>().first()
-                val (userMass, factorMass, factorDistance, factorElevation) = getUserProfileFactors(userProfile)
+                // karoo-ext entrega weight siempre en kg y los streams en SI (m/s, m),
+                // independientemente de preferredUnit (solo afecta a la pantalla):
+                // no hay que aplicar factores de conversión imperial aquí.
+                val userMass = userProfile.weight.toDouble()
                 val userFtp = userProfile.ftp
 
 
@@ -131,8 +141,12 @@ class EstimatedPowerSource(
                         val configs = bundle.configs
                         if (configs.isNotEmpty()) {
                             val config = configs[0]
+                            val nowMs = System.currentTimeMillis()
                             val speedMs = bundle.values.speed.getValueOrDefault()
-                            val acceleration = accelerationTracker.update(speedMs, System.currentTimeMillis())
+                            val acceleration = accelerationTracker.update(speedMs, nowMs)
+                            val slopePercent = gradeSmoother.update(
+                                bundle.values.slope.getValueOrDefault(), nowMs
+                            )
 
                             val tempC: Double? = bundle.weatherTempC ?: run {
                                 if (config.useKarooTemp && bundle.karooTemp is StreamState.Streaming) {
@@ -143,18 +157,16 @@ class EstimatedPowerSource(
 
                             val powerBike = calculatePowerBike(
                                 userMass,
-                                factorMass,
-                                factorDistance,
-                                factorElevation,
                                 configs,
                                 bundle.values,
+                                slopePercent,
                                 tempC,
                                 pressurePa,
                                 acceleration,
                                 userFtp
                             )
 
-                            val powerValue = powerBike.calculateCyclingWattage()
+                            val powerValue = powerSmoother.update(powerBike.calculateCyclingWattage(), nowMs)
                             emitter.onNext(
                                 OnDataPoint(
                                     DataPoint(
@@ -185,42 +197,40 @@ class EstimatedPowerSource(
 
     private fun calculatePowerBike(
         userMass: Double,
-        factorMass: Double,
-        factorDistance: Double,
-        factorElevation: Double,
         powerConfigs: List<ConfigData>,
         values: RealKarooValues,
+        slopePercent: Double,
         temperatureC: Double?,
         pressurePa: Double?,
         acceleration: Double,
         userFtp: Int
     ): CyclingWattageEstimator {
         val speed = values.speed.getValueOrDefault()
-        val slope = values.slope.getValueOrDefault()
         val elevation = values.elevation.getValueOrDefault()
         val finalHeadwind = values.headwind.getValueOrDefault()
 
-        var cadence = 0.0
+        var isPedaling = true
         var isforcepower = powerConfigs[0].isforcepower
 
-        if (values.cadence is StreamState.Streaming) cadence = values.cadence.getValueOrDefault()
-        else isforcepower = true
+        if (values.cadence is StreamState.Streaming) {
+            isPedaling = cadenceGate.update(values.cadence.getValueOrDefault())
+        } else isforcepower = true
 
         val ftp = if (powerConfigs[0].useProfileFtp && userFtp > 0) userFtp.toDouble()
         else powerConfigs[0].ftp.toDoubleLocale()
 
         return CyclingWattageEstimator(
-            slope = slope / 100,
-            totalMass = (userMass + powerConfigs[0].bikeMass.toDoubleLocale()) * factorMass,
+            slope = slopePercent / 100,
+            totalMass = userMass + powerConfigs[0].bikeMass.toDoubleLocale(),
             rollingResistanceCoefficient = powerConfigs[0].rollingResistanceCoefficient.toDoubleLocale(),
             dragCoefficient = powerConfigs[0].dragCoefficient.toDoubleLocale(),
-            speed = speed * factorDistance,
-            elevation = elevation * factorElevation,
+            speed = speed,
+            elevation = elevation,
             windSpeed = finalHeadwind,
             powerLoss = powerConfigs[0].powerLoss.toDoubleLocale() / 100,
             frontalArea = powerConfigs[0].frontalArea.toDoubleLocale(),
             ftp = ftp,
-            cadence = cadence,
+            isPedaling = isPedaling,
             surface = powerConfigs[0].surface.factor,
             isforcepower = isforcepower,
             temperatureC = temperatureC,

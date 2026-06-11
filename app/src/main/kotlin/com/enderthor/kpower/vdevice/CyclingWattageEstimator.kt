@@ -1,14 +1,25 @@
 package com.enderthor.kpower.vdevice
 
+import kotlin.math.abs
 import kotlin.math.atan
 import kotlin.math.sin
 import kotlin.math.cos
 import kotlin.math.pow
+import kotlin.math.tanh
 
 // Techo absoluto de potencia (W): backstop de cordura para un estimador sin medidor.
-// El tope real escala con el FTP (factor·FTP); esto solo limita FTPs muy altos o el
-// caso de FTP inválido. Subir/bajar aquí si se quiere otro límite.
+// El tope real escala con el FTP (CAP_FTP_FACTOR·FTP); esto solo limita FTPs muy altos
+// o el caso de FTP inválido. Subir/bajar aquí si se quiere otro límite.
 private const val MAX_POWER_CAP_W = 600.0
+
+// Tope asintótico AFÍN al FTP: cap = CAP_FTP_SLOPE·FTP + CAP_BASE_W. El margen de pico
+// sobre FTP no escala linealmente (FTP 100 puede picar ~2.5×, FTP 250 rara vez pasa de
+// ~1.7×), así que un múltiplo fijo quedaba corto abajo y generoso arriba. Anclas:
+// FTP 100 → 250 W, FTP 250 → 430 W, FTP ~390+ → techo absoluto de 600 W.
+// La compresión suave empieza en KNEE_FRACTION·cap.
+private const val CAP_FTP_SLOPE = 1.2
+private const val CAP_BASE_W = 130.0
+private const val KNEE_FRACTION = 0.8
 
 class CyclingWattageEstimator(
     private val gravity: Double = 9.80665,
@@ -22,7 +33,7 @@ class CyclingWattageEstimator(
     private val powerLoss: Double,
     private val elevation: Double,
     private val ftp: Double,
-    private val cadence: Double,
+    private val isPedaling: Boolean,
     private val surface: Double,
     private val isforcepower: Boolean,
     private val temperatureC: Double? = null,
@@ -30,21 +41,23 @@ class CyclingWattageEstimator(
     private val acceleration: Double = 0.0
 ) {
 
-    fun smoothPower(estimatedPower: Double): Double {
-   // Timber.d("Is force power: $isforcepower")
-        if (!isforcepower && cadence < 22) return 0.0
+    /**
+     * Tope monotónico con rodilla suave: por debajo de la rodilla la potencia pasa tal
+     * cual; por encima se comprime con tanh hacia el tope asintótico. Sustituye al tope
+     * escalonado (2.8/2.5/2.2/1.7·FTP), que no era monotónico: al cruzar un umbral la
+     * potencia mostrada podía BAJAR al pedalear más fuerte (400 W → 340 W con FTP 200).
+     * Si el FTP no es válido (0 o vacío), se cae al techo absoluto en vez de clavar
+     * toda la potencia a 0.
+     */
+    fun applyPowerCap(estimatedPower: Double): Double {
+        if (!isforcepower && !isPedaling) return 0.0
 
-        val factor = when {
-            estimatedPower < 210 -> 2.8
-            estimatedPower <= 300 -> 2.5
-            estimatedPower <= 400 -> 2.2
-            else -> 1.7
-        }
-       // Timber.d("Estimated power is $estimatedPower")
-        // Si el FTP no es válido (0 o vacío), no se puede escalar el tope con él:
-        // se cae al techo absoluto en vez de clavar toda la potencia a 0.
-        val cap = if (ftp > 0.0) minOf(factor * ftp, MAX_POWER_CAP_W) else MAX_POWER_CAP_W
-        return minOf(estimatedPower, cap)
+        val cap = if (ftp > 0.0) minOf(CAP_FTP_SLOPE * ftp + CAP_BASE_W, MAX_POWER_CAP_W) else MAX_POWER_CAP_W
+        val knee = KNEE_FRACTION * cap
+        if (estimatedPower <= knee) return estimatedPower
+
+        val range = cap - knee
+        return knee + range * tanh((estimatedPower - knee) / range)
     }
 
     fun calculateCyclingWattage(): Double {
@@ -57,7 +70,7 @@ class CyclingWattageEstimator(
         val estimatedPower = ((gravityForce + rollingResistanceForce + aerodynamicDragForce +
                 calculateDynamicRollingResistanceForce(slopeAngle) + inertiaForce) * speed * (1 - powerLoss).pow(-1))
 
-        return maxOf(0.0, smoothPower(estimatedPower))
+        return maxOf(0.0, applyPowerCap(estimatedPower))
     }
 
     private fun calculateDynamicRollingResistanceForce(slopeAngle: Double): Double {
@@ -74,6 +87,9 @@ class CyclingWattageEstimator(
 
     private fun calculateAerodynamicDragForce(): Double {
         val airDensity = airDensity(pressurePa, temperatureC, elevation)
-        return (0.5 * dragCoefficient * frontalArea * airDensity * (speed + windSpeed).pow(2))
+        // v_rel con signo: con viento de cola mayor que la velocidad el aire empuja
+        // (fuerza negativa); (v_rel)² perdía el signo y sumaba resistencia.
+        val vRel = speed + windSpeed
+        return 0.5 * dragCoefficient * frontalArea * airDensity * vRel * abs(vRel)
     }
 }
