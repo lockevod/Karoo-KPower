@@ -11,6 +11,12 @@ import com.enderthor.kpower.BuildConfig
 import com.enderthor.kpower.data.ConfigData
 import com.enderthor.kpower.data.RealKarooValues
 import com.enderthor.kpower.data.previewConfigData
+import com.enderthor.kpower.data.GpsCoordinates
+import com.enderthor.kpower.data.KarooSurface
+import com.enderthor.kpower.data.SURFACE_MIN_INTERVAL_MS
+import com.enderthor.kpower.data.SURFACE_MIN_MOVE_M
+import com.enderthor.kpower.surface.SurfaceConditionReader
+import com.enderthor.kpower.surface.effectiveSurface
 import com.enderthor.kpower.extension.*
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -52,6 +58,12 @@ class EstimatedPowerSource(
     private val gradeSmoother = GradeSmoother()
     private val powerSmoother = PowerSmoother()
     private val cadenceGate = CadenceGate()
+
+    private val surfaceReader by lazy { SurfaceConditionReader(context) }
+
+    // Superficie detectada en vivo bajo el ciclista; null = Unknown -> se usa el preset.
+    @Volatile
+    private var liveSurface: KarooSurface? = null
 
     @OptIn(FlowPreview::class)
     fun connect(emitter: Emitter<DeviceEvent>, extension: String) {
@@ -100,6 +112,31 @@ class EstimatedPowerSource(
 
                 val karooTempFlow = karooSystem.streamDataMonitorFlow(DataType.Type.TEMPERATURE, noCheck = true)
                     .onStart { emit(StreamState.NotAvailable) }
+
+                // Clasificación de superficie en vivo (independiente del bucle de potencia).
+                // Gated por bloqueo GPS real (orientation != null), distancia y tiempo.
+                scope.launch {
+                    var lastLat = Double.NaN
+                    var lastLon = Double.NaN
+                    var lastMs = 0L
+                    karooSystem.streamLocation()
+                        .filter { it.orientation != null }
+                        .collect { loc ->
+                            val cfg = powerConfigFlow.value.firstOrNull()
+                            if (cfg?.useRouteSurface != true) {
+                                liveSurface = null
+                                return@collect
+                            }
+                            val now = System.currentTimeMillis()
+                            val movedEnoughM = if (lastLat.isNaN()) Double.MAX_VALUE
+                                else GpsCoordinates(lastLat, lastLon)
+                                    .distanceTo(GpsCoordinates(loc.lat, loc.lng)) * 1000.0
+                            if (movedEnoughM >= SURFACE_MIN_MOVE_M && now - lastMs >= SURFACE_MIN_INTERVAL_MS) {
+                                liveSurface = surfaceReader.classifyAt(loc.lat, loc.lng)
+                                lastLat = loc.lat; lastLon = loc.lng; lastMs = now
+                            }
+                        }
+                }
 
                 combine(
                     karooSystem.speedStreamWithStaleness(),
@@ -190,6 +227,7 @@ class EstimatedPowerSource(
 
         emitter.setCancellable {
             if (BuildConfig.DEBUG) Timber.w("Stopping connect coroutine")
+            runCatching { surfaceReader.close() }
             scope.cancel()
             if (activeScope === scope) activeScope = null
         }
@@ -231,7 +269,7 @@ class EstimatedPowerSource(
             frontalArea = powerConfigs[0].frontalArea.toDoubleLocale(),
             ftp = ftp,
             isPedaling = isPedaling,
-            surface = powerConfigs[0].surface.factor,
+            surface = effectiveSurface(powerConfigs[0], liveSurface).factor,
             isforcepower = isforcepower,
             temperatureC = temperatureC,
             pressurePa = pressurePa,
