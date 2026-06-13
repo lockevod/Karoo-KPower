@@ -62,6 +62,7 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
     var useKarooTemp by remember { mutableStateOf(configdata.useKarooTemp) }
     var tubeless by remember { mutableStateOf(configdata.tubeless) }
     var preferHeadwind by remember { mutableStateOf(configdata.preferHeadwind) }
+    var useRouteSurface by remember { mutableStateOf(configdata.useRouteSurface) }
     val headwindInstalled = remember { ctx.isHeadwindInstalled() }
 
     var riderWeightKg by remember { mutableStateOf(0.0) }
@@ -108,7 +109,7 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
         configdata.id, title, isActive, bikeMass, rollingResistanceCoefficient, dragCoefficient,
         frontalArea, powerLoss, headwind, isOpenWeather, apikey, ftp, surface, isforcepower,
         bikePosition, riderHeight, tyreWidth, tyrePressure, treadType, useProfileFtp, simpleMode, useKarooTemp, tubeless,
-        preferHeadwind
+        preferHeadwind, useRouteSurface
     )
 
     Column(modifier = Modifier
@@ -270,6 +271,23 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                         "Headwind detected: KPower will take temperature, pressure and wind from it and skip its own weather lookups. Wind assumes Headwind's default unit (km/h metric / mph imperial); if you set it to m/s or knots in Headwind, wind will be wrong."
                     else
                         "Headwind not installed: KPower will use its own weather (OpenMeteo/OpenWeather below).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(checked = useRouteSurface, onCheckedChange = { useRouteSurface = it })
+                Spacer(modifier = Modifier.width(10.dp))
+                Text("Auto surface from offline maps")
+            }
+
+            if (useRouteSurface) {
+                Text(
+                    text = "KPower reads the OSM surface under you from the offline maps " +
+                        "(/offline/maps) and adjusts the Crr live (paved/standard/gravel/sand). " +
+                        "Needs offline maps for the area and storage permission; otherwise it keeps " +
+                        "the surface you selected above.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
