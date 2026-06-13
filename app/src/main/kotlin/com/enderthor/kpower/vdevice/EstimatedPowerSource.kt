@@ -119,27 +119,33 @@ class EstimatedPowerSource(
                 // Clasificación de superficie en vivo (independiente del bucle de potencia).
                 // Gated por bloqueo GPS real (orientation != null), distancia y tiempo.
                 scope.launch {
-                    var lastLat = Double.NaN
-                    var lastLon = Double.NaN
-                    var lastMs = 0L
-                    karooSystem.streamLocation()
-                        .filter { it.orientation != null }
-                        .collect { loc ->
-                            val cfg = powerConfigFlow.value.firstOrNull()
-                            if (cfg?.useRouteSurface != true) {
-                                liveSurface = null
-                                return@collect
+                    try {
+                        var lastLat = Double.NaN
+                        var lastLon = Double.NaN
+                        var lastMs = 0L
+                        karooSystem.streamLocation()
+                            .filter { it.orientation != null }
+                            .collect { loc ->
+                                val cfg = powerConfigFlow.value.firstOrNull()
+                                if (cfg?.useRouteSurface != true) {
+                                    liveSurface = null
+                                    return@collect
+                                }
+                                val now = System.currentTimeMillis()
+                                val movedEnoughM = if (lastLat.isNaN()) Double.MAX_VALUE
+                                    else GpsCoordinates(lastLat, lastLon)
+                                        .distanceTo(GpsCoordinates(loc.lat, loc.lng)) * 1000.0
+                                if (movedEnoughM >= SURFACE_MIN_MOVE_M && now - lastMs >= SURFACE_MIN_INTERVAL_MS) {
+                                    liveSurface = surfaceReader.classifyAt(loc.lat, loc.lng)
+                                    liveSurfaceAtMs = now
+                                    lastLat = loc.lat; lastLon = loc.lng; lastMs = now
+                                }
                             }
-                            val now = System.currentTimeMillis()
-                            val movedEnoughM = if (lastLat.isNaN()) Double.MAX_VALUE
-                                else GpsCoordinates(lastLat, lastLon)
-                                    .distanceTo(GpsCoordinates(loc.lat, loc.lng)) * 1000.0
-                            if (movedEnoughM >= SURFACE_MIN_MOVE_M && now - lastMs >= SURFACE_MIN_INTERVAL_MS) {
-                                liveSurface = surfaceReader.classifyAt(loc.lat, loc.lng)
-                                liveSurfaceAtMs = now
-                                lastLat = loc.lat; lastLon = loc.lng; lastMs = now
-                            }
-                        }
+                    } finally {
+                        // Cerrar el reader aquí (hilo IO de la corrutina), no en setCancellable,
+                        // para no bloquear el hilo de cancelación si hay un classifyAt en vuelo.
+                        runCatching { surfaceReader.close() }
+                    }
                 }
 
                 combine(
@@ -231,7 +237,6 @@ class EstimatedPowerSource(
 
         emitter.setCancellable {
             if (BuildConfig.DEBUG) Timber.w("Stopping connect coroutine")
-            runCatching { surfaceReader.close() }
             scope.cancel()
             if (activeScope === scope) activeScope = null
         }
