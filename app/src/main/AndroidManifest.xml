@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
+    <!-- Lectura de los mapfiles offline del Karoo (/offline/maps/*.map) para detectar
+         la superficie OSM bajo el ciclista. Sin permiso o sin mapfiles, la feature
+         degrada a "Unknown" y se usa el preset. -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <!-- Para detectar si Headwind está instalado (Android 11+ oculta el resto de paquetes). -->
     <queries>
         <package android:name="de.timklge.karooheadwind" />
