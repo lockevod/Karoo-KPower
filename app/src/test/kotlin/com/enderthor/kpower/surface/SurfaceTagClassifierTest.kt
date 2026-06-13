@@ -34,11 +34,35 @@ class SurfaceTagClassifierTest {
     @Test fun `unrecognized tags return null`() =
         assertNull(SurfaceTagClassifier.classify("banana", "gradeX"))
 
-    @Test fun `no surface tag means null from classify but paved from classifyFoundWay`() {
-        assertNull(SurfaceTagClassifier.classify(null, null))
-        assertEquals(KarooSurface.ASPHALT, SurfaceTagClassifier.classifyFoundWay(null, null))
-    }
-
     @Test fun `case and whitespace are normalized`() =
         assertEquals(KarooSurface.SAND, SurfaceTagClassifier.classify("  SAND ", null))
+
+    @Test fun `classify returns null when nothing recognized`() {
+        assertNull(SurfaceTagClassifier.classify(null, null))
+        assertNull(SurfaceTagClassifier.classify("banana", "gradeX"))
+    }
+
+    @Test fun `earth maps to gravel`() =
+        assertEquals(KarooSurface.GRAVEL, SurfaceTagClassifier.classify("earth", null))
+
+    @Test fun `paved surface maps to asphalt`() =
+        assertEquals(KarooSurface.ASPHALT, SurfaceTagClassifier.classify("paved", null))
+
+    @Test fun `classifyWay surface tag wins over highway default`() =
+        assertEquals(KarooSurface.GRAVEL, SurfaceTagClassifier.classifyWay("gravel", null, "track"))
+
+    @Test fun `classifyWay tracktype wins over highway default`() =
+        assertEquals(KarooSurface.SAND, SurfaceTagClassifier.classifyWay(null, "grade4", "track"))
+
+    @Test fun `classifyWay paved highway with no surface tag is asphalt`() =
+        assertEquals(KarooSurface.ASPHALT, SurfaceTagClassifier.classifyWay(null, null, "residential"))
+
+    @Test fun `classifyWay tagless track is standard`() =
+        assertEquals(KarooSurface.STANDARD, SurfaceTagClassifier.classifyWay(null, null, "track"))
+
+    @Test fun `classifyWay ambiguous tagless highway is unknown`() {
+        assertNull(SurfaceTagClassifier.classifyWay(null, null, "path"))
+        assertNull(SurfaceTagClassifier.classifyWay(null, null, "footway"))
+        assertNull(SurfaceTagClassifier.classifyWay(null, null, null))
+    }
 }

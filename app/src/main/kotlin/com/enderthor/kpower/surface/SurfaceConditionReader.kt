@@ -24,14 +24,12 @@ import java.io.File
 class SurfaceConditionReader(private val context: Context) {
 
     private data class MapFileInfo(val file: File, val box: BoundingBox)
-    private data class WaySnapshot(
+    private class WaySnapshot(
         val segments: Array<Array<org.mapsforge.core.model.LatLong>>,
         val surface: String?,
         val tracktype: String?,
-    ) {
-        override fun equals(other: Any?) = other is WaySnapshot && segments.contentDeepEquals(other.segments) && surface == other.surface && tracktype == other.tracktype
-        override fun hashCode() = segments.contentDeepHashCode() * 31 + surface.hashCode() * 31 + tracktype.hashCode()
-    }
+        val highway: String?,
+    )
 
     private var knownMapfiles: List<MapFileInfo>? = null
     private var lastScanMs = 0L
@@ -39,7 +37,7 @@ class SurfaceConditionReader(private val context: Context) {
     private var cachedTileKey: Long = Long.MIN_VALUE
     private var cachedWays: List<WaySnapshot> = emptyList()
 
-    fun classifyAt(lat: Double, lon: Double): KarooSurface? {
+    @Synchronized fun classifyAt(lat: Double, lon: Double): KarooSurface? {
         ensureMapfiles()
         val covering = knownMapfiles?.filter { it.box.contains(lat, lon) }?.map { it.file }.orEmpty()
         if (covering.isEmpty()) return null
@@ -66,10 +64,13 @@ class SurfaceConditionReader(private val context: Context) {
         }
 
         if (best == null || bestDist > MAX_DIST_M) return null
-        return SurfaceTagClassifier.classifyFoundWay(best.surface, best.tracktype)
+        return SurfaceTagClassifier.classifyWay(best.surface, best.tracktype, best.highway)
     }
 
     private fun ensureMapfiles() {
+        // Una vez encontrados, no reescanear durante la ruta (los .map no aparecen a mitad);
+        // close() resetea knownMapfiles=null, así que una reconexión sí reescanea.
+        if (knownMapfiles?.isNotEmpty() == true) return
         val now = System.currentTimeMillis()
         if (knownMapfiles != null && now - lastScanMs < SCAN_INTERVAL_MS) return
         lastScanMs = now
@@ -100,11 +101,14 @@ class SurfaceConditionReader(private val context: Context) {
                 val result = reader.readMapData(tile) ?: continue
                 for (way in result.ways) {
                     val tags = way.tags
+                    val highway = tags.find { it.key.equals("highway", true) }?.value?.lowercase()
+                        ?: continue
                     out.add(
                         WaySnapshot(
                             segments = way.latLongs,
                             surface = tags.find { it.key.equals("surface", true) }?.value?.lowercase(),
                             tracktype = tags.find { it.key.equals("tracktype", true) }?.value?.lowercase(),
+                            highway = highway,
                         )
                     )
                 }
@@ -129,7 +133,7 @@ class SurfaceConditionReader(private val context: Context) {
         context.checkCallingOrSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) ==
             PackageManager.PERMISSION_GRANTED
 
-    fun close() {
+    @Synchronized fun close() {
         openReaders.values.forEach { runCatching { it.close() } }
         openReaders.clear()
         knownMapfiles = null
