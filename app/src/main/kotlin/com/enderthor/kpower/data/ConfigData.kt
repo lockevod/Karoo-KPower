@@ -25,6 +25,10 @@ const val WEATHER_MIN_MOVE_KM = 3.0
 // el mapfile, así que limitamos la frecuencia).
 const val SURFACE_MIN_MOVE_M = 25.0
 const val SURFACE_MIN_INTERVAL_MS = 7_000L
+// Caducidad de la clasificación de superficie: si la última reclasificación con éxito es
+// más vieja que esto (GPS perdido en túnel, o parado mucho rato), se descarta y se vuelve
+// al preset en vez de arrastrar una superficie obsoleta el resto de la ruta.
+const val SURFACE_MAX_AGE_MS = 120_000L
 const val WEATHER_MAX_AGE_MS = 30L * 60L * 1000L     // 30 minutes
 const val WEATHER_CHECK_INTERVAL_MS = 60L * 1000L    // tick every minute
 const val WEATHER_RETRY_DELAY_MS = 5L * 60L * 1000L  // 5 min after a failure

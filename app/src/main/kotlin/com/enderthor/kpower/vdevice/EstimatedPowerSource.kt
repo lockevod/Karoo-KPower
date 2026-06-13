@@ -13,6 +13,7 @@ import com.enderthor.kpower.data.RealKarooValues
 import com.enderthor.kpower.data.previewConfigData
 import com.enderthor.kpower.data.GpsCoordinates
 import com.enderthor.kpower.data.KarooSurface
+import com.enderthor.kpower.data.SURFACE_MAX_AGE_MS
 import com.enderthor.kpower.data.SURFACE_MIN_INTERVAL_MS
 import com.enderthor.kpower.data.SURFACE_MIN_MOVE_M
 import com.enderthor.kpower.surface.SurfaceConditionReader
@@ -64,6 +65,8 @@ class EstimatedPowerSource(
     // Superficie detectada en vivo bajo el ciclista; null = Unknown -> se usa el preset.
     @Volatile
     private var liveSurface: KarooSurface? = null
+    @Volatile
+    private var liveSurfaceAtMs: Long = 0L
 
     @OptIn(FlowPreview::class)
     fun connect(emitter: Emitter<DeviceEvent>, extension: String) {
@@ -133,6 +136,7 @@ class EstimatedPowerSource(
                                     .distanceTo(GpsCoordinates(loc.lat, loc.lng)) * 1000.0
                             if (movedEnoughM >= SURFACE_MIN_MOVE_M && now - lastMs >= SURFACE_MIN_INTERVAL_MS) {
                                 liveSurface = surfaceReader.classifyAt(loc.lat, loc.lng)
+                                liveSurfaceAtMs = now
                                 lastLat = loc.lat; lastLon = loc.lng; lastMs = now
                             }
                         }
@@ -269,13 +273,18 @@ class EstimatedPowerSource(
             frontalArea = powerConfigs[0].frontalArea.toDoubleLocale(),
             ftp = ftp,
             isPedaling = isPedaling,
-            surface = effectiveSurface(powerConfigs[0], liveSurface).factor,
+            surface = effectiveSurface(powerConfigs[0], freshLiveSurface()).factor,
             isforcepower = isforcepower,
             temperatureC = temperatureC,
             pressurePa = pressurePa,
             acceleration = acceleration
         )
     }
+
+    // liveSurface solo es válida si la última reclasificación es reciente; si no (GPS
+    // perdido o parada larga), se descarta para no arrastrar una superficie obsoleta.
+    private fun freshLiveSurface(): KarooSurface? =
+        liveSurface?.takeIf { System.currentTimeMillis() - liveSurfaceAtMs < SURFACE_MAX_AGE_MS }
 
 
     companion object {
