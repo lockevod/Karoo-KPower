@@ -132,6 +132,8 @@ class SurfaceConditionReader(private val context: Context) {
     fun close() {
         openReaders.values.forEach { runCatching { it.close() } }
         openReaders.clear()
+        knownMapfiles = null
+        lastScanMs = 0L
         cachedTileKey = Long.MIN_VALUE
         cachedWays = emptyList()
     }
