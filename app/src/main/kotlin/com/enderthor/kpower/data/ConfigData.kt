@@ -19,6 +19,12 @@ const val STREAM_TIMEOUT = 20000L // 20 seconds
 // Weather refresh policy (Headwind pattern): fetch when rider moved >= MIN_KM
 // OR the last successful fetch is >= MAX_AGE_MS old.
 const val WEATHER_MIN_MOVE_KM = 3.0
+
+// Gating del recálculo de superficie: reclasifica solo si te has movido >= MIN_MOVE_M
+// y como mucho cada MIN_INTERVAL_MS (la superficie cambia despacio; el coste real es leer
+// el mapfile, así que limitamos la frecuencia).
+const val SURFACE_MIN_MOVE_M = 25.0
+const val SURFACE_MIN_INTERVAL_MS = 7_000L
 const val WEATHER_MAX_AGE_MS = 30L * 60L * 1000L     // 30 minutes
 const val WEATHER_CHECK_INTERVAL_MS = 60L * 1000L    // tick every minute
 const val WEATHER_RETRY_DELAY_MS = 5L * 60L * 1000L  // 5 min after a failure
@@ -106,7 +112,12 @@ data class ConfigData(
     // la temperatura, presión y viento en vez de pedir su propia API meteo (evita el
     // doble polling). Default true = automático; el usuario puede forzar la meteo propia
     // desde la UI. Retrocompat: una config antigua se deserializa con true (auto).
-    val preferHeadwind: Boolean = true
+    val preferHeadwind: Boolean = true,
+    // Detección de superficie en vivo leyendo los mapfiles offline (OSM surface/tracktype)
+    // bajo la posición actual. Activado por defecto; si no hay mapfiles/permiso/datos,
+    // degrada a "Unknown" y se usa la superficie elegida abajo. Retrocompat: una config
+    // antigua se deserializa con true.
+    val useRouteSurface: Boolean = true
 )
 
 
