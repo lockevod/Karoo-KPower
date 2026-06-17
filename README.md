@@ -142,6 +142,8 @@ How to compare:
 
 ## Upgrading from a previous version
 
+> Coming from a version **older than 1.9.5**? Uninstall the old version first and then install this one (older builds used an incompatible data format).
+
 Your existing profiles keep working **without changes**:
 
 - All your stored values (Crr, Cd, frontal area, power loss, FTP, surface) are preserved and used exactly as before.
