@@ -37,8 +37,10 @@ import com.enderthor.kpower.ant.AntPowerManager
 import com.enderthor.kpower.ant.SavedMeter
 import com.enderthor.kpower.extension.antMetersFlow
 import com.enderthor.kpower.extension.comparisonModeFlow
+import com.enderthor.kpower.extension.recordDynamicsFlow
 import com.enderthor.kpower.extension.saveAntMeters
 import com.enderthor.kpower.extension.saveComparisonMode
+import com.enderthor.kpower.extension.saveRecordDynamics
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -57,6 +59,7 @@ fun ComparisonScreen() {
     // @Composable) can receive plain values — no nested @Composable calls inside the
     // LazyListScope extension.
     val comparisonMode by ctx.comparisonModeFlow().collectAsState(initial = false)
+    val recordDynamics by ctx.recordDynamicsFlow().collectAsState(initial = false)
     val detected by antManager.detectedDevices.collectAsState()
     val saved by ctx.antMetersFlow().collectAsState(initial = emptyList())
     var scanning by remember { mutableStateOf(false) }
@@ -93,6 +96,35 @@ fun ComparisonScreen() {
                                 text = "Exposes 4 estimated-power data fields and writes them to the FIT " +
                                     "(est_power, est_power_3s, est_np, est_avg). For comparing against a real " +
                                     "power meter. Off by default — increases battery/CPU and FIT size.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
+                // Second item: record-cycling-dynamics toggle card.
+                item {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(5.dp),
+                        shape = RoundedCornerShape(corner = CornerSize(10.dp))
+                    ) {
+                        Column(Modifier.padding(10.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Switch(
+                                    checked = recordDynamics,
+                                    onCheckedChange = { enabled ->
+                                        scope.launch { saveRecordDynamics(ctx, enabled) }
+                                    }
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text("Record cycling dynamics")
+                            }
+                            Text(
+                                text = "Reads advanced pedaling metrics (power phase, PCO, balance, " +
+                                    "torque effectiveness…) from the recorded ANT+ meter and writes them " +
+                                    "to the FIT. The Karoo does not record these. Needs a recorded meter.",
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
