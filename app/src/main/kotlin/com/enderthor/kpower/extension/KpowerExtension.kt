@@ -47,8 +47,13 @@ import com.enderthor.kpower.vdevice.PowerEstimationEngine
 import timber.log.Timber
 
 
-/** 4-tuple for the startFit combine (Kotlin has no built-in Quadruple). */
-private data class Quadruple<A, B, C, D>(val a: A, val b: B, val c: C, val d: D)
+/** Holder for the 4-way combine driving the startFit per-record writes (mirrors [RideGate]). */
+private data class FitTick(
+    val elapsed: StreamState,
+    val meters: List<com.enderthor.kpower.ant.SavedMeter>,
+    val configs: List<com.enderthor.kpower.data.ConfigData>,
+    val recordDynamics: Boolean,
+)
 
 /** Holder for the 4-way combine driving the ride-state connect gate. */
 private data class RideGate(
@@ -366,8 +371,10 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                     .flatMapLatest { on -> if (on) karooSystem.streamDataFlow(DataType.Type.ELAPSED_TIME) else emptyFlow() },
                 applicationContext.antMetersFlow(),
                 loadPreferencesFlow(),
+                // Same prefs flow as the subscription gate above; observed again here to gate the
+                // per-tick dynamics WRITES (cheap: it's the shared DataStore-backed flow).
                 applicationContext.recordDynamicsFlow(),
-            ) { elapsed, meters, configs, recordDynamics -> Quadruple(elapsed, meters, configs, recordDynamics) }
+            ) { elapsed, meters, configs, recordDynamics -> FitTick(elapsed, meters, configs, recordDynamics) }
                 .collect { (elapsed, metersSnapshot, configs, recordDynamics) ->
                     if (elapsed !is StreamState.Streaming) return@collect
 
