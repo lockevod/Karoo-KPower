@@ -110,3 +110,7 @@
 -dontwarn java.awt.**
 -dontwarn javax.xml.stream.**
 -dontwarn org.kxml2.**
+
+# ANT+ plugin libraries
+-keep class com.dsi.ant.** { *; }
+-dontwarn com.dsi.ant.**

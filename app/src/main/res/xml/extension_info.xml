@@ -29,4 +29,7 @@
         description="@string/est_avg_desc"
         graphical="false"
         icon="@drawable/ic_power_hr" />
+    <DataType typeId="real-power-0" displayName="@string/real1_name" description="@string/real1_desc" graphical="false" icon="@drawable/ic_power_hr" />
+    <DataType typeId="real-power-1" displayName="@string/real2_name" description="@string/real2_desc" graphical="false" icon="@drawable/ic_power_hr" />
+    <DataType typeId="real-power-2" displayName="@string/real3_name" description="@string/real3_desc" graphical="false" icon="@drawable/ic_power_hr" />
 </ExtensionInfo>
