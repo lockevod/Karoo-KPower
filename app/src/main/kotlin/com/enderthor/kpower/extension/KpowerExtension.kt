@@ -330,13 +330,24 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
             delay(2000L)
             Timber.d("Start scan")
             emitter.onNext(EstimatedPowerSource.buildDevice(extension, 2000, engine).source)
+            val savedMeters = applicationContext.antMetersFlow().first()
+            savedMeters.forEach { sm ->
+                emitter.onNext(
+                    com.enderthor.kpower.vdevice.RealPowerSource
+                        .buildDevice(extension, sm.deviceNumber, sm.label, antManager).source
+                )
+            }
         }
         emitter.setCancellable { job.cancel() }
     }
 
     override fun connectDevice(uid: String, emitter: Emitter<DeviceEvent>) {
         Timber.d("Connect Device")
-        EstimatedPowerSource.fromUid(extension, uid, engine)?.connect(emitter, extension)
+        if (uid.startsWith("real-power-")) {
+            com.enderthor.kpower.vdevice.RealPowerSource.fromUid(extension, uid, antManager)?.connect(emitter, extension)
+        } else {
+            EstimatedPowerSource.fromUid(extension, uid, engine)?.connect(emitter, extension)
+        }
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
