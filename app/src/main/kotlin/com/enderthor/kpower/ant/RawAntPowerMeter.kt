@@ -103,9 +103,13 @@ class RawAntPowerMeter(
             CyclingDynamicsParser.PAGE_PEDAL_POSITION -> {
                 val d = CyclingDynamicsParser.parsePedalPosition(p) ?: return
                 _pedalPosition.value = d
-                // Cadence fallback: if the power-only page had no cadence, use this page's.
+                // Cadence fallback: if the power-only page had no cadence, use this page's, and
+                // recompute torque from the cached power so the snapshot stays consistent
+                // (finite power + cadence must not leave torque NaN).
                 if (_cadence.value.isNaN() && d.cadenceRpm != null) {
                     _cadence.value = d.cadenceRpm
+                    val pw = _power.value
+                    if (!pw.isNaN()) _torque.value = computeTorque(pw, d.cadenceRpm)
                 }
                 lastEventMs = System.currentTimeMillis()
             }
