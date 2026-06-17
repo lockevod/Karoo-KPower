@@ -21,12 +21,15 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.coroutines.coroutineContext
@@ -240,14 +243,24 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
         EstimatedPowerSource.fromUid(extension, uid, engine)?.connect(emitter, extension)
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     override fun startFit(emitter: Emitter<FitEffect>) {
         val job = serviceScope.launch {
-            // Cadenciado por ELAPSED_TIME (1 Hz mientras se graba; se detiene en pausa).
-            // Solo escribe cuando el modo comparación está ON.
-            karooSystem.streamDataFlow(DataType.Type.ELAPSED_TIME)
-                .combine(applicationContext.comparisonModeFlow()) { elapsed, mode -> elapsed to mode }
-                .collect { (elapsed, mode) ->
-                    if (!mode || elapsed !is StreamState.Streaming) return@collect
+            // startFit lo llama el host en TODAS las marchas (fitFile=true). Para no pagar
+            // coste cuando el modo comparación está OFF (el caso por defecto), solo nos
+            // suscribimos a ELAPSED_TIME mientras el toggle está ON; flatMapLatest re-suscribe
+            // al togglear (hot-toggle). ELAPSED_TIME cadencia a 1 Hz mientras se graba y se
+            // detiene en pausa -> escritura sin drift y sin samples fantasma (patrón KSafe).
+            // Sesión = "last write wins": solo emitimos cuando NP/media cambian, para no
+            // churnar un Binder round-trip + allocation cada segundo.
+            var lastSesNp = Double.NaN
+            var lastSesAvg = Double.NaN
+            applicationContext.comparisonModeFlow()
+                .flatMapLatest { mode ->
+                    if (mode) karooSystem.streamDataFlow(DataType.Type.ELAPSED_TIME) else emptyFlow()
+                }
+                .collect { elapsed ->
+                    if (elapsed !is StreamState.Streaming) return@collect
 
                     val instant = engine.instantW.value
                     val p3s = engine.power3sW.value
@@ -259,11 +272,15 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
 
                     val np = engine.npW.value
                     val avg = engine.avgW.value
-                    val sessionValues = buildList {
-                        if (!np.isNaN()) add(FieldValue(fieldEstNp, np))
-                        if (!avg.isNaN()) add(FieldValue(fieldEstAvg, avg))
+                    if (np != lastSesNp || avg != lastSesAvg) {
+                        val sessionValues = buildList {
+                            if (!np.isNaN()) add(FieldValue(fieldEstNp, np))
+                            if (!avg.isNaN()) add(FieldValue(fieldEstAvg, avg))
+                        }
+                        if (sessionValues.isNotEmpty()) emitter.onNext(WriteToSessionMesg(sessionValues))
+                        lastSesNp = np
+                        lastSesAvg = avg
                     }
-                    if (sessionValues.isNotEmpty()) emitter.onNext(WriteToSessionMesg(sessionValues))
                 }
         }
         emitter.setCancellable { job.cancel() }
