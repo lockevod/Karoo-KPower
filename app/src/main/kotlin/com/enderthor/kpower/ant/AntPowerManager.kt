@@ -112,6 +112,9 @@ class AntPowerManager(private val context: Context) {
                     m.requestMetricsReset()
                     meters[dn] = m
                     val sink = powerFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
+                    val p3sSink = power3sFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
+                    val npSink = npFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
+                    val avgSink = avgFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
                     bridges[dn] = scope.launch {
                         // mirror power into the stable sink
                         launch { m.power.collect { sink.value = it } }
@@ -125,9 +128,12 @@ class AntPowerManager(private val context: Context) {
                             m.expireIfStale(System.currentTimeMillis())
                             if (m.consumePendingReset()) m.metrics.reset()
                             m.metrics.tick(m.power.value, recording)
-                            power3sFlows.getOrPut(dn){ kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }.value = m.metrics.power3sW.value
-                            npFlows.getOrPut(dn){ kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }.value = m.metrics.npW.value
-                            avgFlows.getOrPut(dn){ kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }.value = m.metrics.avgW.value
+                            // 3s is a live rolling average: blank it when power is stale (NaN) so the
+                            // field goes `---` on a dropout instead of freezing. NP/avg are session
+                            // aggregates and hold their last accumulated value.
+                            p3sSink.value = if (m.power.value.isNaN()) Double.NaN else m.metrics.power3sW.value
+                            npSink.value = m.metrics.npW.value
+                            avgSink.value = m.metrics.avgW.value
                         }
                     }
                 }

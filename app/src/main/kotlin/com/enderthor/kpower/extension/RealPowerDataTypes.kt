@@ -7,6 +7,7 @@ import io.hammerhead.karooext.models.DataType
 import io.hammerhead.karooext.models.StreamState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -14,6 +15,9 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.launch
 import kotlin.time.Duration.Companion.seconds
@@ -24,20 +28,23 @@ fun realFieldTypeId(slot: Int, metric: String) = "real-$metric-$slot"   // e.g. 
 class RealPowerDataType(
     extension: String,
     typeId: String,
+    private val slot: Int,
     private val comparisonModeFlow: () -> Flow<Boolean>,
-    private val valueFlow: () -> StateFlow<Double>?,
+    private val savedMetersFlow: () -> Flow<List<com.enderthor.kpower.ant.SavedMeter>>,
+    private val metricFlowFor: (deviceNumber: Int) -> StateFlow<Double>,
 ) : DataTypeImpl(extension, typeId) {
 
-    @OptIn(FlowPreview::class)
+    @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
     override fun startStream(emitter: Emitter<StreamState>) {
         val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         scope.launch {
-            val flow = valueFlow()
-            if (flow == null) {
-                emitter.onNext(StreamState.NotAvailable)
-                return@launch
+            combine(comparisonModeFlow(), savedMetersFlow()) { enabled, meters ->
+                enabled to meters.firstOrNull { it.slot == slot }?.deviceNumber
             }
-            combine(comparisonModeFlow(), flow) { enabled, value -> enabled to value }
+                .flatMapLatest { (enabled, dn) ->
+                    if (dn == null) flowOf(enabled to Double.NaN)
+                    else metricFlowFor(dn).map { enabled to it }
+                }
                 .sample(1.seconds)
                 .distinctUntilChanged()
                 .collect { (enabled, value) ->

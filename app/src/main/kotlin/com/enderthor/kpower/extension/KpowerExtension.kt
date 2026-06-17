@@ -71,31 +71,16 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
     // weather loop so it skips the expensive GPS/stats/HTTP work when not recording.
     @Volatile private var isRecording = false
 
-    // Cached saved ANT meters (slot->device), updated by a collector in onCreate. Lets
-    // realDeviceNumber resolve the slot's device number without a blocking DataStore read.
-    @Volatile private var lastSavedMeters: List<com.enderthor.kpower.ant.SavedMeter> = emptyList()
-
-    // The display resolves the slot->device mapping once per stream subscribe, so a slot
-    // REassignment mid-ride only takes effect on the next re-subscribe. But it no longer
-    // latches blank: the returned flow is stable (NaN until the meter connects, then live),
-    // so the field lights up when the meter connects. The FIT writer remains the per-tick
-    // source of truth.
-    private fun realDeviceNumber(slot: Int): Int? = lastSavedMeters.firstOrNull { it.slot == slot }?.deviceNumber
-    private fun realPower(slot: Int): kotlinx.coroutines.flow.StateFlow<Double>? = realDeviceNumber(slot)?.let { antManager.powerFlow(it) }
-    private fun real3s(slot: Int): kotlinx.coroutines.flow.StateFlow<Double>? = realDeviceNumber(slot)?.let { antManager.power3sFlow(it) }
-    private fun realNp(slot: Int): kotlinx.coroutines.flow.StateFlow<Double>? = realDeviceNumber(slot)?.let { antManager.npFlow(it) }
-    private fun realAvg(slot: Int): kotlinx.coroutines.flow.StateFlow<Double>? = realDeviceNumber(slot)?.let { antManager.avgFlow(it) }
-
     override val types: List<DataTypeImpl> by lazy {
         listOf(
             EstimatedPowerDataType(extension, TYPE_EST_INSTANT, engine, { applicationContext.comparisonModeFlow() }) { it.instantW },
             EstimatedPowerDataType(extension, TYPE_EST_3S, engine, { applicationContext.comparisonModeFlow() }) { it.power3sW },
             EstimatedPowerDataType(extension, TYPE_EST_NP, engine, { applicationContext.comparisonModeFlow() }) { it.npW },
             EstimatedPowerDataType(extension, TYPE_EST_AVG, engine, { applicationContext.comparisonModeFlow() }) { it.avgW },
-            RealPowerDataType(extension, realFieldTypeId(0, "power"), { applicationContext.comparisonModeFlow() }) { realPower(0) },
-            RealPowerDataType(extension, realFieldTypeId(0, "3s"),    { applicationContext.comparisonModeFlow() }) { real3s(0) },
-            RealPowerDataType(extension, realFieldTypeId(0, "np"),    { applicationContext.comparisonModeFlow() }) { realNp(0) },
-            RealPowerDataType(extension, realFieldTypeId(0, "avg"),   { applicationContext.comparisonModeFlow() }) { realAvg(0) },
+            RealPowerDataType(extension, realFieldTypeId(0, "power"), 0, { applicationContext.comparisonModeFlow() }, { applicationContext.antMetersFlow() }) { dn -> antManager.powerFlow(dn) },
+            RealPowerDataType(extension, realFieldTypeId(0, "3s"),    0, { applicationContext.comparisonModeFlow() }, { applicationContext.antMetersFlow() }) { dn -> antManager.power3sFlow(dn) },
+            RealPowerDataType(extension, realFieldTypeId(0, "np"),    0, { applicationContext.comparisonModeFlow() }, { applicationContext.antMetersFlow() }) { dn -> antManager.npFlow(dn) },
+            RealPowerDataType(extension, realFieldTypeId(0, "avg"),   0, { applicationContext.comparisonModeFlow() }, { applicationContext.antMetersFlow() }) { dn -> antManager.avgFlow(dn) },
         )
     }
 
@@ -132,12 +117,6 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
 
         serviceScope.launch {
             weatherRefreshLoop()
-        }
-
-        // Keep the saved slot->device mapping cached so realDeviceNumber() can resolve a slot's
-        // device number without a blocking DataStore read at subscribe time.
-        serviceScope.launch {
-            applicationContext.antMetersFlow().collect { lastSavedMeters = it }
         }
 
         // Mirror the active Karoo ride-profile id (drives bike resolution in the engine)
