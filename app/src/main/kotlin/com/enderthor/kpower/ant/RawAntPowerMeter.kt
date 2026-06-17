@@ -70,8 +70,12 @@ class RawAntPowerMeter(
     @Volatile private var lastEventMs: Long = 0L
 
     fun connect() {
-        runCatching { channel?.stop() }
+        // Capture and detach the old channel BEFORE starting the new one. Its async stop() now
+        // races nothing: the old channel's own `stopped` guard prevents an orphan, and the field
+        // already points at the freshly-started channel.
+        val old = channel
         channel = RawAntChannel(context, deviceNumber, ::onPayload).also { it.start() }
+        runCatching { old?.stop() }
     }
 
     /** Dispatch a raw broadcast payload by page number (b0). Unknown pages are ignored. */
