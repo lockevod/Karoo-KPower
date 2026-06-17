@@ -3,7 +3,6 @@ package com.enderthor.kpower.vdevice
 import io.hammerhead.karooext.internal.Emitter
 import io.hammerhead.karooext.models.*
 import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.filter
 import timber.log.Timber
 import com.enderthor.kpower.BuildConfig
 
@@ -42,34 +41,52 @@ class RealPowerSource(
                 delay(1000)
                 emitter.onNext(OnManufacturerInfo(ManufacturerInfo("Enderthor", "1234", "POWER-REAL-$deviceNumber")))
 
+                // Power is the primary signal: it governs the CONNECTED/SEARCHING state.
+                // When the meter drops out the watchdog blanks the value to NaN; we must
+                // tell the Karoo the sensor is SEARCHING so it blanks the field instead of
+                // holding the last watts. Connection-status transitions are driven ONLY from
+                // this single power collector (cadence never writes `connected`) so there is
+                // no shared-state race.
+                var connected = true
                 launch {
                     antManager.powerFlow(deviceNumber)
-                        .filter { !it.isNaN() }
                         .collect { powerValue ->
+                            if (powerValue.isNaN()) {
+                                if (connected) {
+                                    connected = false
+                                    emitter.onNext(OnConnectionStatus(ConnectionStatus.SEARCHING))
+                                }
+                            } else {
+                                if (!connected) {
+                                    connected = true
+                                    emitter.onNext(OnConnectionStatus(ConnectionStatus.CONNECTED))
+                                }
+                                emitter.onNext(
+                                    OnDataPoint(
+                                        DataPoint(
+                                            DataType.Source.POWER,
+                                            values = mapOf(DataType.Field.POWER to powerValue),
+                                            sourceId = source.uid,
+                                        )
+                                    )
+                                )
+                            }
+                        }
+                }
+
+                antManager.cadenceFlow(deviceNumber)
+                    .collect { cadenceValue ->
+                        if (!cadenceValue.isNaN()) {
                             emitter.onNext(
                                 OnDataPoint(
                                     DataPoint(
-                                        DataType.Source.POWER,
-                                        values = mapOf(DataType.Field.POWER to powerValue),
+                                        DataType.Source.CADENCE,
+                                        values = mapOf(DataType.Field.CADENCE to cadenceValue),
                                         sourceId = source.uid,
                                     )
                                 )
                             )
                         }
-                }
-
-                antManager.cadenceFlow(deviceNumber)
-                    .filter { !it.isNaN() }
-                    .collect { cadenceValue ->
-                        emitter.onNext(
-                            OnDataPoint(
-                                DataPoint(
-                                    DataType.Source.CADENCE,
-                                    values = mapOf(DataType.Field.CADENCE to cadenceValue),
-                                    sourceId = source.uid,
-                                )
-                            )
-                        )
                     }
             } catch (e: CancellationException) {
                 if (BuildConfig.DEBUG) Timber.w("Connect coroutine was cancelled")
