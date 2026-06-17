@@ -7,6 +7,6 @@
   "latestVersionCode": 202606131,
   "developer": "Enderthor",
   "description": "Adds a virtual power meter to your Karoo, estimating power from a physics model when you don't have a real power meter.",
-  "releaseNotes": "Major update: the power estimation has been reworked, so your power numbers will change noticeably. Your existing profiles are kept and keep working - just review them after updating (if you are coming from a version older than 1.9.5, uninstall the old version first). Changes: 3-second power smoothing and slope filtering remove watt spikes; the FTP-scaled cap uses realistic peak-over-FTP margins (1.2xFTP+130W); cadence gating has hysteresis; tailwind handling is fixed; and rolling resistance can adjust by surface from offline maps.",
+  "releaseNotes": "Big update — your estimated power will change a bit (more accurate physics: real air temperature/pressure, accelerations, smoother 3s power, an FTP-based cap, and rolling resistance that adapts to the surface). What's new: keep several bikes and link each to a Karoo ride profile, so the right one is picked automatically when you switch profile; and an optional Comparison mode (off by default) that records your estimate — plus one real ANT+ power meter — as extra fields you can overlay in intervals.icu. Your existing setup keeps working; just review your bike's values after updating. Coming from a version older than 1.9.5? Uninstall the old one first.",
   "tags": ["entertainment","health","performance"]
 }
