@@ -132,11 +132,11 @@ If you want to check how close KPower's estimate is to a **real** power meter, t
 How to compare:
 
 1. Turn on **Comparison mode**.
-2. **Remove / deactivate KPower's virtual power meter from your sensors (Settings → Sensors)** and pair your **real** power meter as the active power source instead. This matters: the Karoo records one power source into the native `power` field, so if KPower's virtual meter is still active the two would interfere and you would not be recording the real meter. KPower keeps estimating **in the background** even when it is not your active power source, so the *Est.* fields and the FIT developer fields still work.
+2. **In the profile you'll ride with, deactivate KPower as the power source** and use your **real** power meter instead. Sensors are assigned per profile, so you don't need to delete or unpair KPower's virtual meter — just turn it off in that profile (or ride a profile that uses the real meter). This matters: the Karoo records one power source into the native `power` field, so if KPower's virtual meter is still active in that profile the two would interfere and you would not be recording the real meter. KPower keeps estimating **in the background** even when it is not your active power source, so the *Est.* fields and the FIT developer fields still work.
 3. Add the four *Est.* fields to a data screen if you want to watch them live, and ride.
 4. Afterwards open the FIT in a tool that shows developer fields — **[intervals.icu](https://intervals.icu)** is the easiest — and overlay `est_power` (KPower's estimate) against the native power (your real meter). (Strava ignores developer fields, so use intervals.icu for this.)
 
-> In short: during comparison the **real** meter is the active power source, and KPower is **not** — KPower only feeds the *Est.* fields and the FIT developer fields. Outside comparison, set it back (KPower as your power source) for normal rides.
+> In short: during comparison the **real** meter is the active power source in that profile, and KPower is **not** — KPower only feeds the *Est.* fields and the FIT developer fields. A handy setup is to keep two profiles (one with the real meter, one with KPower) and just switch between them; nothing needs unpairing.
 
 **Why it's off by default:** it adds some CPU/battery work and extra columns to every FIT while enabled. Leave it off for normal rides; only turn it on when you actually want to compare.
 
