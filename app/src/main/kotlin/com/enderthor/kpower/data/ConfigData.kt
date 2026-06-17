@@ -140,3 +140,9 @@ data class ConfigData(
 // antiguas migradas usan los defaults retrocompatibles del data class).
 val previewConfigData = listOf(ConfigData(0,"Spark", true, "14.0","0.008","0.85","0.42","2.5","0.0", false, "","257", KarooSurface.GRAVEL, false, simpleMode = true, useProfileFtp = true))
 val defaultConfigData = Json.encodeToString(previewConfigData)
+
+/** The bike to use for the active Karoo profile: mapped profile → isActive → first. */
+fun resolveActiveConfig(configs: List<ConfigData>, activeProfileId: String?): ConfigData? =
+    configs.firstOrNull { it.karooProfileId != null && it.karooProfileId == activeProfileId }
+        ?: configs.firstOrNull { it.isActive }
+        ?: configs.firstOrNull()
