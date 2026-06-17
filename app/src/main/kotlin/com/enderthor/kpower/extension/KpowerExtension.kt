@@ -47,6 +47,9 @@ import com.enderthor.kpower.vdevice.PowerEstimationEngine
 import timber.log.Timber
 
 
+/** 4-tuple for the startFit combine (Kotlin has no built-in Quadruple). */
+private data class Quadruple<A, B, C, D>(val a: A, val b: B, val c: C, val d: D)
+
 /** Holder for the 4-way combine driving the ride-state connect gate. */
 private data class RideGate(
     val state: RideState,
@@ -116,6 +119,12 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                 (com.enderthor.kpower.ant.fitFieldBase(slot) + kind).toShort(), 136, name, units,
             )
         }
+
+    // Memoized DeveloperField cache for cycling-dynamics fields (single meter). Numbers come from
+    // DynField (8..). Single-threaded (FIT collect loop) so a plain map is fine.
+    private val dynFieldCache = HashMap<Int, DeveloperField>()
+    private fun dynField(num: Int, name: String, units: String) =
+        dynFieldCache.getOrPut(num) { DeveloperField(num.toShort(), 136, name, units) }
 
     private val fieldEstPower = DeveloperField(0, 136, "est_power", "W")
     private val fieldEstPower3s = DeveloperField(1, 136, "est_power_3s", "W")
@@ -347,12 +356,19 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
             var lastSesNp = Double.NaN
             var lastSesAvg = Double.NaN
             kotlinx.coroutines.flow.combine(
-                applicationContext.comparisonModeFlow()
-                    .flatMapLatest { mode -> if (mode) karooSystem.streamDataFlow(DataType.Type.ELAPSED_TIME) else emptyFlow() },
+                // Subscribe to ELAPSED_TIME (1Hz while recording) when EITHER the comparison-mode
+                // toggle OR the record-dynamics toggle is ON; flatMapLatest re-subscribes on
+                // hot-toggle of either.
+                combine(
+                    applicationContext.comparisonModeFlow(),
+                    applicationContext.recordDynamicsFlow(),
+                ) { mode, dyn -> mode || dyn }
+                    .flatMapLatest { on -> if (on) karooSystem.streamDataFlow(DataType.Type.ELAPSED_TIME) else emptyFlow() },
                 applicationContext.antMetersFlow(),
                 loadPreferencesFlow(),
-            ) { elapsed, meters, configs -> Triple(elapsed, meters, configs) }
-                .collect { (elapsed, metersSnapshot, configs) ->
+                applicationContext.recordDynamicsFlow(),
+            ) { elapsed, meters, configs, recordDynamics -> Quadruple(elapsed, meters, configs, recordDynamics) }
+                .collect { (elapsed, metersSnapshot, configs, recordDynamics) ->
                     if (elapsed !is StreamState.Streaming) return@collect
 
                     // El source PRIMARY de la bici activa ya lo escribe el Karoo en el `power`
@@ -381,6 +397,44 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                             if (!cad.isNaN()) recordValues.add(FieldValue(meterField(m.slot, 1, "pm${m.slot + 1}_cad", "rpm"), cad))
                             if (!bal.isNaN()) recordValues.add(FieldValue(meterField(m.slot, 2, "pm${m.slot + 1}_balance", "%"), bal))
                             if (!tq.isNaN()) recordValues.add(FieldValue(meterField(m.slot, 3, "pm${m.slot + 1}_torque", "Nm"), tq))
+                        }
+                    }
+                    // Cycling-dynamics developer fields. Written whenever the record-dynamics
+                    // toggle is ON and a meter is recorded — independent of the comparison-mode
+                    // primary-source filter (writeMeterFields). Each metric field is nullable;
+                    // skip the write when null/NaN so the FIT stays clean while coasting. They
+                    // join the SAME record message emitted below.
+                    if (recordDynamics) {
+                        metersSnapshot.forEach { m ->
+                            val reader = antManager.meter(m.deviceNumber) ?: return@forEach
+                            reader.tePs.value?.let { d ->
+                                d.teLeftPct?.let { recordValues.add(FieldValue(dynField(com.enderthor.kpower.ant.DynField.TE_LEFT, "dyn_te_l", "%"), it)) }
+                                d.teRightPct?.let { recordValues.add(FieldValue(dynField(com.enderthor.kpower.ant.DynField.TE_RIGHT, "dyn_te_r", "%"), it)) }
+                                d.psLeftPct?.let { recordValues.add(FieldValue(dynField(com.enderthor.kpower.ant.DynField.PS_LEFT, "dyn_ps_l", "%"), it)) }
+                                d.psRightPct?.let { recordValues.add(FieldValue(dynField(com.enderthor.kpower.ant.DynField.PS_RIGHT, "dyn_ps_r", "%"), it)) }
+                            }
+                            reader.forceAngleLeft.value?.let { d ->
+                                d.startAngleDeg?.let { recordValues.add(FieldValue(dynField(com.enderthor.kpower.ant.DynField.PP_START_L, "dyn_pp_start_l", "deg"), it)) }
+                                d.endAngleDeg?.let { recordValues.add(FieldValue(dynField(com.enderthor.kpower.ant.DynField.PP_END_L, "dyn_pp_end_l", "deg"), it)) }
+                                d.startPeakDeg?.let { recordValues.add(FieldValue(dynField(com.enderthor.kpower.ant.DynField.PEAK_START_L, "dyn_peak_start_l", "deg"), it)) }
+                                d.endPeakDeg?.let { recordValues.add(FieldValue(dynField(com.enderthor.kpower.ant.DynField.PEAK_END_L, "dyn_peak_end_l", "deg"), it)) }
+                                d.torqueNm?.let { recordValues.add(FieldValue(dynField(com.enderthor.kpower.ant.DynField.TORQUE_LEFT, "dyn_torque_l", "Nm"), it)) }
+                            }
+                            reader.forceAngleRight.value?.let { d ->
+                                d.startAngleDeg?.let { recordValues.add(FieldValue(dynField(com.enderthor.kpower.ant.DynField.PP_START_R, "dyn_pp_start_r", "deg"), it)) }
+                                d.endAngleDeg?.let { recordValues.add(FieldValue(dynField(com.enderthor.kpower.ant.DynField.PP_END_R, "dyn_pp_end_r", "deg"), it)) }
+                                d.startPeakDeg?.let { recordValues.add(FieldValue(dynField(com.enderthor.kpower.ant.DynField.PEAK_START_R, "dyn_peak_start_r", "deg"), it)) }
+                                d.endPeakDeg?.let { recordValues.add(FieldValue(dynField(com.enderthor.kpower.ant.DynField.PEAK_END_R, "dyn_peak_end_r", "deg"), it)) }
+                                d.torqueNm?.let { recordValues.add(FieldValue(dynField(com.enderthor.kpower.ant.DynField.TORQUE_RIGHT, "dyn_torque_r", "Nm"), it)) }
+                            }
+                            reader.pedalPosition.value?.let { d ->
+                                d.leftPcoMm?.let { recordValues.add(FieldValue(dynField(com.enderthor.kpower.ant.DynField.PCO_LEFT, "dyn_pco_l", "mm"), it.toDouble())) }
+                                d.rightPcoMm?.let { recordValues.add(FieldValue(dynField(com.enderthor.kpower.ant.DynField.PCO_RIGHT, "dyn_pco_r", "mm"), it.toDouble())) }
+                                recordValues.add(FieldValue(dynField(com.enderthor.kpower.ant.DynField.RIDER_POSITION, "dyn_rider_pos", ""), d.riderPosition.ordinal.toDouble()))
+                            }
+                            reader.barycenter.value?.angleDeg?.let {
+                                recordValues.add(FieldValue(dynField(com.enderthor.kpower.ant.DynField.BARYCENTER, "dyn_baryc", "deg"), it))
+                            }
                         }
                     }
                     if (recordValues.isNotEmpty()) emitter.onNext(WriteToRecordMesg(recordValues))
