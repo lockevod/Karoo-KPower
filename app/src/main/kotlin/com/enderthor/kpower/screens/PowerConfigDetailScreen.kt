@@ -146,6 +146,14 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                 }
             }
 
+            if (knownProfiles.isEmpty()) {
+                Text(
+                    text = "No Karoo profiles seen yet — open each ride profile once on the Karoo (or start a ride with it) and it will appear here.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
             apply {
                 val sourceOptions = listOf(
                     DropdownOption("ESTIMATE", "Estimated"),

@@ -4,13 +4,13 @@
     <string name="drag_coefficient_desc">Drag Coefficient. Only useful if you have a real power meter</string>
     <string name="drag_coefficient">CDrag</string>
     <string name="est_instant_name">Est. Power</string>
-    <string name="est_instant_desc">KPower estimated instantaneous power</string>
+    <string name="est_instant_desc">KPower estimated instantaneous power (requires Comparison mode)</string>
     <string name="est_3s_name">Est. Power 3s</string>
-    <string name="est_3s_desc">KPower estimated 3s power</string>
+    <string name="est_3s_desc">KPower estimated 3s power (requires Comparison mode)</string>
     <string name="est_np_name">Est. NP</string>
-    <string name="est_np_desc">KPower estimated normalized power</string>
+    <string name="est_np_desc">KPower estimated normalized power (requires Comparison mode)</string>
     <string name="est_avg_name">Est. Avg Power</string>
-    <string name="est_avg_desc">KPower estimated average power</string>
+    <string name="est_avg_desc">KPower estimated average power (requires Comparison mode)</string>
     <string name="real1_name">Real Power</string>
     <string name="real1_desc">Recorded real ANT+ power meter (requires Comparison mode)</string>
     <string name="real1_3s_name">Real Power 3s</string>
