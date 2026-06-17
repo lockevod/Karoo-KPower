@@ -14,7 +14,9 @@ Compatible with Karoo 2 and Karoo 3 devices running Karoo OS version 1.524.2003 
 - **FTP from your Karoo profile.** New profiles can take your FTP automatically from the Karoo user profile (the FTP field becomes read-only while this is on).
 - **Headwind integration.** If the Headwind extension is installed, KPower reuses its temperature, pressure and wind instead of doing its own weather lookups (with automatic fallback, and a switch to opt out).
 - **Literature-calibrated coefficients** (Bassett frontal-area model, Crr from tyre/surface, drivetrain losses).
-- **Compare against a real power meter (optional, off by default).** A new *Comparison mode* exposes the estimate as four extra data fields (instant, 3 s, normalized, average) and writes them into the ride's FIT file as developer fields, so you can overlay KPower's estimate against a real power meter recorded on the same ride. See *Comparing with a real power meter* below.
+- **Multiple bikes, linked to your Karoo profiles.** Create one estimator bike per real bike (each with its own weight, tyres, aero) and link it to a Karoo **ride profile**. When you switch profile on the Karoo, KPower automatically uses the matching bike — no manual changes. See *Multiple bikes & Karoo profiles* below.
+- **Compare against a real power meter, and record several at once (optional, off by default).** A new *Comparison mode* shows the estimate as extra data fields (instant, 3 s, normalized, average) and writes them into the ride's FIT as developer fields. You can also pair **real ANT+ power meters** and record them alongside, so you can overlay KPower's estimate against one or more real meters in the same ride. See *Comparison & real power meters* below.
+- **Settings are now split in two tabs:** *Bikes* (your estimator bikes) and *Comparison / Real meters* (the comparison toggle + ANT+ meters).
 - **Existing profiles keep working unchanged** — see *Upgrading* below.
 
 
@@ -122,23 +124,53 @@ Start scan and  you'll see a new category (looks like a puzzle piece), select th
 3- Kpower will show you the power estimation in the power fields. You can use the power fields in the data screens, in the workout builder, etc. It's like a real power meter.
 
 
-### Comparing with a real power meter (optional)
+## Multiple bikes & Karoo profiles
 
-If you want to check how close KPower's estimate is to a **real** power meter, turn on **Comparison mode** — a single switch on the configuration screen, **off by default**. While it is on it does two things:
+If you ride more than one bike, you can keep **one estimator bike per real bike** and have KPower switch between them automatically.
 
-- **Adds four estimated-power data fields** you can place on any data screen: **Est. Power** (instantaneous), **Est. Power 3s**, **Est. NP** (normalized power) and **Est. Avg Power**. With Comparison mode off they show `---`.
-- **Writes the estimate into the ride's FIT file** as developer fields: `est_power` and `est_power_3s` every second (next to the native power/HR/cadence samples), plus `est_np` and `est_avg` in the ride summary.
+Settings now have two tabs at the top: **Bikes** and **Comparison / Real meters**. Everything about your bikes lives under **Bikes**.
 
-How to compare:
+1. In **Bikes**, create one entry per bike (the "+" button) and fill in its data (weight, tyres, aero, FTP…) as described above.
+2. Open a bike and set **"Link to Karoo profile"** to the Karoo ride profile you use with that bike (e.g. *Road*, *Gravel*, *MTB*). The list shows the profiles KPower has seen — if a profile is missing, just scroll to it once on the Karoo launcher (or start a ride with it) and it will appear.
+3. That's it. When you switch ride profile on the Karoo, KPower automatically uses the bike linked to it — different weight/tyres/aero, all handled for you.
 
-1. Turn on **Comparison mode**.
-2. **In the profile you'll ride with, deactivate KPower as the power source** and use your **real** power meter instead. Sensors are assigned per profile, so you don't need to delete or unpair KPower's virtual meter — just turn it off in that profile (or ride a profile that uses the real meter). This matters: the Karoo records one power source into the native `power` field, so if KPower's virtual meter is still active in that profile the two would interfere and you would not be recording the real meter. KPower keeps estimating **in the background** even when it is not your active power source, so the *Est.* fields and the FIT developer fields still work.
-3. Add the four *Est.* fields to a data screen if you want to watch them live, and ride.
-4. Afterwards open the FIT in a tool that shows developer fields — **[intervals.icu](https://intervals.icu)** is the easiest — and overlay `est_power` (KPower's estimate) against the native power (your real meter). (Strava ignores developer fields, so use intervals.icu for this.)
+Fallback when nothing is linked: if the active profile isn't linked to any bike, KPower uses the bike you marked as **active**, or the first one. So a single-bike setup keeps working exactly as before.
 
-> In short: during comparison the **real** meter is the active power source in that profile, and KPower is **not** — KPower only feeds the *Est.* fields and the FIT developer fields. A handy setup is to keep two profiles (one with the real meter, one with KPower) and just switch between them; nothing needs unpairing.
+> Tip: link each bike to the profile you actually ride it with. If the active Karoo profile is linked to the wrong bike, the estimate (and which power meter is treated as your main one) will follow that wrong bike.
 
-**Why it's off by default:** it adds some CPU/battery work and extra columns to every FIT while enabled. Leave it off for normal rides; only turn it on when you actually want to compare.
+## Comparison & real power meters (optional)
+
+This is for checking how close KPower's estimate is to a **real** power meter — even recording **several** meters at once on the same ride. Everything here lives under the **Comparison / Real meters** tab and is **off by default** (it adds some battery/CPU work and extra columns to the FIT).
+
+### The idea: one "main" source + extras
+
+Your Karoo always records **one** power source into its normal `power` field (the one you pick in the Karoo profile's sensors). That's your **main** source — it can be a real meter, or KPower's estimate (if you select KPower's virtual meter as the profile's power sensor).
+
+Everything else KPower records as **extra columns** ("developer fields") in the FIT, so nothing fights over the main field:
+- the **estimate** (when it isn't your main source), and
+- any **real ANT+ power meters** you add here.
+
+KPower never writes your main source twice — whatever is the main source is left to the Karoo's normal `power` field, and only the *others* become extra columns.
+
+### Turn it on
+
+Open **Comparison / Real meters** and switch on **Comparison mode**. While it's on:
+- Four estimated-power **data fields** become available for your screens: **Est. Power** (instant), **Est. Power 3s**, **Est. NP** (normalized) and **Est. Avg Power** (they show `---` when comparison mode is off).
+- The estimate is written to the FIT as `est_power` / `est_power_3s` (every second) and `est_np` / `est_avg` (ride summary) — *unless the estimate is your main source*, in which case it's already in the normal `power` field.
+
+### Add real ANT+ power meters
+
+In the same tab, tap **Scan** to search for ANT+ power meters and tick the ones you want to record (up to 3). They're recorded as extra FIT columns `pm1_power`, `pm1_cad`, `pm1_balance`, `pm1_torque` (and `pm2_…`, `pm3_…`), plus a live **PM1 / PM2 / PM3 Power** data field each. ANT+ is broadcast, so KPower can listen to a meter at the same time as the Karoo — no need to unpair anything.
+
+> Don't keep the Scan screen open while you're recording a ride — scanning competes with the meters being recorded. Scan, pick your meters, then leave the screen.
+
+### How to compare afterwards
+
+1. Comparison mode on; in the bike you're riding, set **Primary power source** (in the bike's settings) to whatever feeds the Karoo's normal `power` field — *Estimated*, a specific *real meter*, or *External* (a sensor KPower doesn't manage).
+2. Ride. Optionally add the *Est.* / *PMx* fields to a screen to watch live.
+3. Open the FIT in a tool that shows developer fields — **[intervals.icu](https://intervals.icu)** is the easiest — and overlay `est_power` and `pm1_power`… against the normal power. (Strava ignores developer fields, so use intervals.icu.)
+
+**Why it's off by default:** it keeps the estimator and the ANT+ meters running and adds extra columns to every FIT. Leave it off for normal rides; turn it on only when you want to compare.
 
 ## Upgrading from a previous version
 
@@ -167,6 +199,8 @@ New in this release:
 - **Cadence gate with hysteresis**: coasting detection switches off below 20 rpm and back on above 25 rpm, so power no longer flickers between 0 and full value when cadence hovers around the cutoff.
 - **Tailwind fix**: a tailwind stronger than your speed now correctly *reduces* the aero term instead of adding drag.
 - **Comparison mode** (optional, off by default): exposes the estimate as four extra data fields (Est. Power / Est. Power 3s / Est. NP / Est. Avg Power) and writes `est_power`, `est_power_3s` (per-second) plus `est_np`, `est_avg` (session summary) into the FIT, so you can compare the estimate side-by-side against a real power meter in intervals.icu.
+- **Record real ANT+ power meters** (up to 3, optional): pair them under *Comparison / Real meters* and they're recorded as extra FIT columns (`pm1_power`/`pm1_cad`/`pm1_balance`/`pm1_torque`, etc.) + live data fields, alongside the estimate — for multi-meter comparison on one ride.
+- **Multiple bikes linked to Karoo ride profiles**: one estimator bike per real bike, auto-selected when you switch profile on the Karoo. Settings split into *Bikes* and *Comparison / Real meters* tabs.
 - Literature-calibrated coefficients (frontal area, Crr, drivetrain losses).
 
 Previous features:
@@ -199,7 +233,7 @@ You can use openmeteo or openweathermap If you want to use openweathermap (bette
   https://github.com/timklge?tab=repositories
 - Power estimation https://www.gribble.org/cycling/power_v_speed.html
 - SRAM and Hammerhead coypyright are describer in Karoo file.
-- KPower doesn't save or share any information for it's use, but it use firebase crashlytics service only for crashes in app (and firebase use this crash information). I only use this information to prevent new crashes in the app. Please if you isn't agree with Firebase use (this conditions are in firebase web and can change, please read it), please you cannot use kpower app. If you use kpower you are agree with all conditions and copyrights.
+- KPower doesn't save or share any information, only uses the Karoo sensors and weather APIs to get the information needed to estimate the power.
 
 ## Links
 
