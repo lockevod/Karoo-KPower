@@ -18,21 +18,21 @@ import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.launch
 import kotlin.time.Duration.Companion.seconds
 
-fun realPowerTypeId(slot: Int) = "real-power-$slot"
+fun realFieldTypeId(slot: Int, metric: String) = "real-$metric-$slot"   // e.g. real-power-0, real-3s-0, real-np-0, real-avg-0
 
-/** Live power of a real ANT+ meter slot; shows `---` when comparison mode is off or no sample. */
+/** Live metric of a real ANT+ meter slot; shows `---` when comparison mode is off or no sample. */
 class RealPowerDataType(
     extension: String,
-    slot: Int,
+    typeId: String,
     private val comparisonModeFlow: () -> Flow<Boolean>,
-    private val powerFlow: () -> StateFlow<Double>?,
-) : DataTypeImpl(extension, realPowerTypeId(slot)) {
+    private val valueFlow: () -> StateFlow<Double>?,
+) : DataTypeImpl(extension, typeId) {
 
     @OptIn(FlowPreview::class)
     override fun startStream(emitter: Emitter<StreamState>) {
         val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         scope.launch {
-            val flow = powerFlow()
+            val flow = valueFlow()
             if (flow == null) {
                 emitter.onNext(StreamState.NotAvailable)
                 return@launch

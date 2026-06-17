@@ -11,8 +11,12 @@
     <string name="est_np_desc">KPower estimated normalized power</string>
     <string name="est_avg_name">Est. Avg Power</string>
     <string name="est_avg_desc">KPower estimated average power</string>
-    <string name="real1_name">PM1 Power</string>
-    <string name="real1_desc">Real ANT+ power meter 1</string>
-    <string name="real2_name">PM2 Power</string>
-    <string name="real2_desc">Real ANT+ power meter 2</string>
+    <string name="real1_name">Real Power</string>
+    <string name="real1_desc">Recorded real ANT+ power meter (requires Comparison mode)</string>
+    <string name="real1_3s_name">Real Power 3s</string>
+    <string name="real1_3s_desc">Recorded real meter 3s power (requires Comparison mode)</string>
+    <string name="real1_np_name">Real NP</string>
+    <string name="real1_np_desc">Recorded real meter normalized power (requires Comparison mode)</string>
+    <string name="real1_avg_name">Real Avg Power</string>
+    <string name="real1_avg_desc">Recorded real meter average power (requires Comparison mode)</string>
 </resources>

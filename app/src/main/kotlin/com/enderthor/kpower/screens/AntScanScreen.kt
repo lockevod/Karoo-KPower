@@ -27,7 +27,7 @@ import com.enderthor.kpower.extension.antMetersFlow
 import com.enderthor.kpower.extension.saveAntMeters
 import kotlinx.coroutines.launch
 
-private const val MAX_METERS = 2
+private const val MAX_METERS = 1
 
 @Composable
 fun AntScanScreen(manager: AntPowerManager) {

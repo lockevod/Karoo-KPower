@@ -24,6 +24,9 @@ class AntPowerManager(private val context: Context) {
 
     private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
     private val powerFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
+    private val power3sFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
+    private val npFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
+    private val avgFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
     private val bridges = HashMap<Int, kotlinx.coroutines.Job>()
 
     // Ride state mirrored from the extension. `recording` gates NP/avg accumulation per meter;
@@ -49,6 +52,11 @@ class AntPowerManager(private val context: Context) {
     /** Stable power flow for a device number (survives connect/disconnect; NaN when not streaming). */
     fun powerFlow(deviceNumber: Int): kotlinx.coroutines.flow.StateFlow<Double> =
         powerFlows.getOrPut(deviceNumber) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
+
+    /** Stable 3s/NP/avg flows for a device number (survive reconnect, like powerFlow). */
+    fun power3sFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<Double> = power3sFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
+    fun npFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<Double> = npFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
+    fun avgFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<Double> = avgFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
 
     /** Live reader for a device number, or null if not connected. */
     fun meter(deviceNumber: Int): AntPowerMeter? = synchronized(meters) { meters[deviceNumber] }
@@ -92,6 +100,9 @@ class AntPowerManager(private val context: Context) {
             (meters.keys - deviceNumbers.toSet()).toList().forEach { dn ->
                 bridges.remove(dn)?.cancel()
                 powerFlows[dn]?.value = Double.NaN
+                power3sFlows[dn]?.value = Double.NaN
+                npFlows[dn]?.value = Double.NaN
+                avgFlows[dn]?.value = Double.NaN
                 meters.remove(dn)?.disconnect()
             }
             deviceNumbers.forEach { dn ->
@@ -114,6 +125,9 @@ class AntPowerManager(private val context: Context) {
                             m.expireIfStale(System.currentTimeMillis())
                             if (m.consumePendingReset()) m.metrics.reset()
                             m.metrics.tick(m.power.value, recording)
+                            power3sFlows.getOrPut(dn){ kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }.value = m.metrics.power3sW.value
+                            npFlows.getOrPut(dn){ kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }.value = m.metrics.npW.value
+                            avgFlows.getOrPut(dn){ kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }.value = m.metrics.avgW.value
                         }
                     }
                 }
@@ -128,6 +142,9 @@ class AntPowerManager(private val context: Context) {
             bridges.values.forEach { it.cancel() }
             bridges.clear()
             powerFlows.values.forEach { it.value = Double.NaN }
+            power3sFlows.values.forEach { it.value = Double.NaN }
+            npFlows.values.forEach { it.value = Double.NaN }
+            avgFlows.values.forEach { it.value = Double.NaN }
             meters.values.forEach { it.disconnect() }
             meters.clear()
         }

@@ -30,5 +30,7 @@
         graphical="false"
         icon="@drawable/ic_power_hr" />
     <DataType typeId="real-power-0" displayName="@string/real1_name" description="@string/real1_desc" graphical="false" icon="@drawable/ic_power_hr" />
-    <DataType typeId="real-power-1" displayName="@string/real2_name" description="@string/real2_desc" graphical="false" icon="@drawable/ic_power_hr" />
+    <DataType typeId="real-3s-0" displayName="@string/real1_3s_name" description="@string/real1_3s_desc" graphical="false" icon="@drawable/ic_power_hr" />
+    <DataType typeId="real-np-0" displayName="@string/real1_np_name" description="@string/real1_np_desc" graphical="false" icon="@drawable/ic_power_hr" />
+    <DataType typeId="real-avg-0" displayName="@string/real1_avg_name" description="@string/real1_avg_desc" graphical="false" icon="@drawable/ic_power_hr" />
 </ExtensionInfo>
