@@ -58,8 +58,20 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
         PowerEstimationEngine(karooSystem, applicationContext, serviceScope)
     }
 
+    private val antManager: com.enderthor.kpower.ant.AntPowerManager by lazy {
+        com.enderthor.kpower.ant.AntPowerManager(applicationContext)
+    }
+
     // Token estable del consumidor "modo comparación" para el ref-count del engine.
     private val comparisonToken = Any()
+
+    private fun slotPowerFlow(slot: Int): kotlinx.coroutines.flow.StateFlow<Double>? {
+        val saved = runCatching {
+            kotlinx.coroutines.runBlocking { applicationContext.antMetersFlow().first() }
+        }.getOrNull()
+        val dn = saved?.firstOrNull { it.slot == slot }?.deviceNumber ?: return null
+        return antManager.meter(dn)?.power
+    }
 
     override val types: List<DataTypeImpl> by lazy {
         listOf(
@@ -67,8 +79,16 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
             EstimatedPowerDataType(extension, TYPE_EST_3S, engine, { applicationContext.comparisonModeFlow() }) { it.power3sW },
             EstimatedPowerDataType(extension, TYPE_EST_NP, engine, { applicationContext.comparisonModeFlow() }) { it.npW },
             EstimatedPowerDataType(extension, TYPE_EST_AVG, engine, { applicationContext.comparisonModeFlow() }) { it.avgW },
+            RealPowerDataType(extension, 0, { applicationContext.comparisonModeFlow() }) { slotPowerFlow(0) },
+            RealPowerDataType(extension, 1, { applicationContext.comparisonModeFlow() }) { slotPowerFlow(1) },
+            RealPowerDataType(extension, 2, { applicationContext.comparisonModeFlow() }) { slotPowerFlow(2) },
         )
     }
+
+    private fun meterField(slot: Int, kind: Int, name: String, units: String) =
+        io.hammerhead.karooext.models.DeveloperField(
+            (com.enderthor.kpower.ant.fitFieldBase(slot) + kind).toShort(), 136, name, units,
+        )
 
     private val fieldEstPower = DeveloperField(0, 136, "est_power", "W")
     private val fieldEstPower3s = DeveloperField(1, 136, "est_power_3s", "W")
@@ -100,15 +120,18 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
         // resetear NP/media en Idle->Recording y congelar en pausa.
         serviceScope.launch {
             var acquiredForComparison = false
-            karooSystem.consumerFlow<RideState>()
-                .combine(applicationContext.comparisonModeFlow()) { state, mode -> state to mode }
+            kotlinx.coroutines.flow.combine(
+                karooSystem.consumerFlow<RideState>(),
+                applicationContext.comparisonModeFlow(),
+                applicationContext.antMetersFlow(),
+            ) { state, mode, meters -> Triple(state, mode, meters) }
                 // Dedup is safe: RideState.Recording/Idle are payload-free objects, so
                 // collapsing identical emissions never drops a real transition. And
                 // engine.onRideState(state) is intentionally called before the comparison
                 // shouldRun gate below, so NP/avg reset + pause-freeze work even when
                 // comparison mode is OFF.
                 .distinctUntilChanged()
-                .collect { (state, mode) ->
+                .collect { (state, mode, meters) ->
                     engine.onRideState(state)
                     val shouldRun = mode && state is RideState.Recording
                     if (shouldRun && !acquiredForComparison) {
@@ -116,6 +139,8 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                     } else if (!shouldRun && acquiredForComparison) {
                         engine.release(comparisonToken); acquiredForComparison = false
                     }
+                    if (shouldRun) antManager.connectMeters(meters.map { it.deviceNumber })
+                    else antManager.disconnectAll()
                 }
         }
     }
@@ -262,14 +287,26 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                 .flatMapLatest { mode ->
                     if (mode) karooSystem.streamDataFlow(DataType.Type.ELAPSED_TIME) else emptyFlow()
                 }
-                .collect { elapsed ->
+                .combine(applicationContext.antMetersFlow()) { elapsed, meters -> elapsed to meters }
+                .collect { (elapsed, metersSnapshot) ->
                     if (elapsed !is StreamState.Streaming) return@collect
 
                     val instant = engine.instantW.value
                     val p3s = engine.power3sW.value
-                    val recordValues = buildList {
+                    val recordValues = mutableListOf<FieldValue>().apply {
                         if (!instant.isNaN()) add(FieldValue(fieldEstPower, instant))
                         if (!p3s.isNaN()) add(FieldValue(fieldEstPower3s, p3s))
+                    }
+                    metersSnapshot.forEach { m ->
+                        val reader = antManager.meter(m.deviceNumber)
+                        val pw = reader?.power?.value ?: Double.NaN
+                        val cad = reader?.cadence?.value ?: Double.NaN
+                        val bal = reader?.balanceRightPct?.value ?: Double.NaN
+                        val tq = reader?.torque?.value ?: Double.NaN
+                        if (!pw.isNaN()) recordValues.add(FieldValue(meterField(m.slot, 0, "pm${m.slot + 1}_power", "W"), pw))
+                        if (!cad.isNaN()) recordValues.add(FieldValue(meterField(m.slot, 1, "pm${m.slot + 1}_cad", "rpm"), cad))
+                        if (!bal.isNaN()) recordValues.add(FieldValue(meterField(m.slot, 2, "pm${m.slot + 1}_balance", "%"), bal))
+                        if (!tq.isNaN()) recordValues.add(FieldValue(meterField(m.slot, 3, "pm${m.slot + 1}_torque", "Nm"), tq))
                     }
                     if (recordValues.isNotEmpty()) emitter.onNext(WriteToRecordMesg(recordValues))
 
