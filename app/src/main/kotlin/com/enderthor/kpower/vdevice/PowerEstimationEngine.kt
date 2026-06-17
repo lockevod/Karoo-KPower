@@ -54,6 +54,7 @@ class PowerEstimationEngine(
     private val karooSystem: KarooSystemService,
     private val context: Context,
     private val scope: CoroutineScope,
+    private val activeProfileIdFlow: kotlinx.coroutines.flow.StateFlow<String?>,
 ) {
     private val _instantW = MutableStateFlow(Double.NaN)
     private val _powerEmaW = MutableStateFlow(Double.NaN)
@@ -68,6 +69,11 @@ class PowerEstimationEngine(
     val npW: StateFlow<Double> = _npW.asStateFlow()
     val avgW: StateFlow<Double> = _avgW.asStateFlow()
     val hasSample: StateFlow<Boolean> = _hasSample.asStateFlow()
+
+    private val _estimateIsPrimary = MutableStateFlow(false)
+    /** True when KPower's virtual device is the Karoo's active power source (bound in the profile). */
+    val estimateIsPrimary: StateFlow<Boolean> = _estimateIsPrimary.asStateFlow()
+    fun setVirtualDeviceConnected(connected: Boolean) { _estimateIsPrimary.value = connected }
 
     private val accelerationTracker = AccelerationTracker()
     private val gradeSmoother = GradeSmoother()
@@ -213,8 +219,7 @@ class PowerEstimationEngine(
                 .sample(900.milliseconds)
                 .collect { bundle ->
                     val configs = bundle.configs
-                    if (configs.isEmpty()) return@collect
-                    val config = configs[0]
+                    val config = com.enderthor.kpower.data.resolveActiveConfig(configs, activeProfileIdFlow.value) ?: return@collect
                     val nowMs = System.currentTimeMillis()
                     val speedMs = bundle.values.speed.getValueOrDefault()
                     val acceleration = accelerationTracker.update(speedMs, nowMs)
@@ -226,7 +231,7 @@ class PowerEstimationEngine(
                     val pressurePa: Double? = bundle.weatherPressureHpa?.times(100.0)
 
                     val rawPower = calculatePowerBike(
-                        userMass, configs, bundle.values, slopePercent, tempC, pressurePa, acceleration, userFtp
+                        userMass, config, bundle.values, slopePercent, tempC, pressurePa, acceleration, userFtp
                     ).calculateCyclingWattage()
                     val ema = powerSmoother.update(rawPower, nowMs)
 
@@ -274,7 +279,7 @@ class PowerEstimationEngine(
 
     private fun calculatePowerBike(
         userMass: Double,
-        powerConfigs: List<ConfigData>,
+        config: ConfigData,
         values: RealKarooValues,
         slopePercent: Double,
         temperatureC: Double?,
@@ -287,28 +292,28 @@ class PowerEstimationEngine(
         val finalHeadwind = values.headwind.getValueOrDefault()
 
         var isPedaling = true
-        var isforcepower = powerConfigs[0].isforcepower
+        var isforcepower = config.isforcepower
 
         if (values.cadence is StreamState.Streaming) {
             isPedaling = cadenceGate.update(values.cadence.getValueOrDefault())
         } else isforcepower = true
 
-        val ftp = if (powerConfigs[0].useProfileFtp && userFtp > 0) userFtp.toDouble()
-        else powerConfigs[0].ftp.toDoubleLocale()
+        val ftp = if (config.useProfileFtp && userFtp > 0) userFtp.toDouble()
+        else config.ftp.toDoubleLocale()
 
         return CyclingWattageEstimator(
             slope = slopePercent / 100,
-            totalMass = userMass + powerConfigs[0].bikeMass.toDoubleLocale(),
-            rollingResistanceCoefficient = powerConfigs[0].rollingResistanceCoefficient.toDoubleLocale(),
-            dragCoefficient = powerConfigs[0].dragCoefficient.toDoubleLocale(),
+            totalMass = userMass + config.bikeMass.toDoubleLocale(),
+            rollingResistanceCoefficient = config.rollingResistanceCoefficient.toDoubleLocale(),
+            dragCoefficient = config.dragCoefficient.toDoubleLocale(),
             speed = speed,
             elevation = elevation,
             windSpeed = finalHeadwind,
-            powerLoss = powerConfigs[0].powerLoss.toDoubleLocale() / 100,
-            frontalArea = powerConfigs[0].frontalArea.toDoubleLocale(),
+            powerLoss = config.powerLoss.toDoubleLocale() / 100,
+            frontalArea = config.frontalArea.toDoubleLocale(),
             ftp = ftp,
             isPedaling = isPedaling,
-            surface = effectiveSurface(powerConfigs[0], freshLiveSurface()).factor,
+            surface = effectiveSurface(config, freshLiveSurface()).factor,
             isforcepower = isforcepower,
             temperatureC = temperatureC,
             pressurePa = pressurePa,
