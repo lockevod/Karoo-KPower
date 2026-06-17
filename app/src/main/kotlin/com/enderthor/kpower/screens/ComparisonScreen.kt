@@ -31,15 +31,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 import com.enderthor.kpower.ant.AntPowerManager
 import com.enderthor.kpower.ant.SavedMeter
 import com.enderthor.kpower.extension.antMetersFlow
 import com.enderthor.kpower.extension.comparisonModeFlow
+import com.enderthor.kpower.extension.loadPreferencesFlow
 import com.enderthor.kpower.extension.recordDynamicsFlow
 import com.enderthor.kpower.extension.saveAntMeters
 import com.enderthor.kpower.extension.saveComparisonMode
+import com.enderthor.kpower.extension.savePreferences
 import com.enderthor.kpower.extension.saveRecordDynamics
 
 
@@ -151,8 +154,21 @@ fun ComparisonScreen() {
                         scope.launch { saveAntMeters(ctx, next) }
                     },
                     onDelete = { m ->
-                        val next = saved.filterNot { it.deviceNumber == m.deviceNumber }
-                        scope.launch { saveAntMeters(ctx, next) }
+                        val dn = m.deviceNumber
+                        val next = saved.filterNot { it.deviceNumber == dn }
+                        scope.launch {
+                            saveAntMeters(ctx, next)
+                            // Revert any bike config whose primary pointed at the deleted
+                            // meter back to ESTIMATE, else writeMeterFields would suppress a
+                            // meter that no longer exists and that bike records no power.
+                            val configs = ctx.loadPreferencesFlow().first()
+                            val fixed = configs.map {
+                                if (it.primarySource == "REAL" && it.primaryRealDeviceNumber == dn)
+                                    it.copy(primarySource = "ESTIMATE", primaryRealDeviceNumber = null)
+                                else it
+                            }
+                            if (fixed != configs) savePreferences(ctx, fixed.toMutableList())
+                        }
                     },
                 )
             }
