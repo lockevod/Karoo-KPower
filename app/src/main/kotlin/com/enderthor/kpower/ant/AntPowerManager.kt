@@ -20,7 +20,7 @@ class AntPowerManager(private val context: Context) {
     val detectedDevices: StateFlow<List<AntDeviceInfo>> = _detectedDevices.asStateFlow()
 
     private var search: MultiDeviceSearch? = null
-    private val meters = LinkedHashMap<Int, AntPowerMeter>()
+    private val meters = LinkedHashMap<Int, RawAntPowerMeter>()
 
     private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
     private val powerFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
@@ -59,7 +59,7 @@ class AntPowerManager(private val context: Context) {
     fun avgFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<Double> = avgFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
 
     /** Live reader for a device number, or null if not connected. */
-    fun meter(deviceNumber: Int): AntPowerMeter? = synchronized(meters) { meters[deviceNumber] }
+    fun meter(deviceNumber: Int): RawAntPowerMeter? = synchronized(meters) { meters[deviceNumber] }
 
     @Synchronized
     fun startScan() {
@@ -107,7 +107,7 @@ class AntPowerManager(private val context: Context) {
             }
             deviceNumbers.forEach { dn ->
                 if (!meters.containsKey(dn)) {
-                    val m = AntPowerMeter(context, dn).also { it.connect() }
+                    val m = RawAntPowerMeter(context, dn).also { it.connect() }
                     // A meter added mid-recording starts its metrics fresh on the first loop tick.
                     m.requestMetricsReset()
                     meters[dn] = m
