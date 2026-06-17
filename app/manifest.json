@@ -6,7 +6,7 @@
   "latestVersion": "3.0.0",
   "latestVersionCode": 202606131,
   "developer": "Enderthor",
-  "description": "This extension for Karoo devices adds a device simulates a virtual power meter.",
+  "description": "Adds a virtual power meter to your Karoo, estimating power from a physics model when you don't have a real power meter.",
   "releaseNotes": "Major update: the power estimation has been reworked, so your power numbers will change noticeably. Your existing profiles are kept and keep working - just review them after updating. Changes: 3-second power smoothing and slope filtering remove watt spikes; the FTP-scaled cap uses realistic peak-over-FTP margins (1.2xFTP+130W); cadence gating has hysteresis; tailwind handling is fixed; and rolling resistance can adjust by surface from offline maps.",
   "tags": ["entertainment","health","performance"]
 }
