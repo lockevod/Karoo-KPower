@@ -36,6 +36,9 @@ const val WEATHER_RETRY_DELAY_MS = 5L * 60L * 1000L  // 5 min after a failure
 data class StreamData(val headingResponse: HeadingResponse, val weatherResponse: OpenMeteoCurrentWeatherResponse?)
 
 @Serializable
+data class KnownProfile(val id: String, val name: String)
+
+@Serializable
 data class RealKarooValues(
     val speed: StreamState? = null,
     val slope: StreamState? = null,
@@ -121,7 +124,14 @@ data class ConfigData(
     // bajo la posición actual. Activado por defecto; si no hay mapfiles/permiso/datos,
     // degrada a "Unknown" y se usa la superficie elegida abajo. Retrocompat: una config
     // antigua se deserializa con true.
-    val useRouteSurface: Boolean = true
+    val useRouteSurface: Boolean = true,
+    // Karoo ride-profile this bike is linked to (RideProfile.id); null = unmapped (legacy).
+    val karooProfileId: String? = null,
+    // Which source is PRIMARY for this profile (bound in the Karoo profile, feeds standard `power`).
+    // "ESTIMATE" | "REAL" | "EXTERNAL". Default ESTIMATE.
+    val primarySource: String = "ESTIMATE",
+    // Device number of the real meter when primarySource == "REAL".
+    val primaryRealDeviceNumber: Int? = null,
 )
 
 
