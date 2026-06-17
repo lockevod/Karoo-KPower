@@ -27,6 +27,11 @@ class AntPowerManager(private val context: Context) {
     private val power3sFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
     private val npFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
     private val avgFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
+    // Stable dynamics sinks (survive reconnect; re-bound by bridges[dn] to each new meter).
+    private val balanceFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
+    private val tePsFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<TePsData?>>()
+    private val forceLeftFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<ForceAngleData?>>()
+    private val forceRightFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<ForceAngleData?>>()
     private val bridges = HashMap<Int, kotlinx.coroutines.Job>()
 
     // Ride state mirrored from the extension. `recording` gates NP/avg accumulation per meter;
@@ -57,6 +62,12 @@ class AntPowerManager(private val context: Context) {
     fun power3sFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<Double> = power3sFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
     fun npFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<Double> = npFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
     fun avgFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<Double> = avgFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
+
+    /** Stable dynamics flows for a device number (survive reconnect, like powerFlow). */
+    fun balanceFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<Double> = balanceFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
+    fun tePsFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<TePsData?> = tePsFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(null) }
+    fun forceLeftFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<ForceAngleData?> = forceLeftFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(null) }
+    fun forceRightFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<ForceAngleData?> = forceRightFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(null) }
 
     /** Live reader for a device number, or null if not connected. */
     fun meter(deviceNumber: Int): RawAntPowerMeter? = synchronized(meters) { meters[deviceNumber] }
@@ -103,6 +114,10 @@ class AntPowerManager(private val context: Context) {
                 power3sFlows[dn]?.value = Double.NaN
                 npFlows[dn]?.value = Double.NaN
                 avgFlows[dn]?.value = Double.NaN
+                balanceFlows[dn]?.value = Double.NaN
+                tePsFlows[dn]?.value = null
+                forceLeftFlows[dn]?.value = null
+                forceRightFlows[dn]?.value = null
                 meters.remove(dn)?.disconnect()
             }
             deviceNumbers.forEach { dn ->
@@ -115,9 +130,18 @@ class AntPowerManager(private val context: Context) {
                     val p3sSink = power3sFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
                     val npSink = npFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
                     val avgSink = avgFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
+                    val balanceSink = balanceFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
+                    val tePsSink = tePsFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(null) }
+                    val forceLeftSink = forceLeftFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(null) }
+                    val forceRightSink = forceRightFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(null) }
                     bridges[dn] = scope.launch {
                         // mirror power into the stable sink
                         launch { m.power.collect { sink.value = it } }
+                        // mirror dynamics into the stable sinks (re-binds the NEW meter on reconnect)
+                        launch { m.balanceRightPct.collect { balanceSink.value = it } }
+                        launch { m.tePs.collect { tePsSink.value = it } }
+                        launch { m.forceAngleLeft.collect { forceLeftSink.value = it } }
+                        launch { m.forceAngleRight.collect { forceRightSink.value = it } }
                         // watchdog: expire stale values (no event for >5s) so the FIT records a
                         // gap, not frozen watts. Both child launches live under this one
                         // bridges[dn] job, so cancelling it stops the mirror and the watchdog.
@@ -151,6 +175,10 @@ class AntPowerManager(private val context: Context) {
             power3sFlows.values.forEach { it.value = Double.NaN }
             npFlows.values.forEach { it.value = Double.NaN }
             avgFlows.values.forEach { it.value = Double.NaN }
+            balanceFlows.values.forEach { it.value = Double.NaN }
+            tePsFlows.values.forEach { it.value = null }
+            forceLeftFlows.values.forEach { it.value = null }
+            forceRightFlows.values.forEach { it.value = null }
             meters.values.forEach { it.disconnect() }
             meters.clear()
         }
