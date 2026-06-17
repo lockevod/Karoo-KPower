@@ -306,20 +306,18 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
             // churnar un Binder round-trip + allocation cada segundo.
             var lastSesNp = Double.NaN
             var lastSesAvg = Double.NaN
-            applicationContext.comparisonModeFlow()
-                .flatMapLatest { mode ->
-                    if (mode) karooSystem.streamDataFlow(DataType.Type.ELAPSED_TIME) else emptyFlow()
-                }
-                .combine(applicationContext.antMetersFlow()) { elapsed, meters -> elapsed to meters }
-                .collect { (elapsed, metersSnapshot) ->
+            kotlinx.coroutines.flow.combine(
+                applicationContext.comparisonModeFlow()
+                    .flatMapLatest { mode -> if (mode) karooSystem.streamDataFlow(DataType.Type.ELAPSED_TIME) else emptyFlow() },
+                applicationContext.antMetersFlow(),
+                loadPreferencesFlow(),
+            ) { elapsed, meters, configs -> Triple(elapsed, meters, configs) }
+                .collect { (elapsed, metersSnapshot, configs) ->
                     if (elapsed !is StreamState.Streaming) return@collect
 
                     // El source PRIMARY de la bici activa ya lo escribe el Karoo en el `power`
                     // estándar -> omitimos su developer field para no duplicarlo.
-                    val activeCfg = com.enderthor.kpower.data.resolveActiveConfig(
-                        runCatching { kotlinx.coroutines.runBlocking { loadPreferencesFlow().first() } }.getOrNull() ?: emptyList(),
-                        activeProfileIdFlow.value,
-                    )
+                    val activeCfg = com.enderthor.kpower.data.resolveActiveConfig(configs, activeProfileIdFlow.value)
                     val primarySrc = activeCfg?.primarySource ?: "ESTIMATE"
                     val primaryDev = activeCfg?.primaryRealDeviceNumber
                     val estPrimary = engine.estimateIsPrimary.value
@@ -327,7 +325,7 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                     val instant = engine.instantW.value
                     val p3s = engine.power3sW.value
                     val recordValues = mutableListOf<FieldValue>().apply {
-                        if (writeEstimateFields(primarySrc, estPrimary)) {
+                        if (writeEstimateFields(estPrimary)) {
                             if (!instant.isNaN()) add(FieldValue(fieldEstPower, instant))
                             if (!p3s.isNaN()) add(FieldValue(fieldEstPower3s, p3s))
                         }
@@ -347,7 +345,7 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                     }
                     if (recordValues.isNotEmpty()) emitter.onNext(WriteToRecordMesg(recordValues))
 
-                    if (writeEstimateFields(primarySrc, estPrimary)) {
+                    if (writeEstimateFields(estPrimary)) {
                         val np = engine.npW.value
                         val avg = engine.avgW.value
                         if (np != lastSesNp || avg != lastSesAvg) {

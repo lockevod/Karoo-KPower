@@ -5,11 +5,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class FitPrimaryFilterTest {
-    @Test fun `estimate fields written unless estimate is primary`() {
-        assertFalse(writeEstimateFields("ESTIMATE", false))
-        assertFalse(writeEstimateFields("REAL", true))
-        assertTrue(writeEstimateFields("REAL", false))
-        assertTrue(writeEstimateFields("EXTERNAL", false))
+    @Test fun `estimate fields written unless it is the bound primary`() {
+        assertTrue(writeEstimateFields(false))
+        assertFalse(writeEstimateFields(true))
     }
     @Test fun `real meter fields written unless it is the primary device`() {
         assertFalse(writeMeterFields(7, "REAL", 7))

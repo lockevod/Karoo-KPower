@@ -140,7 +140,7 @@ fun ConfigDataAppNavHost(modifier: Modifier = Modifier, navController: NavHostCo
         composable(route = "configDatas") {
             MainScreen(
                 configDatas,
-                onNavigateToConfigData = { configdata -> navController.navigate(route = "configdata/${configdata.id}") },
+                onNavigateToConfigData = { configdata -> navController.navigate(route = "configData/${configdata.id}") },
             )
         }
     }
