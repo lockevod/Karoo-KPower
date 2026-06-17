@@ -98,6 +98,7 @@ val lastKnownPositionKey = stringPreferencesKey("lastKnownPosition")
 
 val preferencesKey = stringPreferencesKey("configdata")
 val comparisonModeKey = booleanPreferencesKey("comparisonMode")
+val antMetersKey = stringPreferencesKey("antPowerMeters")
 
 suspend fun saveComparisonMode(context: Context, enabled: Boolean) {
     context.dataStore.edit { it[comparisonModeKey] = enabled }
@@ -106,6 +107,20 @@ suspend fun saveComparisonMode(context: Context, enabled: Boolean) {
 /** Toggle global (off por defecto): expone campos custom + escribe FIT de comparación. */
 fun Context.comparisonModeFlow(): Flow<Boolean> =
     dataStore.data.map { it[comparisonModeKey] ?: false }.distinctUntilChanged()
+
+suspend fun saveAntMeters(context: Context, meters: List<com.enderthor.kpower.ant.SavedMeter>) {
+    context.dataStore.edit { it[antMetersKey] = Json.encodeToString(meters) }
+}
+
+fun Context.antMetersFlow(): Flow<List<com.enderthor.kpower.ant.SavedMeter>> =
+    dataStore.data.map { json ->
+        try {
+            jsonWithUnknownKeys.decodeFromString<List<com.enderthor.kpower.ant.SavedMeter>>(json[antMetersKey] ?: "[]")
+        } catch (e: Throwable) {
+            Timber.e(e, "Failed to read antMeters")
+            emptyList()
+        }
+    }.distinctUntilChanged()
 
 suspend fun savePreferences(context: Context, configDatas: MutableList<ConfigData>) {
     context.dataStore.edit { t ->
