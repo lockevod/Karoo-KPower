@@ -19,6 +19,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Switch
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.material3.FabPosition
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -50,7 +53,9 @@ import kotlinx.serialization.json.Json
 
 import com.enderthor.kpower.data.ConfigData
 import com.enderthor.kpower.data.defaultConfigData
+import com.enderthor.kpower.extension.comparisonModeFlow
 import com.enderthor.kpower.extension.loadPreferencesFlow
+import com.enderthor.kpower.extension.saveComparisonMode
 import com.enderthor.kpower.extension.savePreferences
 
 import timber.log.Timber
@@ -158,6 +163,36 @@ fun MainScreen(configDatas: MutableList<ConfigData>, onNavigateToConfigData: (r:
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
                     .background(MaterialTheme.colorScheme.background)) {
+                val cmCtx = LocalContext.current
+                val cmScope = rememberCoroutineScope()
+                val comparisonMode by cmCtx.comparisonModeFlow().collectAsState(initial = false)
+
+                Card(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(5.dp),
+                    shape = RoundedCornerShape(corner = CornerSize(10.dp))
+                ) {
+                    Column(Modifier.padding(10.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Switch(
+                                checked = comparisonMode,
+                                onCheckedChange = { enabled ->
+                                    cmScope.launch { saveComparisonMode(cmCtx, enabled) }
+                                }
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text("Comparison mode")
+                        }
+                        Text(
+                            text = "Exposes 4 estimated-power data fields and writes them to the FIT " +
+                                "(est_power, est_power_3s, est_np, est_avg). For comparing against a real " +
+                                "power meter. Off by default — increases battery/CPU and FIT size.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
                 configDatas.forEach { configData ->
                     Card(Modifier
                         .fillMaxWidth()
