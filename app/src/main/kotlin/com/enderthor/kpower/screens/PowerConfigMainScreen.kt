@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.CornerSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Switch
@@ -53,6 +54,7 @@ import kotlinx.serialization.json.Json
 
 import com.enderthor.kpower.data.ConfigData
 import com.enderthor.kpower.data.defaultConfigData
+import com.enderthor.kpower.ant.AntPowerManager
 import com.enderthor.kpower.extension.comparisonModeFlow
 import com.enderthor.kpower.extension.loadPreferencesFlow
 import com.enderthor.kpower.extension.saveComparisonMode
@@ -70,6 +72,7 @@ fun ConfigDataAppNavHost(modifier: Modifier = Modifier, navController: NavHostCo
     }
 
     val ctx = LocalContext.current
+    val antManager = remember { AntPowerManager(ctx) }
 
 
 /*
@@ -143,14 +146,25 @@ fun ConfigDataAppNavHost(modifier: Modifier = Modifier, navController: NavHostCo
             }, { navController.popBackStack() })
         }
         composable(route = "configDatas") {
-            MainScreen(configDatas) { configdata -> navController.navigate(route = "configdata/${configdata.id}") }
+            MainScreen(
+                configDatas,
+                onNavigateToConfigData = { configdata -> navController.navigate(route = "configdata/${configdata.id}") },
+                onNavigateToAntScan = { navController.navigate("antScan") },
+            )
+        }
+        composable(route = "antScan") {
+            AntScanScreen(antManager)
         }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainScreen(configDatas: MutableList<ConfigData>, onNavigateToConfigData: (r: ConfigData) -> Unit) {
+fun MainScreen(
+    configDatas: MutableList<ConfigData>,
+    onNavigateToConfigData: (r: ConfigData) -> Unit,
+    onNavigateToAntScan: () -> Unit = {},
+) {
 
     Scaffold(
         topBar = { TopAppBar(title = {Text("Config")}) },
@@ -189,6 +203,26 @@ fun MainScreen(configDatas: MutableList<ConfigData>, onNavigateToConfigData: (r:
                                 "(est_power, est_power_3s, est_np, est_avg). For comparing against a real " +
                                 "power meter. Off by default — increases battery/CPU and FIT size.",
                             color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Card(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(5.dp),
+                    shape = RoundedCornerShape(corner = CornerSize(10.dp))
+                ) {
+                    Column(Modifier.padding(10.dp)) {
+                        Button(
+                            onClick = onNavigateToAntScan,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("ANT+ power meters")
+                        }
+                        Text(
+                            text = "Scan and select up to 3 ANT+ power meters to record alongside the estimate.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
