@@ -3,5 +3,30 @@
     displayName="@string/extension_name"
     icon="@drawable/ic_power_hr"
     id="kpower"
+    fitFile="true"
     scansDevices="true">
+    <DataType
+        typeId="estimated-power-instant"
+        displayName="@string/est_instant_name"
+        description="@string/est_instant_desc"
+        graphical="false"
+        icon="@drawable/ic_power_hr" />
+    <DataType
+        typeId="estimated-power-3s"
+        displayName="@string/est_3s_name"
+        description="@string/est_3s_desc"
+        graphical="false"
+        icon="@drawable/ic_power_hr" />
+    <DataType
+        typeId="estimated-power-np"
+        displayName="@string/est_np_name"
+        description="@string/est_np_desc"
+        graphical="false"
+        icon="@drawable/ic_power_hr" />
+    <DataType
+        typeId="estimated-power-avg"
+        displayName="@string/est_avg_name"
+        description="@string/est_avg_desc"
+        graphical="false"
+        icon="@drawable/ic_power_hr" />
 </ExtensionInfo>
