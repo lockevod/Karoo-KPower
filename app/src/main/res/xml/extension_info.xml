@@ -33,4 +33,11 @@
     <DataType typeId="real-3s-0" displayName="@string/real1_3s_name" description="@string/real1_3s_desc" graphical="false" icon="@drawable/ic_power_hr" />
     <DataType typeId="real-np-0" displayName="@string/real1_np_name" description="@string/real1_np_desc" graphical="false" icon="@drawable/ic_power_hr" />
     <DataType typeId="real-avg-0" displayName="@string/real1_avg_name" description="@string/real1_avg_desc" graphical="false" icon="@drawable/ic_power_hr" />
+    <DataType typeId="dyn-balance-0" displayName="@string/dyn_balance_name" description="@string/dyn_balance_desc" graphical="false" icon="@drawable/ic_power_hr" />
+    <DataType typeId="dyn-te-0" displayName="@string/dyn_te_name" description="@string/dyn_te_desc" graphical="false" icon="@drawable/ic_power_hr" />
+    <DataType typeId="dyn-ps-0" displayName="@string/dyn_ps_name" description="@string/dyn_ps_desc" graphical="false" icon="@drawable/ic_power_hr" />
+    <DataType typeId="dyn-pp-left-0" displayName="@string/dyn_pp_left_name" description="@string/dyn_pp_left_desc" graphical="false" icon="@drawable/ic_power_hr" />
+    <DataType typeId="dyn-pp-right-0" displayName="@string/dyn_pp_right_name" description="@string/dyn_pp_right_desc" graphical="false" icon="@drawable/ic_power_hr" />
+    <DataType typeId="dyn-peakpp-left-0" displayName="@string/dyn_peakpp_left_name" description="@string/dyn_peakpp_left_desc" graphical="false" icon="@drawable/ic_power_hr" />
+    <DataType typeId="dyn-peakpp-right-0" displayName="@string/dyn_peakpp_right_name" description="@string/dyn_peakpp_right_desc" graphical="false" icon="@drawable/ic_power_hr" />
 </ExtensionInfo>

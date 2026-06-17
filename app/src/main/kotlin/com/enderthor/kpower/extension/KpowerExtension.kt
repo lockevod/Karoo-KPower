@@ -30,6 +30,7 @@ import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.coroutines.coroutineContext
@@ -92,8 +93,39 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
             RealPowerDataType(extension, realFieldTypeId(0, "3s"),    0, { applicationContext.comparisonModeFlow() }, { applicationContext.antMetersFlow() }) { dn -> antManager.power3sFlow(dn) },
             RealPowerDataType(extension, realFieldTypeId(0, "np"),    0, { applicationContext.comparisonModeFlow() }, { applicationContext.antMetersFlow() }) { dn -> antManager.npFlow(dn) },
             RealPowerDataType(extension, realFieldTypeId(0, "avg"),   0, { applicationContext.comparisonModeFlow() }, { applicationContext.antMetersFlow() }) { dn -> antManager.avgFlow(dn) },
+            // Live cycling-dynamics fields (slot 0), gated on the record-dynamics toggle. Each
+            // metricFlowFor maps the meter's dynamics StateFlow to a Double (null -> NaN -> `---`).
+            // flowOf(NaN) covers the case where the meter for `dn` is not yet connected.
+            DynamicsDataType(extension, dynFieldTypeId("balance"), 0, { applicationContext.recordDynamicsFlow() }, { applicationContext.antMetersFlow() }) { dn -> dynFlow(dn) { it.balanceRightPct } },
+            DynamicsDataType(extension, dynFieldTypeId("te"), 0, { applicationContext.recordDynamicsFlow() }, { applicationContext.antMetersFlow() }) { dn -> dynMappedFlow(dn, { it.tePs }) { it?.teLeftPct } },
+            DynamicsDataType(extension, dynFieldTypeId("ps"), 0, { applicationContext.recordDynamicsFlow() }, { applicationContext.antMetersFlow() }) { dn -> dynMappedFlow(dn, { it.tePs }) { it?.psLeftPct } },
+            DynamicsDataType(extension, dynFieldTypeId("pp-left"), 0, { applicationContext.recordDynamicsFlow() }, { applicationContext.antMetersFlow() }) { dn -> dynMappedFlow(dn, { it.forceAngleLeft }) { it?.startAngleDeg } },
+            DynamicsDataType(extension, dynFieldTypeId("pp-right"), 0, { applicationContext.recordDynamicsFlow() }, { applicationContext.antMetersFlow() }) { dn -> dynMappedFlow(dn, { it.forceAngleRight }) { it?.startAngleDeg } },
+            DynamicsDataType(extension, dynFieldTypeId("peakpp-left"), 0, { applicationContext.recordDynamicsFlow() }, { applicationContext.antMetersFlow() }) { dn -> dynMappedFlow(dn, { it.forceAngleLeft }) { it?.startPeakDeg } },
+            DynamicsDataType(extension, dynFieldTypeId("peakpp-right"), 0, { applicationContext.recordDynamicsFlow() }, { applicationContext.antMetersFlow() }) { dn -> dynMappedFlow(dn, { it.forceAngleRight }) { it?.startPeakDeg } },
         )
     }
+
+    /**
+     * Build a reactive Double flow for a meter dynamics StateFlow<T?>, mapping null -> NaN. The
+     * meter for `dn` is resolved now (at flatMapLatest time in DynamicsDataType, i.e. after
+     * connectMeters); if not yet connected we emit a single NaN so the field shows `---`.
+     */
+    private fun <T> dynMappedFlow(
+        dn: Int,
+        flowOf: (com.enderthor.kpower.ant.RawAntPowerMeter) -> kotlinx.coroutines.flow.StateFlow<T?>,
+        selector: (T?) -> Double?,
+    ): kotlinx.coroutines.flow.Flow<Double> =
+        antManager.meter(dn)?.let { m -> flowOf(m).map { selector(it) ?: Double.NaN } }
+            ?: kotlinx.coroutines.flow.flowOf(Double.NaN)
+
+    /** Variant for plain Double StateFlows (e.g. balanceRightPct) already carrying NaN sentinels. */
+    private fun dynFlow(
+        dn: Int,
+        flowOf: (com.enderthor.kpower.ant.RawAntPowerMeter) -> kotlinx.coroutines.flow.StateFlow<Double>,
+    ): kotlinx.coroutines.flow.Flow<Double> =
+        antManager.meter(dn)?.let { m -> flowOf(m) }
+            ?: kotlinx.coroutines.flow.flowOf(Double.NaN)
 
     // Memoize per (slot,kind): names/units are fixed, so a new DeveloperField every FIT
     // tick was a needless allocation. Single-threaded (FIT collect loop) so a plain map is fine.
