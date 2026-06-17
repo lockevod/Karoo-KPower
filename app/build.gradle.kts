@@ -44,6 +44,8 @@ android {
 
 dependencies {
     implementation(libs.hammerhead.karoo.ext)
+    implementation(files("libs/android_antlib_4-16-0.aar"))
+    implementation(files("libs/antpluginlib_3-9-0.aar"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.bundles.androidx.lifeycle)
     implementation(libs.androidx.activity.compose)
