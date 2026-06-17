@@ -39,7 +39,10 @@ class EstimatedPowerDataType(
 
     @OptIn(FlowPreview::class)
     override fun startStream(emitter: Emitter<StreamState>) {
-        val job: Job = CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
+        // Cancelamos el SCOPE (no solo el job hijo) al desmontar la vista, para no dejar
+        // el SupervisorJob padre vivo acumulándose en re-suscripciones a lo largo de la marcha.
+        val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        scope.launch {
             combine(
                 comparisonModeFlow(),
                 engine.hasSample,
@@ -59,6 +62,6 @@ class EstimatedPowerDataType(
                     }
                 }
         }
-        emitter.setCancellable { job.cancel() }
+        emitter.setCancellable { scope.cancel() }
     }
 }

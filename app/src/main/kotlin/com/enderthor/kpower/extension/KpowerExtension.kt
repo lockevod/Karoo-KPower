@@ -58,6 +58,9 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
         PowerEstimationEngine(karooSystem, applicationContext, serviceScope)
     }
 
+    // Token estable del consumidor "modo comparación" para el ref-count del engine.
+    private val comparisonToken = Any()
+
     override val types: List<DataTypeImpl> by lazy {
         listOf(
             EstimatedPowerDataType(extension, TYPE_EST_INSTANT, engine, { applicationContext.comparisonModeFlow() }) { it.instantW },
@@ -109,9 +112,9 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                     engine.onRideState(state)
                     val shouldRun = mode && state is RideState.Recording
                     if (shouldRun && !acquiredForComparison) {
-                        engine.acquire(); acquiredForComparison = true
+                        engine.acquire(comparisonToken); acquiredForComparison = true
                     } else if (!shouldRun && acquiredForComparison) {
-                        engine.release(); acquiredForComparison = false
+                        engine.release(comparisonToken); acquiredForComparison = false
                     }
                 }
         }

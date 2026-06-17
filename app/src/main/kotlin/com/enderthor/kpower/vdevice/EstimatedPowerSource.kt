@@ -23,7 +23,8 @@ class EstimatedPowerSource(
         activeScope?.cancel()
         val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         activeScope = scope
-        engine.acquire()
+        val token = this
+        engine.acquire(token)
 
         scope.launch {
             try {
@@ -58,7 +59,7 @@ class EstimatedPowerSource(
 
         emitter.setCancellable {
             if (BuildConfig.DEBUG) Timber.w("Stopping connect coroutine")
-            engine.release()
+            engine.release(token)
             scope.cancel()
             if (activeScope === scope) activeScope = null
         }

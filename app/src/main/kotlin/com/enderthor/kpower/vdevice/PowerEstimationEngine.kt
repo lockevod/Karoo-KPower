@@ -75,8 +75,9 @@ class PowerEstimationEngine(
     private val cadenceGate = CadenceGate()
     private val surfaceReader by lazy { SurfaceConditionReader(context) }
 
-    @Volatile private var liveSurface: KarooSurface? = null
-    @Volatile private var liveSurfaceAtMs: Long = 0L
+    // Superficie + su timestamp en UN solo volatile: el lector empareja siempre valor y
+    // tiempo del mismo instante (dos volatiles independientes podían leerse cruzados).
+    @Volatile private var liveSurfaceSample: Pair<KarooSurface, Long>? = null
     @Volatile private var latestInstantW: Double = Double.NaN
 
     private val ma3s = MovingAverage(windowSamples = 3)
@@ -85,20 +86,21 @@ class PowerEstimationEngine(
     @Volatile private var recording = false
     @Volatile private var pendingReset = false
 
-    private var refCount = 0
+    // Consumidores por TOKEN (no un contador): el dispositivo virtual usa su instancia
+    // como token y el modo comparación un token fijo. Un Set hace acquire/release
+    // idempotentes — un doble release (p.ej. el host cancela un emitter dos veces) no
+    // puede desbalancear el contador y parar el motor mientras otro consumidor lo usa.
+    private val consumers = HashSet<Any>()
     private var engineJob: Job? = null
     private var pipelineJob: Job? = null
     private var metricJob: Job? = null
 
-    @Synchronized fun acquire() {
-        if (++refCount == 1) startPipeline()
+    @Synchronized fun acquire(token: Any) {
+        if (consumers.add(token) && consumers.size == 1) startPipeline()
     }
 
-    @Synchronized fun release() {
-        if (--refCount <= 0) {
-            refCount = 0
-            stopPipeline()
-        }
+    @Synchronized fun release(token: Any) {
+        if (consumers.remove(token) && consumers.isEmpty()) stopPipeline()
     }
 
     @Synchronized fun onRideState(state: RideState) {
@@ -159,7 +161,7 @@ class PowerEstimationEngine(
                         .collect { loc ->
                             val cfg = powerConfigFlow.value.firstOrNull()
                             if (cfg?.useRouteSurface != true) {
-                                liveSurface = null
+                                liveSurfaceSample = null
                                 return@collect
                             }
                             val now = System.currentTimeMillis()
@@ -167,8 +169,7 @@ class PowerEstimationEngine(
                                 else GpsCoordinates(lastLat, lastLon)
                                     .distanceTo(GpsCoordinates(loc.lat, loc.lng)) * 1000.0
                             if (movedM >= SURFACE_MIN_MOVE_M && now - lastMs >= SURFACE_MIN_INTERVAL_MS) {
-                                liveSurface = surfaceReader.classifyAt(loc.lat, loc.lng)
-                                liveSurfaceAtMs = now
+                                liveSurfaceSample = surfaceReader.classifyAt(loc.lat, loc.lng)?.let { it to now }
                                 lastLat = loc.lat; lastLon = loc.lng; lastMs = now
                             }
                         }
@@ -316,5 +317,5 @@ class PowerEstimationEngine(
     }
 
     private fun freshLiveSurface(): KarooSurface? =
-        liveSurface?.takeIf { System.currentTimeMillis() - liveSurfaceAtMs < SURFACE_MAX_AGE_MS }
+        liveSurfaceSample?.takeIf { System.currentTimeMillis() - it.second < SURFACE_MAX_AGE_MS }?.first
 }
