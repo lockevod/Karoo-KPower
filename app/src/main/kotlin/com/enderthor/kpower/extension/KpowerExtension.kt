@@ -81,9 +81,6 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
         com.enderthor.kpower.ant.AntPowerManager(applicationContext)
     }
 
-    // THROWAWAY debug-only feasibility spike (raw ANT channel + cycling-dynamics pages). Remove after.
-    private val antProbe by lazy { com.enderthor.kpower.ant.AntChannelProbe(applicationContext) }
-
     // Token estable del consumidor "modo comparación" para el ref-count del engine.
     private val comparisonToken = Any()
 
@@ -207,12 +204,6 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                     if (shouldConnect) antManager.connectMeters(meters.map { it.deviceNumber })
                     else antManager.disconnectAll()
                 }
-        }
-
-        // THROWAWAY debug-only spike: start the raw-ANT-channel probe after a delay so the
-        // power meter is already broadcasting. Filter logcat with tag ANTPROBE.
-        if (BuildConfig.DEBUG) {
-            serviceScope.launch { kotlinx.coroutines.delay(8000); antProbe.start() }
         }
     }
 
@@ -466,7 +457,6 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
 
     override fun onDestroy() {
         runCatching { antManager.disconnectAll() }
-        if (BuildConfig.DEBUG) runCatching { antProbe.stop() }
         runCatching { serviceScope.cancel() }
         karooSystem.disconnect()
         super.onDestroy()

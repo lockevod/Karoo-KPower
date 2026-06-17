@@ -8,12 +8,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlin.math.PI
 
 /**
- * Drop-in replacement for [AntPowerMeter] that reads ONE ANT+ bike power meter by device number
- * over a RAW ANT channel ([RawAntChannel]) instead of antpluginlib. This lets us also see the
+ * Reads ONE ANT+ bike power meter by device number over a RAW ANT channel ([RawAntChannel])
+ * instead of antpluginlib. This lets us also see the
  * Cycling Dynamics pages (0x13 / 0xE0 / 0xE1 / 0xE2 / 0x14) the plugin library does not expose.
  *
- * The power/cadence/balance/torque surface is identical to [AntPowerMeter] (NaN until first
- * sample), so [AntPowerManager] can swap this class in with no other change. Per the ANT+ Bicycle
+ * The power/cadence/balance/torque surface follows the StateFlow contract (NaN until first
+ * sample), so [AntPowerManager] consumes it with no other change. Per the ANT+ Bicycle
  * Power profile the meter does not broadcast torque on the standard power-only page, so torque is
  * recomputed from power & cadence: τ = P / (2π·rpm/60).
  */
