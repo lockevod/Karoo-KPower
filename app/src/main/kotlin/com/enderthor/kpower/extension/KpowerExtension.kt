@@ -54,8 +54,10 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
     private val supervisor = SupervisorJob()
     private val serviceScope = CoroutineScope(Dispatchers.IO + supervisor)
 
+    private val activeProfileIdFlow = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+
     private val engine: PowerEstimationEngine by lazy {
-        PowerEstimationEngine(karooSystem, applicationContext, serviceScope)
+        PowerEstimationEngine(karooSystem, applicationContext, serviceScope, activeProfileIdFlow)
     }
 
     private val antManager: com.enderthor.kpower.ant.AntPowerManager by lazy {
@@ -118,6 +120,22 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
 
         serviceScope.launch {
             weatherRefreshLoop()
+        }
+
+        // Mirror the active Karoo ride-profile id (drives bike resolution in the engine)
+        // and learn profiles (id+name) so the Settings UI can offer them for mapping.
+        serviceScope.launch {
+            karooSystem.streamRideProfile().collect { profile ->
+                activeProfileIdFlow.value = profile.id
+                runCatching {
+                    val known = applicationContext.knownProfilesFlow().first()
+                    if (known.none { it.id == profile.id && it.name == profile.name }) {
+                        val upserted = known.filterNot { it.id == profile.id } +
+                            com.enderthor.kpower.data.KnownProfile(profile.id, profile.name)
+                        saveKnownProfiles(applicationContext, upserted)
+                    }
+                }
+            }
         }
 
         // Mantiene el engine vivo (acquire) mientras (toggle ON && Recording) aunque la
