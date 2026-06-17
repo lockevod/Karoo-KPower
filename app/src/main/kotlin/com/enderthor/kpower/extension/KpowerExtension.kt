@@ -67,16 +67,21 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
     // Token estable del consumidor "modo comparación" para el ref-count del engine.
     private val comparisonToken = Any()
 
+    // Cached ride-recording flag, updated by the RideState observer in onCreate. Gates the
+    // weather loop so it skips the expensive GPS/stats/HTTP work when not recording.
+    @Volatile private var isRecording = false
+
+    // Cached saved ANT meters (slot->device), updated by a collector in onCreate. Lets
+    // slotPowerFlow resolve the slot's device number without a blocking DataStore read.
+    @Volatile private var lastSavedMeters: List<com.enderthor.kpower.ant.SavedMeter> = emptyList()
+
     // The display resolves the slot->device mapping once per stream subscribe, so a slot
     // REassignment mid-ride only takes effect on the next re-subscribe. But it no longer
     // latches blank: the returned flow is stable (NaN until the meter connects, then live),
     // so the field lights up when the meter connects. The FIT writer remains the per-tick
     // source of truth.
     private fun slotPowerFlow(slot: Int): kotlinx.coroutines.flow.StateFlow<Double>? {
-        val saved = runCatching {
-            kotlinx.coroutines.runBlocking { applicationContext.antMetersFlow().first() }
-        }.getOrNull()
-        val dn = saved?.firstOrNull { it.slot == slot }?.deviceNumber ?: return null
+        val dn = lastSavedMeters.firstOrNull { it.slot == slot }?.deviceNumber ?: return null
         return antManager.powerFlow(dn)   // stable: NaN until the meter connects, then live
     }
 
@@ -91,10 +96,15 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
         )
     }
 
+    // Memoize per (slot,kind): names/units are fixed, so a new DeveloperField every FIT
+    // tick was a needless allocation. Single-threaded (FIT collect loop) so a plain map is fine.
+    private val meterFieldCache = HashMap<Pair<Int, Int>, DeveloperField>()
     private fun meterField(slot: Int, kind: Int, name: String, units: String) =
-        io.hammerhead.karooext.models.DeveloperField(
-            (com.enderthor.kpower.ant.fitFieldBase(slot) + kind).toShort(), 136, name, units,
-        )
+        meterFieldCache.getOrPut(slot to kind) {
+            DeveloperField(
+                (com.enderthor.kpower.ant.fitFieldBase(slot) + kind).toShort(), 136, name, units,
+            )
+        }
 
     private val fieldEstPower = DeveloperField(0, 136, "est_power", "W")
     private val fieldEstPower3s = DeveloperField(1, 136, "est_power_3s", "W")
@@ -119,6 +129,12 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
 
         serviceScope.launch {
             weatherRefreshLoop()
+        }
+
+        // Keep the saved slot->device mapping cached so slotPowerFlow() can resolve a slot's
+        // device number without a blocking DataStore read at subscribe time.
+        serviceScope.launch {
+            applicationContext.antMetersFlow().collect { lastSavedMeters = it }
         }
 
         // Mirror the active Karoo ride-profile id (drives bike resolution in the engine)
@@ -155,6 +171,7 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                 .distinctUntilChanged()
                 .collect { (state, mode, meters) ->
                     engine.onRideState(state)
+                    isRecording = state is RideState.Recording
                     val shouldRun = mode && state is RideState.Recording
                     if (shouldRun && !acquiredForComparison) {
                         engine.acquire(comparisonToken); acquiredForComparison = true
@@ -182,6 +199,12 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
     private suspend fun weatherRefreshLoop() {
         while (coroutineContext.isActive) {
             try {
+                // Weather only feeds the estimator, which only runs while recording. Skip the
+                // expensive DataStore/GPS/HTTP work otherwise; just idle a tick.
+                if (!isRecording) {
+                    delay(WEATHER_CHECK_INTERVAL_MS)
+                    continue
+                }
                 val preferences = loadPreferencesFlow().first()
                 if (preferences.isEmpty()) {
                     delay(WEATHER_CHECK_INTERVAL_MS)

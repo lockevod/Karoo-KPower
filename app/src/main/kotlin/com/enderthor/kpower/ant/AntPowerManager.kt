@@ -88,7 +88,6 @@ class AntPowerManager(private val context: Context) {
                         while (isActive) {
                             kotlinx.coroutines.delay(1_000)
                             m.expireIfStale(System.currentTimeMillis())
-                            sink.value = m.power.value
                         }
                     }
                 }

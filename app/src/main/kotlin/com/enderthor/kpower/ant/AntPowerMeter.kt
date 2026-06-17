@@ -37,6 +37,7 @@ class AntPowerMeter(
     @Volatile private var attempts = 0
 
     fun connect() {
+        runCatching { releaseHandle?.close() }
         releaseHandle = AntPlusBikePowerPcc.requestAccess(
             context,
             deviceNumber,

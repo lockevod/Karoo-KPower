@@ -171,7 +171,7 @@ class PowerEstimationEngine(
                     karooSystem.streamLocation()
                         .filter { it.orientation != null }
                         .collect { loc ->
-                            val cfg = powerConfigFlow.value.firstOrNull()
+                            val cfg = com.enderthor.kpower.data.resolveActiveConfig(powerConfigFlow.value, activeProfileIdFlow.value)
                             if (cfg?.useRouteSurface != true) {
                                 liveSurfaceSample = null
                                 return@collect
