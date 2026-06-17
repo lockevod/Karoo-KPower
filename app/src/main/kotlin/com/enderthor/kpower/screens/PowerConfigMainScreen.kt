@@ -50,10 +50,9 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.Json
 
 import com.enderthor.kpower.data.ConfigData
-import com.enderthor.kpower.data.defaultConfigData
+import com.enderthor.kpower.data.previewConfigData
 import com.enderthor.kpower.extension.loadPreferencesFlow
 import com.enderthor.kpower.extension.savePreferences
 
@@ -126,7 +125,12 @@ fun ConfigDataAppNavHost(modifier: Modifier = Modifier, navController: NavHostCo
         }
         composable(route = "create") {
 
-            val newConfigData = Json.decodeFromString<ConfigData>(defaultConfigData)
+            // Plantilla de bici nueva: copia del preview con un id único (no decodificar
+            // defaultConfigData, que es un ARRAY JSON y reventaba aquí). Primera bici = activa.
+            val newConfigData = previewConfigData.first().copy(
+                id = (configDatas.maxOfOrNull { it.id } ?: 0) + 1,
+                isActive = configDatas.isEmpty(),
+            )
             val ctx = LocalContext.current
 
             DetailScreen(true, newConfigData, { updatedConfigData ->

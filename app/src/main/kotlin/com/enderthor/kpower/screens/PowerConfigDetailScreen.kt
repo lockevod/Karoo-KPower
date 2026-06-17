@@ -7,6 +7,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -393,6 +394,23 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                 Icon(Icons.Default.Close, contentDescription = "Cancel Editing")
                 Spacer(modifier = Modifier.width(5.dp))
                 Text("Cancel")
+            }
+
+            // Borrar bici: solo al editar una existente. onSubmit(null) lo interpreta la ruta
+            // configData/{id} como "elimina esta config" (no aparece al crear una nueva).
+            if (!isCreating) {
+                FilledTonalButton(modifier = Modifier
+                    .fillMaxWidth()
+                    .height(50.dp),
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    ),
+                    onClick = { onSubmit(null) }) {
+                    Icon(Icons.Default.Delete, contentDescription = "Delete bike")
+                    Spacer(modifier = Modifier.width(5.dp))
+                    Text("Delete bike")
+                }
             }
         }
     }
