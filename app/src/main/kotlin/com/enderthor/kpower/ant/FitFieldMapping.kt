@@ -10,25 +10,28 @@ fun cadenceFieldNum(slot: Int): Int = fitFieldBase(slot) + 1
 fun balanceFieldNum(slot: Int): Int = fitFieldBase(slot) + 2
 fun torqueFieldNum(slot: Int): Int = fitFieldBase(slot) + 3
 
-// Cycling-dynamics developer fields (single meter). Numbers 8.. are PUBLIC API once shipped.
-const val DYN_FIELD_BASE = 8
+// Cycling-dynamics developer fields. Base = 32, deliberately clear of the real-meter slot range
+// (slot N = 4 + N*4): 32 reserves fields 4..31 for up to 7 future meter slots, so raising
+// MAX_METERS can never collide with dynamics. NOT yet shipped, hence free to choose now; once
+// shipped these numbers are PUBLIC API — never renumber.
+const val DYN_FIELD_BASE = 32
 object DynField {
-    const val TE_LEFT = DYN_FIELD_BASE          // 8  %
-    const val TE_RIGHT = DYN_FIELD_BASE + 1     // 9  %
-    const val PS_LEFT = DYN_FIELD_BASE + 2      // 10 %
-    const val PS_RIGHT = DYN_FIELD_BASE + 3     // 11 %
-    const val PP_START_L = DYN_FIELD_BASE + 4   // 12 deg
-    const val PP_END_L = DYN_FIELD_BASE + 5     // 13 deg
-    const val PP_START_R = DYN_FIELD_BASE + 6   // 14 deg
-    const val PP_END_R = DYN_FIELD_BASE + 7     // 15 deg
-    const val PEAK_START_L = DYN_FIELD_BASE + 8 // 16 deg
-    const val PEAK_END_L = DYN_FIELD_BASE + 9   // 17 deg
-    const val PEAK_START_R = DYN_FIELD_BASE + 10// 18 deg
-    const val PEAK_END_R = DYN_FIELD_BASE + 11  // 19 deg
-    const val PCO_LEFT = DYN_FIELD_BASE + 12    // 20 mm
-    const val PCO_RIGHT = DYN_FIELD_BASE + 13   // 21 mm
-    const val BARYCENTER = DYN_FIELD_BASE + 14  // 22 deg
-    const val RIDER_POSITION = DYN_FIELD_BASE + 15 // 23 enum 0..3
-    const val TORQUE_LEFT = DYN_FIELD_BASE + 16 // 24 Nm
-    const val TORQUE_RIGHT = DYN_FIELD_BASE + 17// 25 Nm
+    const val TE_LEFT = DYN_FIELD_BASE          // 32 %
+    const val TE_RIGHT = DYN_FIELD_BASE + 1     // 33 %
+    const val PS_LEFT = DYN_FIELD_BASE + 2      // 34 %
+    const val PS_RIGHT = DYN_FIELD_BASE + 3     // 35 %
+    const val PP_START_L = DYN_FIELD_BASE + 4   // 36 deg
+    const val PP_END_L = DYN_FIELD_BASE + 5     // 37 deg
+    const val PP_START_R = DYN_FIELD_BASE + 6   // 38 deg
+    const val PP_END_R = DYN_FIELD_BASE + 7     // 39 deg
+    const val PEAK_START_L = DYN_FIELD_BASE + 8 // 40 deg
+    const val PEAK_END_L = DYN_FIELD_BASE + 9   // 41 deg
+    const val PEAK_START_R = DYN_FIELD_BASE + 10// 42 deg
+    const val PEAK_END_R = DYN_FIELD_BASE + 11  // 43 deg
+    const val PCO_LEFT = DYN_FIELD_BASE + 12    // 44 mm
+    const val PCO_RIGHT = DYN_FIELD_BASE + 13   // 45 mm
+    const val BARYCENTER = DYN_FIELD_BASE + 14  // 46 deg
+    const val RIDER_POSITION = DYN_FIELD_BASE + 15 // 47 enum 0..3
+    const val TORQUE_LEFT = DYN_FIELD_BASE + 16 // 48 Nm
+    const val TORQUE_RIGHT = DYN_FIELD_BASE + 17// 49 Nm
 }
