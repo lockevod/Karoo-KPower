@@ -14,6 +14,7 @@ Compatible with Karoo 2 and Karoo 3 devices running Karoo OS version 1.524.2003 
 - **FTP from your Karoo profile.** New profiles can take your FTP automatically from the Karoo user profile (the FTP field becomes read-only while this is on).
 - **Headwind integration.** If the Headwind extension is installed, KPower reuses its temperature, pressure and wind instead of doing its own weather lookups (with automatic fallback, and a switch to opt out).
 - **Literature-calibrated coefficients** (Bassett frontal-area model, Crr from tyre/surface, drivetrain losses).
+- **Compare against a real power meter (optional, off by default).** A new *Comparison mode* exposes the estimate as four extra data fields (instant, 3 s, normalized, average) and writes them into the ride's FIT file as developer fields, so you can overlay KPower's estimate against a real power meter recorded on the same ride. See *Comparing with a real power meter* below.
 - **Existing profiles keep working unchanged** — see *Upgrading* below.
 
 
@@ -121,6 +122,22 @@ Start scan and  you'll see a new category (looks like a puzzle piece), select th
 3- Kpower will show you the power estimation in the power fields. You can use the power fields in the data screens, in the workout builder, etc. It's like a real power meter.
 
 
+### Comparing with a real power meter (optional)
+
+If you want to check how close KPower's estimate is to a **real** power meter, turn on **Comparison mode** — a single switch on the configuration screen, **off by default**. While it is on it does two things:
+
+- **Adds four estimated-power data fields** you can place on any data screen: **Est. Power** (instantaneous), **Est. Power 3s**, **Est. NP** (normalized power) and **Est. Avg Power**. With Comparison mode off they show `---`.
+- **Writes the estimate into the ride's FIT file** as developer fields: `est_power` and `est_power_3s` every second (next to the native power/HR/cadence samples), plus `est_np` and `est_avg` in the ride summary.
+
+How to compare:
+
+1. Turn on **Comparison mode**.
+2. Pair your **real** power meter as the Karoo's active power sensor (do **not** use KPower as the power source for this — KPower keeps estimating in the background regardless).
+3. Add the four *Est.* fields to a data screen if you want to watch them live, and ride.
+4. Afterwards open the FIT in a tool that shows developer fields — **[intervals.icu](https://intervals.icu)** is the easiest — and overlay `est_power` against your real power. (Strava ignores developer fields, so use intervals.icu for this.)
+
+**Why it's off by default:** it adds some CPU/battery work and extra columns to every FIT while enabled. Leave it off for normal rides; only turn it on when you actually want to compare.
+
 ## Upgrading from a previous version
 
 Your existing profiles keep working **without changes**:
@@ -145,6 +162,7 @@ New in this release:
 - **3-second power smoothing**: the displayed power is time-smoothed like real power meters' "3s power", and the slope input is filtered too — GPS/barometer noise no longer produces watt spikes. Power still drops to 0 instantly when you stop pedalling.
 - **Cadence gate with hysteresis**: coasting detection switches off below 20 rpm and back on above 25 rpm, so power no longer flickers between 0 and full value when cadence hovers around the cutoff.
 - **Tailwind fix**: a tailwind stronger than your speed now correctly *reduces* the aero term instead of adding drag.
+- **Comparison mode** (optional, off by default): exposes the estimate as four extra data fields (Est. Power / Est. Power 3s / Est. NP / Est. Avg Power) and writes `est_power`, `est_power_3s` (per-second) plus `est_np`, `est_avg` (session summary) into the FIT, so you can compare the estimate side-by-side against a real power meter in intervals.icu.
 - Literature-calibrated coefficients (frontal area, Crr, drivetrain losses).
 
 Previous features:
