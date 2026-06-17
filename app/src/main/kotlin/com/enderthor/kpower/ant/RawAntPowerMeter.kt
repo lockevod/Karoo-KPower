@@ -1,0 +1,141 @@
+package com.enderthor.kpower.ant
+
+import android.content.Context
+import com.enderthor.kpower.vdevice.PowerSourceMetrics
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlin.math.PI
+
+/**
+ * Drop-in replacement for [AntPowerMeter] that reads ONE ANT+ bike power meter by device number
+ * over a RAW ANT channel ([RawAntChannel]) instead of antpluginlib. This lets us also see the
+ * Cycling Dynamics pages (0x13 / 0xE0 / 0xE1 / 0xE2 / 0x14) the plugin library does not expose.
+ *
+ * The power/cadence/balance/torque surface is identical to [AntPowerMeter] (NaN until first
+ * sample), so [AntPowerManager] can swap this class in with no other change. Per the ANT+ Bicycle
+ * Power profile the meter does not broadcast torque on the standard power-only page, so torque is
+ * recomputed from power & cadence: τ = P / (2π·rpm/60).
+ */
+class RawAntPowerMeter(
+    private val context: Context,
+    val deviceNumber: Int,
+) {
+    private val _power = MutableStateFlow(Double.NaN)
+    private val _cadence = MutableStateFlow(Double.NaN)
+    private val _balanceRightPct = MutableStateFlow(Double.NaN)
+    private val _torque = MutableStateFlow(Double.NaN)
+    val power: StateFlow<Double> = _power.asStateFlow()
+    val cadence: StateFlow<Double> = _cadence.asStateFlow()
+    val balanceRightPct: StateFlow<Double> = _balanceRightPct.asStateFlow()
+    val torque: StateFlow<Double> = _torque.asStateFlow()
+
+    private val _forceAngleLeft = MutableStateFlow<ForceAngleData?>(null)
+    private val _forceAngleRight = MutableStateFlow<ForceAngleData?>(null)
+    private val _pedalPosition = MutableStateFlow<PedalPositionData?>(null)
+    private val _tePs = MutableStateFlow<TePsData?>(null)
+    private val _barycenter = MutableStateFlow<TorqueBarycenterData?>(null)
+
+    /** Latest parsed Cycling Dynamics models; null until first seen / after a dropout reset. */
+    val forceAngleLeft: StateFlow<ForceAngleData?> = _forceAngleLeft.asStateFlow()
+    val forceAngleRight: StateFlow<ForceAngleData?> = _forceAngleRight.asStateFlow()
+    val pedalPosition: StateFlow<PedalPositionData?> = _pedalPosition.asStateFlow()
+    val tePs: StateFlow<TePsData?> = _tePs.asStateFlow()
+    val barycenter: StateFlow<TorqueBarycenterData?> = _barycenter.asStateFlow()
+
+    /**
+     * Per-source 3s / NP / average metrics, symmetric with the estimate engine. NOT fed from
+     * inside this class: the manager's single-threaded per-meter 1Hz loop drives tick()/reset(),
+     * keeping the metric objects on one thread. Ride-boundary reset is requested via
+     * requestMetricsReset()/consumePendingReset(); disconnect() does NOT touch metrics.
+     */
+    val metrics = PowerSourceMetrics()
+
+    /** Ride-boundary reset request, set off-thread (onRideState), consumed on the 1Hz loop. */
+    @Volatile private var pendingMetricsReset = false
+
+    /** Request a metrics reset on the next loop tick (Idle->Recording, or new meter). */
+    fun requestMetricsReset() { pendingMetricsReset = true }
+
+    /** Read-and-clear the pending-reset flag. Call from the per-meter loop thread only. */
+    fun consumePendingReset(): Boolean {
+        if (!pendingMetricsReset) return false
+        pendingMetricsReset = false
+        return true
+    }
+
+    @Volatile private var channel: RawAntChannel? = null
+
+    /** Timestamp (ms) of the most recent ANT event; 0 until the first sample arrives. */
+    @Volatile private var lastEventMs: Long = 0L
+
+    fun connect() {
+        runCatching { channel?.stop() }
+        channel = RawAntChannel(context, deviceNumber, ::onPayload).also { it.start() }
+    }
+
+    /** Dispatch a raw broadcast payload by page number (b0). Unknown pages are ignored. */
+    private fun onPayload(p: ByteArray) {
+        if (p.isEmpty()) return
+        when (p[0].toInt() and 0xFF) {
+            CyclingDynamicsParser.PAGE_POWER_ONLY -> {
+                val d = CyclingDynamicsParser.parsePowerOnly(p) ?: return
+                _power.value = d.powerW ?: Double.NaN
+                _cadence.value = d.cadenceRpm ?: Double.NaN
+                _balanceRightPct.value = d.balanceRightPct ?: Double.NaN
+                _torque.value = computeTorque(d.powerW, d.cadenceRpm)
+                lastEventMs = System.currentTimeMillis()
+            }
+            CyclingDynamicsParser.PAGE_TE_PS -> {
+                CyclingDynamicsParser.parseTePs(p)?.let { _tePs.value = it }
+                lastEventMs = System.currentTimeMillis()
+            }
+            CyclingDynamicsParser.PAGE_RIGHT_FORCE_ANGLE -> {
+                CyclingDynamicsParser.parseForceAngle(p, isLeft = false)
+                    ?.let { _forceAngleRight.value = it }
+                lastEventMs = System.currentTimeMillis()
+            }
+            CyclingDynamicsParser.PAGE_LEFT_FORCE_ANGLE -> {
+                CyclingDynamicsParser.parseForceAngle(p, isLeft = true)
+                    ?.let { _forceAngleLeft.value = it }
+                lastEventMs = System.currentTimeMillis()
+            }
+            CyclingDynamicsParser.PAGE_PEDAL_POSITION -> {
+                val d = CyclingDynamicsParser.parsePedalPosition(p) ?: return
+                _pedalPosition.value = d
+                // Cadence fallback: if the power-only page had no cadence, use this page's.
+                if (_cadence.value.isNaN() && d.cadenceRpm != null) {
+                    _cadence.value = d.cadenceRpm
+                }
+                lastEventMs = System.currentTimeMillis()
+            }
+            CyclingDynamicsParser.PAGE_TORQUE_BARYCENTER -> {
+                CyclingDynamicsParser.parseTorqueBarycenter(p)?.let { _barycenter.value = it }
+                lastEventMs = System.currentTimeMillis()
+            }
+        }
+    }
+
+    /** τ = P / (2π·rpm/60). NaN if power null or cadence null/≤0. */
+    private fun computeTorque(powerW: Double?, cadenceRpm: Double?): Double {
+        if (powerW == null || cadenceRpm == null || cadenceRpm <= 0.0) return Double.NaN
+        return powerW / (2.0 * PI * cadenceRpm / 60.0)
+    }
+
+    /** Reset values to NaN if no ANT event arrived within [staleMs] (silent dropout w/o DEAD). */
+    fun expireIfStale(nowMs: Long, staleMs: Long = 5_000L) {
+        if (lastEventMs != 0L && nowMs - lastEventMs > staleMs) reset()
+    }
+
+    private fun reset() {
+        _power.value = Double.NaN; _cadence.value = Double.NaN
+        _balanceRightPct.value = Double.NaN; _torque.value = Double.NaN
+        _forceAngleLeft.value = null; _forceAngleRight.value = null
+        _pedalPosition.value = null; _tePs.value = null; _barycenter.value = null
+    }
+
+    fun disconnect() {
+        runCatching { channel?.stop() }
+        channel = null; reset()
+    }
+}
