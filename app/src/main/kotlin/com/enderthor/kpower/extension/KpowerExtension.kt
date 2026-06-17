@@ -314,35 +314,51 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                 .collect { (elapsed, metersSnapshot) ->
                     if (elapsed !is StreamState.Streaming) return@collect
 
+                    // El source PRIMARY de la bici activa ya lo escribe el Karoo en el `power`
+                    // estándar -> omitimos su developer field para no duplicarlo.
+                    val activeCfg = com.enderthor.kpower.data.resolveActiveConfig(
+                        runCatching { kotlinx.coroutines.runBlocking { loadPreferencesFlow().first() } }.getOrNull() ?: emptyList(),
+                        activeProfileIdFlow.value,
+                    )
+                    val primarySrc = activeCfg?.primarySource ?: "ESTIMATE"
+                    val primaryDev = activeCfg?.primaryRealDeviceNumber
+                    val estPrimary = engine.estimateIsPrimary.value
+
                     val instant = engine.instantW.value
                     val p3s = engine.power3sW.value
                     val recordValues = mutableListOf<FieldValue>().apply {
-                        if (!instant.isNaN()) add(FieldValue(fieldEstPower, instant))
-                        if (!p3s.isNaN()) add(FieldValue(fieldEstPower3s, p3s))
+                        if (writeEstimateFields(primarySrc, estPrimary)) {
+                            if (!instant.isNaN()) add(FieldValue(fieldEstPower, instant))
+                            if (!p3s.isNaN()) add(FieldValue(fieldEstPower3s, p3s))
+                        }
                     }
                     metersSnapshot.forEach { m ->
-                        val reader = antManager.meter(m.deviceNumber)
-                        val pw = reader?.power?.value ?: Double.NaN
-                        val cad = reader?.cadence?.value ?: Double.NaN
-                        val bal = reader?.balanceRightPct?.value ?: Double.NaN
-                        val tq = reader?.torque?.value ?: Double.NaN
-                        if (!pw.isNaN()) recordValues.add(FieldValue(meterField(m.slot, 0, "pm${m.slot + 1}_power", "W"), pw))
-                        if (!cad.isNaN()) recordValues.add(FieldValue(meterField(m.slot, 1, "pm${m.slot + 1}_cad", "rpm"), cad))
-                        if (!bal.isNaN()) recordValues.add(FieldValue(meterField(m.slot, 2, "pm${m.slot + 1}_balance", "%"), bal))
-                        if (!tq.isNaN()) recordValues.add(FieldValue(meterField(m.slot, 3, "pm${m.slot + 1}_torque", "Nm"), tq))
+                        if (writeMeterFields(m.deviceNumber, primarySrc, primaryDev)) {
+                            val reader = antManager.meter(m.deviceNumber)
+                            val pw = reader?.power?.value ?: Double.NaN
+                            val cad = reader?.cadence?.value ?: Double.NaN
+                            val bal = reader?.balanceRightPct?.value ?: Double.NaN
+                            val tq = reader?.torque?.value ?: Double.NaN
+                            if (!pw.isNaN()) recordValues.add(FieldValue(meterField(m.slot, 0, "pm${m.slot + 1}_power", "W"), pw))
+                            if (!cad.isNaN()) recordValues.add(FieldValue(meterField(m.slot, 1, "pm${m.slot + 1}_cad", "rpm"), cad))
+                            if (!bal.isNaN()) recordValues.add(FieldValue(meterField(m.slot, 2, "pm${m.slot + 1}_balance", "%"), bal))
+                            if (!tq.isNaN()) recordValues.add(FieldValue(meterField(m.slot, 3, "pm${m.slot + 1}_torque", "Nm"), tq))
+                        }
                     }
                     if (recordValues.isNotEmpty()) emitter.onNext(WriteToRecordMesg(recordValues))
 
-                    val np = engine.npW.value
-                    val avg = engine.avgW.value
-                    if (np != lastSesNp || avg != lastSesAvg) {
-                        val sessionValues = buildList {
-                            if (!np.isNaN()) add(FieldValue(fieldEstNp, np))
-                            if (!avg.isNaN()) add(FieldValue(fieldEstAvg, avg))
+                    if (writeEstimateFields(primarySrc, estPrimary)) {
+                        val np = engine.npW.value
+                        val avg = engine.avgW.value
+                        if (np != lastSesNp || avg != lastSesAvg) {
+                            val sessionValues = buildList {
+                                if (!np.isNaN()) add(FieldValue(fieldEstNp, np))
+                                if (!avg.isNaN()) add(FieldValue(fieldEstAvg, avg))
+                            }
+                            if (sessionValues.isNotEmpty()) emitter.onNext(WriteToSessionMesg(sessionValues))
+                            lastSesNp = np
+                            lastSesAvg = avg
                         }
-                        if (sessionValues.isNotEmpty()) emitter.onNext(WriteToSessionMesg(sessionValues))
-                        lastSesNp = np
-                        lastSesAvg = avg
                     }
                 }
         }
