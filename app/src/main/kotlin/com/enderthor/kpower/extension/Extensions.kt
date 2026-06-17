@@ -12,6 +12,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import com.enderthor.kpower.BuildConfig
 import com.enderthor.kpower.activity.dataStore
 import com.enderthor.kpower.data.GpsCoordinates
+import com.enderthor.kpower.data.KnownProfile
 import com.enderthor.kpower.data.OpenMeteoCurrentWeatherResponse
 import com.enderthor.kpower.data.OpenWeatherCurrentWeatherResponse
 import com.enderthor.kpower.data.HeadwindStats
@@ -27,6 +28,7 @@ import com.enderthor.kpower.data.defaultConfigData
 
 
 import io.hammerhead.karooext.KarooSystemService
+import io.hammerhead.karooext.models.ActiveRideProfile
 import io.hammerhead.karooext.models.DataPoint
 import io.hammerhead.karooext.models.DataType
 import io.hammerhead.karooext.models.HttpResponseState
@@ -34,6 +36,7 @@ import io.hammerhead.karooext.models.KarooEvent
 import io.hammerhead.karooext.models.OnHttpResponse
 import io.hammerhead.karooext.models.OnLocationChanged
 import io.hammerhead.karooext.models.OnStreamState
+import io.hammerhead.karooext.models.RideProfile
 import io.hammerhead.karooext.models.StreamState
 
 
@@ -118,6 +121,22 @@ fun Context.antMetersFlow(): Flow<List<com.enderthor.kpower.ant.SavedMeter>> =
             jsonWithUnknownKeys.decodeFromString<List<com.enderthor.kpower.ant.SavedMeter>>(json[antMetersKey] ?: "[]")
         } catch (e: Throwable) {
             Timber.e(e, "Failed to read antMeters")
+            emptyList()
+        }
+    }.distinctUntilChanged()
+
+val knownProfilesKey = stringPreferencesKey("knownProfiles")
+
+suspend fun saveKnownProfiles(context: Context, profiles: List<KnownProfile>) {
+    context.dataStore.edit { it[knownProfilesKey] = Json.encodeToString(profiles) }
+}
+
+fun Context.knownProfilesFlow(): Flow<List<KnownProfile>> =
+    dataStore.data.map { json ->
+        try {
+            jsonWithUnknownKeys.decodeFromString<List<KnownProfile>>(json[knownProfilesKey] ?: "[]")
+        } catch (e: Throwable) {
+            Timber.e(e, "Failed to read knownProfiles")
             emptyList()
         }
     }.distinctUntilChanged()
@@ -483,6 +502,9 @@ inline fun <reified T : KarooEvent> KarooSystemService.consumerFlow(): Flow<T> {
         }
     }
 }
+
+fun KarooSystemService.streamRideProfile(): Flow<RideProfile> =
+    consumerFlow<ActiveRideProfile>().map { it.profile }
 
 
 
