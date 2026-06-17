@@ -160,7 +160,7 @@ Open **Comparison / Real meters** and switch on **Comparison mode**. While it's 
 
 ### Add real ANT+ power meters
 
-In the same tab, tap **Scan** to search for ANT+ power meters and tick the ones you want to record (up to 3). They're recorded as extra FIT columns `pm1_power`, `pm1_cad`, `pm1_balance`, `pm1_torque` (and `pm2_…`, `pm3_…`), plus a live **PM1 / PM2 / PM3 Power** data field each. ANT+ is broadcast, so KPower can listen to a meter at the same time as the Karoo — no need to unpair anything.
+In the same tab, tap **Scan** to find ANT+ power meters and **Add** the ones you want to record (up to 2 — the typical setup is your main meter on the Karoo plus one or two extras here). Recorded meters appear in a **Recorded meters** list where you can **delete** them at any time (even if a meter isn't switched on / broadcasting). Each recorded meter is written as extra FIT columns `pm1_power`, `pm1_cad`, `pm1_balance`, `pm1_torque` (and `pm2_…`), plus a live **PM1 / PM2 Power** data field. ANT+ is broadcast, so KPower can listen to a meter at the same time as the Karoo — no need to unpair anything.
 
 > Don't keep the Scan screen open while you're recording a ride — scanning competes with the meters being recorded. Scan, pick your meters, then leave the screen.
 
@@ -199,7 +199,7 @@ New in this release:
 - **Cadence gate with hysteresis**: coasting detection switches off below 20 rpm and back on above 25 rpm, so power no longer flickers between 0 and full value when cadence hovers around the cutoff.
 - **Tailwind fix**: a tailwind stronger than your speed now correctly *reduces* the aero term instead of adding drag.
 - **Comparison mode** (optional, off by default): exposes the estimate as four extra data fields (Est. Power / Est. Power 3s / Est. NP / Est. Avg Power) and writes `est_power`, `est_power_3s` (per-second) plus `est_np`, `est_avg` (session summary) into the FIT, so you can compare the estimate side-by-side against a real power meter in intervals.icu.
-- **Record real ANT+ power meters** (up to 3, optional): pair them under *Comparison / Real meters* and they're recorded as extra FIT columns (`pm1_power`/`pm1_cad`/`pm1_balance`/`pm1_torque`, etc.) + live data fields, alongside the estimate — for multi-meter comparison on one ride.
+- **Record real ANT+ power meters** (up to 2, optional): add/remove them under *Comparison / Real meters* and they're recorded as extra FIT columns (`pm1_power`/`pm1_cad`/`pm1_balance`/`pm1_torque`, etc.) + live data fields, alongside the estimate — for multi-meter comparison on one ride.
 - **Multiple bikes linked to Karoo ride profiles**: one estimator bike per real bike, auto-selected when you switch profile on the Karoo. Settings split into *Bikes* and *Comparison / Real meters* tabs.
 - Literature-calibrated coefficients (frontal area, Crr, drivetrain losses).
 
