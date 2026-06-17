@@ -111,6 +111,15 @@ suspend fun saveComparisonMode(context: Context, enabled: Boolean) {
 fun Context.comparisonModeFlow(): Flow<Boolean> =
     dataStore.data.map { it[comparisonModeKey] ?: false }.distinctUntilChanged()
 
+val recordDynamicsKey = booleanPreferencesKey("recordDynamics")
+
+suspend fun saveRecordDynamics(context: Context, enabled: Boolean) {
+    context.dataStore.edit { it[recordDynamicsKey] = enabled }
+}
+
+fun Context.recordDynamicsFlow(): Flow<Boolean> =
+    dataStore.data.map { it[recordDynamicsKey] ?: false }.distinctUntilChanged()
+
 suspend fun saveAntMeters(context: Context, meters: List<com.enderthor.kpower.ant.SavedMeter>) {
     context.dataStore.edit { it[antMetersKey] = Json.encodeToString(meters) }
 }

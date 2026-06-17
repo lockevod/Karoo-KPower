@@ -46,6 +46,14 @@ import com.enderthor.kpower.vdevice.PowerEstimationEngine
 import timber.log.Timber
 
 
+/** Holder for the 4-way combine driving the ride-state connect gate. */
+private data class RideGate(
+    val state: RideState,
+    val mode: Boolean,
+    val meters: List<com.enderthor.kpower.ant.SavedMeter>,
+    val recordDynamics: Boolean,
+)
+
 class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
 {
 
@@ -147,24 +155,30 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                 karooSystem.consumerFlow<RideState>(),
                 applicationContext.comparisonModeFlow(),
                 applicationContext.antMetersFlow(),
-            ) { state, mode, meters -> Triple(state, mode, meters) }
+                applicationContext.recordDynamicsFlow(),
+            ) { state, mode, meters, recordDynamics -> RideGate(state, mode, meters, recordDynamics) }
                 // Dedup is safe: RideState.Recording/Idle are payload-free objects, so
                 // collapsing identical emissions never drops a real transition. And
                 // engine.onRideState(state) is intentionally called before the comparison
                 // shouldRun gate below, so NP/avg reset + pause-freeze work even when
                 // comparison mode is OFF.
                 .distinctUntilChanged()
-                .collect { (state, mode, meters) ->
+                .collect { (state, mode, meters, recordDynamics) ->
                     engine.onRideState(state)
                     antManager.onRideState(state)
                     isRecording = state is RideState.Recording
-                    val shouldRun = mode && state is RideState.Recording
-                    if (shouldRun && !acquiredForComparison) {
+                    val dyn = recordDynamics
+                    // Estimate engine acquire/release stays tied to COMPARISON mode only;
+                    // dynamics recording does not need the estimate engine running.
+                    val shouldRunComparison = mode && state is RideState.Recording
+                    // Raw ANT meters connect when EITHER toggle is on AND we are recording.
+                    val shouldConnect = (mode || dyn) && state is RideState.Recording
+                    if (shouldRunComparison && !acquiredForComparison) {
                         engine.acquire(comparisonToken); acquiredForComparison = true
-                    } else if (!shouldRun && acquiredForComparison) {
+                    } else if (!shouldRunComparison && acquiredForComparison) {
                         engine.release(comparisonToken); acquiredForComparison = false
                     }
-                    if (shouldRun) antManager.connectMeters(meters.map { it.deviceNumber })
+                    if (shouldConnect) antManager.connectMeters(meters.map { it.deviceNumber })
                     else antManager.disconnectAll()
                 }
         }
