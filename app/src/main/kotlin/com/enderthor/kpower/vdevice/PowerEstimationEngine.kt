@@ -27,7 +27,6 @@ import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import java.util.concurrent.atomic.AtomicInteger
 import com.enderthor.kpower.data.ConfigData
 import com.enderthor.kpower.data.RealKarooValues
 import com.enderthor.kpower.data.previewConfigData
@@ -57,7 +56,7 @@ class PowerEstimationEngine(
     private val scope: CoroutineScope,
 ) {
     private val _instantW = MutableStateFlow(Double.NaN)
-    private val _powerEmaW = MutableStateFlow(0.0)
+    private val _powerEmaW = MutableStateFlow(Double.NaN)
     private val _power3sW = MutableStateFlow(Double.NaN)
     private val _npW = MutableStateFlow(Double.NaN)
     private val _avgW = MutableStateFlow(Double.NaN)
@@ -84,23 +83,25 @@ class PowerEstimationEngine(
     private val npCalc = NormalizedPowerCalculator()
     private val runningAvg = RunningAverage()
     @Volatile private var recording = false
+    @Volatile private var pendingReset = false
 
-    private val refCount = AtomicInteger(0)
+    private var refCount = 0
+    private var engineJob: Job? = null
     private var pipelineJob: Job? = null
     private var metricJob: Job? = null
 
     @Synchronized fun acquire() {
-        if (refCount.incrementAndGet() == 1) startPipeline()
+        if (++refCount == 1) startPipeline()
     }
 
     @Synchronized fun release() {
-        if (refCount.decrementAndGet() <= 0) {
-            refCount.set(0)
+        if (--refCount <= 0) {
+            refCount = 0
             stopPipeline()
         }
     }
 
-    fun onRideState(state: RideState) {
+    @Synchronized fun onRideState(state: RideState) {
         when (state) {
             is RideState.Recording -> {
                 if (!recording) resetSessionAccumulators()
@@ -111,8 +112,11 @@ class PowerEstimationEngine(
         }
     }
 
+    // Resets only the published StateFlows (StateFlow.value is thread-safe). The
+    // accumulator-object resets (ma3s/npCalc/runningAvg) are deferred to the metric
+    // loop via pendingReset, so they run on the same thread that calls .add(...).
     private fun resetSessionAccumulators() {
-        ma3s.reset(); npCalc.reset(); runningAvg.reset()
+        pendingReset = true
         _power3sW.value = Double.NaN
         _npW.value = Double.NaN
         _avgW.value = Double.NaN
@@ -123,6 +127,7 @@ class PowerEstimationEngine(
         if (pipelineJob != null) return
         Timber.d("PowerEstimationEngine: start")
         val job = SupervisorJob(scope.coroutineContext[Job])
+        engineJob = job
         val engineScope = CoroutineScope(Dispatchers.IO + job)
 
         pipelineJob = engineScope.launch {
@@ -233,9 +238,19 @@ class PowerEstimationEngine(
 
         metricJob = engineScope.launch {
             while (isActive) {
+                // Self-clock for the 1Hz metric tick. Acceptable here; the FIT-file
+                // cadence is driven separately by ELAPSED_TIME elsewhere.
                 delay(1.seconds)
+                // Consume deferred accumulator reset on the metric-loop thread so the
+                // .reset()/.add(...) mutations never race across threads.
+                if (pendingReset) {
+                    ma3s.reset(); npCalc.reset(); runningAvg.reset()
+                    pendingReset = false
+                }
                 val w = latestInstantW
                 if (w.isNaN()) continue
+                // The 3s moving average accumulates every tick by design (NOT gated by
+                // `recording`, unlike NP/avg below).
                 _power3sW.value = ma3s.add(w)
                 if (recording) {
                     npCalc.add(w)
@@ -249,8 +264,7 @@ class PowerEstimationEngine(
 
     private fun stopPipeline() {
         Timber.d("PowerEstimationEngine: stop")
-        pipelineJob?.cancel(); pipelineJob = null
-        metricJob?.cancel(); metricJob = null
+        engineJob?.cancel(); engineJob = null; pipelineJob = null; metricJob = null
         _hasSample.value = false
         latestInstantW = Double.NaN
     }
