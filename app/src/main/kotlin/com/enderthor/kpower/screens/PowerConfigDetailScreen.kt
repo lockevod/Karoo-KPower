@@ -73,6 +73,7 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
     var primarySource by remember { mutableStateOf(configdata.primarySource) }
     var primaryRealDeviceNumber by remember { mutableStateOf(configdata.primaryRealDeviceNumber) }
     val headwindInstalled = remember { ctx.isHeadwindInstalled() }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
 
     val detailCtx = androidx.compose.ui.platform.LocalContext.current
     val knownProfiles by detailCtx.knownProfilesFlow().collectAsState(initial = emptyList())
@@ -414,12 +415,33 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                         containerColor = MaterialTheme.colorScheme.errorContainer,
                         contentColor = MaterialTheme.colorScheme.onErrorContainer,
                     ),
-                    onClick = { onSubmit(null) }) {
+                    onClick = { showDeleteConfirm = true }) {
                     Icon(Icons.Default.Delete, contentDescription = "Delete bike")
                     Spacer(modifier = Modifier.width(5.dp))
                     Text("Delete bike")
                 }
             }
         }
+    }
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("Delete this bike?") },
+            text = { Text("This removes the bike configuration. This can't be undone.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDeleteConfirm = false
+                    onSubmit(null)
+                }) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }

@@ -114,6 +114,9 @@ fun ConfigDataAppNavHost(modifier: Modifier = Modifier, navController: NavHostCo
                         configDatas[configDataIndex] = updatedConfigData
                     } else {
                         configDatas.remove(r)
+                        if (r.isActive && configDatas.isNotEmpty() && configDatas.none { it.isActive }) {
+                            configDatas[0] = configDatas[0].copy(isActive = true)
+                        }
                     }
 
                     scope.launch {
