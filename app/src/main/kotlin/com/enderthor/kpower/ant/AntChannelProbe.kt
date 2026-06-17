@@ -20,6 +20,10 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import timber.log.Timber
+import java.io.BufferedWriter
+import java.io.File
+import java.io.FileWriter
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * THROWAWAY feasibility spike: can a sideloaded app open a raw ANT channel on the Karoo and
@@ -30,6 +34,13 @@ class AntChannelProbe(private val context: Context) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     @Volatile private var antService: AntService? = null
     @Volatile private var channel: AntChannel? = null
+    @Volatile private var idLogged = false
+
+    // File logging (patrón KGhost simplificado): vuelca capturas a un fichero para poder
+    // estudiar una salida a la calle SIN adb/logcat. Writer abierto toda la sesión.
+    @Volatile private var fileWriter: BufferedWriter? = null
+    private val pageCounts = ConcurrentHashMap<Int, Long>()
+    private val lastPageLogMs = ConcurrentHashMap<Int, Long>()
 
     private val conn = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
@@ -51,6 +62,7 @@ class AntChannelProbe(private val context: Context) {
 
     private suspend fun setup() {
         try {
+            openFileLog()
             val provider: AntChannelProvider = antService?.channelProvider ?: run {
                 Timber.tag(TAG).e("no channel provider"); return
             }
@@ -84,7 +96,30 @@ class AntChannelProbe(private val context: Context) {
                         if (type == MessageFromAntType.BROADCAST_DATA && msg != null) {
                             val payload = BroadcastDataMessage(msg).payload
                             val page = payload[0].toInt() and 0xFF
-                            Timber.tag(TAG).w("PAGE 0x%02X payload=%s", page, payload.joinToString(" ") { String.format("%02X", it) })
+                            // En cuanto llega el primer broadcast el canal comodín YA está
+                            // enganchado a un sensor concreto: pedimos su device number para
+                            // saber EXACTAMENTE a qué potenciómetro estamos oyendo.
+                            if (!idLogged) {
+                                idLogged = true
+                                scope.launch { logResolvedId() }
+                            }
+                            // Contador por página: la línea de RESUMEN periódica lo vuelca y es
+                            // lo que prueba si las dinámicas llegan (p.ej. 0xE0=12000 0xE2=12000).
+                            pageCounts.merge(page, 1L) { a, b -> a + b }
+                            // Páginas de Cycling Dynamics (Garmin): 0xE0 ángulo fuerza derecha,
+                            // 0xE1 izquierda, 0xE2 posición pedal/PCO, 0x13 TE/PS. Las resaltamos.
+                            val isDynamics = page == 0xE0 || page == 0xE1 || page == 0xE2 || page == 0x13
+                            // Throttle: 0x10 está a 4 Hz toda la ruta (14k líneas/h). Lo limitamos a
+                            // 1 línea/5 s; las de dinámicas a 1/s para no perder muestras útiles.
+                            val now = System.currentTimeMillis()
+                            val throttleMs = if (isDynamics) 1000L else 5000L
+                            if (now - (lastPageLogMs[page] ?: 0L) >= throttleMs) {
+                                lastPageLogMs[page] = now
+                                val prefix = if (isDynamics) "*** DYNAMICS " else ""
+                                val hex = payload.joinToString(" ") { String.format("%02X", it) }
+                                Timber.tag(TAG).w("%sPAGE 0x%02X payload=%s", prefix, page, hex)
+                                fileLog("${prefix}PAGE 0x%02X payload=%s".format(page, hex))
+                            }
                         }
                     }
                     override fun onChannelDeath() { Timber.tag(TAG).e("ANT channel death") }
@@ -105,11 +140,53 @@ class AntChannelProbe(private val context: Context) {
         }
     }
 
+    private fun logResolvedId() {
+        try {
+            val id = channel?.requestChannelId()?.channelId ?: return
+            val line = "RESOLVED deviceNumber=%d deviceType=%d transmissionType=%d (este es el sensor enganchado)".format(
+                id.deviceNumber, id.deviceType, id.transmissionType
+            )
+            Timber.tag(TAG).w(line)
+            fileLog(line)
+        } catch (e: Throwable) {
+            Timber.tag(TAG).e(e, "requestChannelId failed: %s", e.javaClass.simpleName)
+        }
+    }
+
+    /** Abre el fichero de log y lanza el bucle de resumen periódico (cada 15 s). */
+    private fun openFileLog() {
+        runCatching {
+            val dir = File(context.getExternalFilesDir(null) ?: context.filesDir, "antprobe")
+            dir.mkdirs()
+            val f = File(dir, "antprobe.log")
+            fileWriter = FileWriter(f, /* append= */ true).buffered()
+            Timber.tag(TAG).w("file log -> %s", f.absolutePath)
+            fileLog("===== ANTPROBE START ${System.currentTimeMillis()} -> ${f.absolutePath} =====")
+        }.onFailure { Timber.tag(TAG).e(it, "openFileLog failed") }
+
+        scope.launch {
+            while (true) {
+                delay(15_000)
+                val summary = pageCounts.entries.sortedBy { it.key }
+                    .joinToString(" ") { "0x%02X=%d".format(it.key, it.value) }
+                Timber.tag(TAG).w("SUMMARY pages: %s", summary)
+                fileLog("SUMMARY pages: $summary")
+            }
+        }
+    }
+
+    private fun fileLog(line: String) {
+        val w = fileWriter ?: return
+        runCatching { synchronized(w) { w.write(line); w.newLine(); w.flush() } }
+    }
+
     fun stop() {
         scope.launch {
             runCatching { channel?.close() }
             runCatching { channel?.unassign() }
             runCatching { context.unbindService(conn) }
+            runCatching { fileLog("===== ANTPROBE STOP ${System.currentTimeMillis()} =====") }
+            runCatching { synchronized(fileWriter ?: return@runCatching) { fileWriter?.close() } }
         }
     }
 
