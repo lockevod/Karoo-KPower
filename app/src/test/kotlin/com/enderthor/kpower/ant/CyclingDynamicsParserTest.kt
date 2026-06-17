@@ -31,12 +31,33 @@ class CyclingDynamicsParserTest {
     }
 
     @Test fun teps_scale_and_invalid() {
-        // TE left=0x64(100% ->50? scale 0.5) ; spec: raw*0.5 -> 0x64=100 -> 50%? confirm 0.5/LSB
+        // Scale is 0.5 %/LSB: 0xC8 = 200 -> 100 %. b5 = 0xFF -> right PS invalid.
         val d = CyclingDynamicsParser.parseTePs(bytes(0x13, 0x10, 0xC8, 0xC8, 0xC8, 0xFF, 0xFF, 0xFF))!!
         assertEquals(100.0, d.teLeftPct!!, 0.0)  // 0xC8=200 * 0.5 = 100%
         assertEquals(100.0, d.teRightPct!!, 0.0)
         assertEquals(100.0, d.psLeftPct!!, 0.0)
         assertNull(d.psRightPct)                 // 0xFF -> invalid
+        assertTrue(!d.psCombined)
+    }
+
+    @Test fun teps_psCombined_0xFE() {
+        // b5 = 0xFE -> right PS field carries no value; the combined PS is in psLeft (b4).
+        val d = CyclingDynamicsParser.parseTePs(bytes(0x13, 0x10, 0xFF, 0xFF, 0x96, 0xFE, 0xFF, 0xFF))!!
+        assertTrue(d.psCombined)
+        assertNull(d.psRightPct)
+        assertEquals(75.0, d.psLeftPct!!, 0.0)   // 0x96=150 * 0.5 = 75%
+    }
+
+    @Test fun forceAngle_loneC0_isValid270() {
+        // Only END is 0xC0 (not a pair) -> a legitimate 270deg, NOT the invalid sentinel.
+        val d = CyclingDynamicsParser.parseForceAngle(bytes(0xE0, 0x10, 64, 0xC0, 0, 0, 0x00, 0x00), isLeft = false)!!
+        assertEquals(90.0, d.startAngleDeg!!, 0.01)
+        assertEquals(270.0, d.endAngleDeg!!, 0.01)
+        assertEquals(180.0, d.arcDeg!!, 0.01)
+    }
+
+    @Test fun shortPayload_returnsNull() {
+        assertNull(CyclingDynamicsParser.parsePowerOnly(bytes(0x10, 0x10, 0x00, 0x00)))
     }
 
     @Test fun forceAngle_brads_to_degrees() {
