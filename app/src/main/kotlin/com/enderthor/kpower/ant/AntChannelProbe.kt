@@ -8,7 +8,7 @@ import com.dsi.ant.AntService
 import com.dsi.ant.channel.AntChannel
 import com.dsi.ant.channel.AntChannelProvider
 import com.dsi.ant.channel.IAntChannelEventHandler
-import com.dsi.ant.channel.NetworkKey
+import com.dsi.ant.channel.PredefinedNetwork
 import com.dsi.ant.message.ChannelId
 import com.dsi.ant.message.ChannelType
 import com.dsi.ant.message.fromant.BroadcastDataMessage
@@ -30,12 +30,6 @@ class AntChannelProbe(private val context: Context) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     @Volatile private var antService: AntService? = null
     @Volatile private var channel: AntChannel? = null
-
-    // ANT+ managed network key.
-    private val antPlusKey = byteArrayOf(
-        0xB9.toByte(), 0xA5.toByte(), 0x21, 0xFB.toByte(),
-        0xBD.toByte(), 0x72, 0xC3.toByte(), 0x45,
-    )
 
     private val conn = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
@@ -71,19 +65,20 @@ class AntChannelProbe(private val context: Context) {
             // If this succeeds, channels ARE available to third-party apps and the only block
             // is the private/ANT+ network key (rejected by the Karoo's ANT Radio Service).
             try {
-                val pub = provider.acquireChannel(context, com.dsi.ant.channel.PredefinedNetwork.PUBLIC)
+                val pub = provider.acquireChannel(context, PredefinedNetwork.PUBLIC)
                 Timber.tag(TAG).w("PUBLIC acquireChannel OK -> raw channel acquisition WORKS (channels available)")
                 runCatching { pub.release() }
             } catch (e: Throwable) {
                 Timber.tag(TAG).e(e, "PUBLIC acquireChannel FAILED: %s", e.javaClass.simpleName)
             }
 
-            // STEP 2: attempt the private (ANT+) network acquire. Expected to fail on the Karoo
-            // with IllegalArgumentException (invalid/null network key) if third-party ANT+ is blocked.
+            // STEP 2: acquire on the ANT+ managed network (Ki2's working approach). The radio
+            // service supplies the ANT+ network key — no manual key. This is the real path that
+            // opens + listens for bike-power pages.
             try {
-                val ch = provider.acquireChannelOnPrivateNetwork(context, NetworkKey(antPlusKey))
+                val ch = provider.acquireChannel(context, PredefinedNetwork.ANT_PLUS)
                 channel = ch
-                Timber.tag(TAG).w("PRIVATE acquireChannelOnPrivateNetwork OK -> acquired ANT+ channel")
+                Timber.tag(TAG).w("acquired ANT+ channel OK (PredefinedNetwork.ANT_PLUS)")
                 ch.setChannelEventHandler(object : IAntChannelEventHandler {
                     override fun onReceiveMessage(type: MessageFromAntType?, msg: AntMessageParcel?) {
                         if (type == MessageFromAntType.BROADCAST_DATA && msg != null) {
@@ -99,12 +94,12 @@ class AntChannelProbe(private val context: Context) {
                 ch.setRfFrequency(57); delay(100)                  // 2457 MHz (ANT+)
                 ch.setPeriod(8182); delay(100)                     // 4.005 Hz (ANT+ power)
                 ch.open()
-                Timber.tag(TAG).w("ANT channel OPEN — listening; watch for PAGE 0xE0/0xE1/0xE2 (cycling dynamics)")
+                Timber.tag(TAG).w("ANT+ channel OPEN — watch for PAGE 0xE0/0xE1/0xE2 (cycling dynamics)")
             } catch (e: Throwable) {
-                Timber.tag(TAG).e(e, "PRIVATE acquireChannelOnPrivateNetwork FAILED: %s", e.javaClass.simpleName)
+                Timber.tag(TAG).e(e, "ANT_PLUS acquireChannel FAILED: %s", e.javaClass.simpleName)
             }
 
-            Timber.tag(TAG).w("SUMMARY: if PUBLIC ok but PRIVATE failed with invalid-key -> Karoo blocks third-party ANT+ raw channels (cycling dynamics NOT feasible via public API)")
+            Timber.tag(TAG).w("SUMMARY: if PUBLIC ok and ANT_PLUS opens with PAGE logs -> Karoo allows third-party ANT+ raw channels (cycling dynamics feasible via PredefinedNetwork.ANT_PLUS)")
         } catch (e: Throwable) {
             Timber.tag(TAG).e(e, "ANT probe failed: %s", e.javaClass.simpleName)
         }

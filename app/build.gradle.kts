@@ -13,7 +13,7 @@ android {
         applicationId = "com.enderthor.kpower"
         minSdk = 23
         targetSdk = 34
-        versionCode = 202606111
+        versionCode = 202606131
         versionName = "3.0.0"
     }
 
@@ -44,7 +44,7 @@ android {
 
 dependencies {
     implementation(libs.hammerhead.karoo.ext)
-    implementation(files("libs/android_antlib_4-16-0.aar"))
+    implementation(files("libs/android_antlib_4-12-0.jar"))
     implementation(files("libs/antpluginlib_3-9-0.aar"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.bundles.androidx.lifeycle)
