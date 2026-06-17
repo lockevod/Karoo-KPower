@@ -171,6 +171,7 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                 .distinctUntilChanged()
                 .collect { (state, mode, meters) ->
                     engine.onRideState(state)
+                    antManager.onRideState(state)
                     isRecording = state is RideState.Recording
                     val shouldRun = mode && state is RideState.Recording
                     if (shouldRun && !acquiredForComparison) {

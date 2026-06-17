@@ -5,6 +5,7 @@ import com.dsi.ant.plugins.antplus.pcc.AntPlusBikePowerPcc
 import com.dsi.ant.plugins.antplus.pcc.defines.DeviceState
 import com.dsi.ant.plugins.antplus.pcc.defines.RequestAccessResult
 import com.dsi.ant.plugins.antplus.pccbase.PccReleaseHandle
+import com.enderthor.kpower.vdevice.PowerSourceMetrics
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -26,6 +27,27 @@ class AntPowerMeter(
     val cadence: StateFlow<Double> = _cadence.asStateFlow()
     val balanceRightPct: StateFlow<Double> = _balanceRightPct.asStateFlow()
     val torque: StateFlow<Double> = _torque.asStateFlow()
+
+    /**
+     * Per-source 3s / NP / average metrics, symmetric with the estimate engine. NOT fed from
+     * inside this class: the manager's single-threaded per-meter 1Hz loop drives tick()/reset(),
+     * keeping the metric objects on one thread. Ride-boundary reset is requested via
+     * requestMetricsReset()/consumePendingReset(); disconnect() does NOT touch metrics.
+     */
+    val metrics = PowerSourceMetrics()
+
+    /** Ride-boundary reset request, set off-thread (onRideState), consumed on the 1Hz loop. */
+    @Volatile private var pendingMetricsReset = false
+
+    /** Request a metrics reset on the next loop tick (Idle->Recording, or new meter). */
+    fun requestMetricsReset() { pendingMetricsReset = true }
+
+    /** Read-and-clear the pending-reset flag. Call from the per-meter loop thread only. */
+    fun consumePendingReset(): Boolean {
+        if (!pendingMetricsReset) return false
+        pendingMetricsReset = false
+        return true
+    }
 
     @Volatile private var pcc: AntPlusBikePowerPcc? = null
     @Volatile private var releaseHandle: PccReleaseHandle<AntPlusBikePowerPcc>? = null

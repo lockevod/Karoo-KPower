@@ -26,6 +26,26 @@ class AntPowerManager(private val context: Context) {
     private val powerFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
     private val bridges = HashMap<Int, kotlinx.coroutines.Job>()
 
+    // Ride state mirrored from the extension. `recording` gates NP/avg accumulation per meter;
+    // `pendingReset` requests are pushed to each meter (consumed on its single-threaded loop).
+    @Volatile private var recording = false
+
+    /**
+     * Mirror the Karoo RideState so each meter's metrics track NP/avg only while recording and
+     * reset on the Idle->Recording transition. Reset is requested per-meter (requestMetricsReset)
+     * and consumed on the per-meter 1Hz loop, so metrics.reset()/tick() stay on one thread.
+     */
+    @Synchronized
+    fun onRideState(state: io.hammerhead.karooext.models.RideState) {
+        when (state) {
+            is io.hammerhead.karooext.models.RideState.Recording -> {
+                if (!recording) synchronized(meters) { meters.values.forEach { it.requestMetricsReset() } }
+                recording = true
+            }
+            else -> recording = false
+        }
+    }
+
     /** Stable power flow for a device number (survives connect/disconnect; NaN when not streaming). */
     fun powerFlow(deviceNumber: Int): kotlinx.coroutines.flow.StateFlow<Double> =
         powerFlows.getOrPut(deviceNumber) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
@@ -77,6 +97,8 @@ class AntPowerManager(private val context: Context) {
             deviceNumbers.forEach { dn ->
                 if (!meters.containsKey(dn)) {
                     val m = AntPowerMeter(context, dn).also { it.connect() }
+                    // A meter added mid-recording starts its metrics fresh on the first loop tick.
+                    m.requestMetricsReset()
                     meters[dn] = m
                     val sink = powerFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
                     bridges[dn] = scope.launch {
@@ -85,9 +107,13 @@ class AntPowerManager(private val context: Context) {
                         // watchdog: expire stale values (no event for >5s) so the FIT records a
                         // gap, not frozen watts. Both child launches live under this one
                         // bridges[dn] job, so cancelling it stops the mirror and the watchdog.
+                        // This single loop also drives the per-meter metrics: reset + tick run
+                        // here only, so PowerSourceMetrics stays single-threaded.
                         while (isActive) {
                             kotlinx.coroutines.delay(1_000)
                             m.expireIfStale(System.currentTimeMillis())
+                            if (m.consumePendingReset()) m.metrics.reset()
+                            m.metrics.tick(m.power.value, recording)
                         }
                     }
                 }
