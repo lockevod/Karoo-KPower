@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
 
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 
@@ -96,6 +97,15 @@ val statsKey = stringPreferencesKey("stats")
 val lastKnownPositionKey = stringPreferencesKey("lastKnownPosition")
 
 val preferencesKey = stringPreferencesKey("configdata")
+val comparisonModeKey = booleanPreferencesKey("comparisonMode")
+
+suspend fun saveComparisonMode(context: Context, enabled: Boolean) {
+    context.dataStore.edit { it[comparisonModeKey] = enabled }
+}
+
+/** Toggle global (off por defecto): expone campos custom + escribe FIT de comparación. */
+fun Context.comparisonModeFlow(): Flow<Boolean> =
+    dataStore.data.map { it[comparisonModeKey] ?: false }.distinctUntilChanged()
 
 suspend fun savePreferences(context: Context, configDatas: MutableList<ConfigData>) {
     context.dataStore.edit { t ->
