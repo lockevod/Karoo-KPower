@@ -5,6 +5,9 @@ import kotlin.math.pow
 /**
  * Media móvil de ventana fija sobre muestras a 1 Hz (ring buffer).
  * Usada para la potencia "3 s" (ventana 3) y como ventana interna de 30 s en la NP.
+ * `sum` se mantiene de forma incremental (añade la nueva muestra y resta la que sale) y se
+ * pone a cero en cada reset de ruta, de modo que la deriva de punto flotante queda acotada
+ * dentro de una sola actividad.
  */
 class MovingAverage(private val windowSamples: Int) {
     private val buffer = DoubleArray(windowSamples)

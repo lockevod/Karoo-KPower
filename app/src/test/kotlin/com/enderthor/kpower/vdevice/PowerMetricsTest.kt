@@ -72,7 +72,7 @@ class PowerMetricsTest {
         // 60 s a 100 W y 60 s a 300 W: media = 200, NP > 200 por la 4a potencia.
         repeat(60) { np.add(100.0) }
         repeat(60) { np.add(300.0) }
-        assertTrue("NP=${np.value} should exceed the 200 W average", np.value > 215.0)
+        assertTrue("NP=${np.value} should exceed the 200 W average", np.value > 240.0)
     }
 
     @Test
@@ -82,5 +82,21 @@ class PowerMetricsTest {
         np.reset()
         repeat(29) { np.add(100.0) }
         assertTrue(np.value.isNaN())
+    }
+
+    @Test
+    fun `NP computes correctly after reset`() {
+        val np = NormalizedPowerCalculator()
+        repeat(40) { np.add(400.0) }
+        np.reset()
+        repeat(30) { np.add(150.0) }
+        assertEquals(150.0, np.value, 1e-6)
+    }
+
+    @Test
+    fun `moving average window of one is identity`() {
+        val ma = MovingAverage(windowSamples = 1)
+        assertEquals(10.0, ma.add(10.0), 1e-9)
+        assertEquals(20.0, ma.add(20.0), 1e-9)
     }
 }
