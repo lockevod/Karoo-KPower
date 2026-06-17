@@ -26,8 +26,10 @@ object CyclingDynamicsParser {
             eventCount = p.u(1),
             powerW = if (pwr == 0xFFFF) null else pwr.toDouble(),
             cadenceRpm = if (cad == 0xFF) null else cad.toDouble(),
-            // b2 "Pedal Power": 0xFF invalid; else bits0-6 = right-pedal %.
-            balanceRightPct = if (balRaw == 0xFF) null else (balRaw and 0x7F).toDouble(),
+            // b2 "Pedal Power": 0xFF invalid. Bit7 = right-pedal indicator; only when SET do
+            // bits0-6 carry the right-pedal % (matching the original antpluginlib behaviour). If
+            // bit7 is clear the balance is undetermined -> null, not a wrong-side value.
+            balanceRightPct = if (balRaw == 0xFF || (balRaw and 0x80) == 0) null else (balRaw and 0x7F).toDouble(),
         )
     }
 

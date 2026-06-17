@@ -25,6 +25,18 @@ class CyclingDynamicsParserTest {
         assertEquals(0.0, d.balanceRightPct!!, 0.0) // b2=0x80: right-indicator bit set, 0% right
     }
 
+    @Test fun powerOnly_balance_null_when_rightPedalBitClear() {
+        // b2 = 0x32 (50) with bit7 CLEAR -> balance undetermined -> null (not 50% right).
+        val d = CyclingDynamicsParser.parsePowerOnly(bytes(0x10, 0x10, 0x32, 0x5A, 0x00, 0x00, 0xC8, 0x00))!!
+        assertNull(d.balanceRightPct)
+    }
+
+    @Test fun powerOnly_balance_value_when_rightPedalBitSet() {
+        // b2 = 0xAA -> bit7 set, bits0-6 = 0x2A = 42 -> 42% right.
+        val d = CyclingDynamicsParser.parsePowerOnly(bytes(0x10, 0x10, 0xAA, 0x5A, 0x00, 0x00, 0xC8, 0x00))!!
+        assertEquals(42.0, d.balanceRightPct!!, 0.0)
+    }
+
     @Test fun powerOnly_cadence255_invalid() {
         val d = CyclingDynamicsParser.parsePowerOnly(bytes(0x10, 0x10, 0xFF, 0xFF, 0x00, 0x00, 0xC8, 0x00))!!
         assertNull(d.cadenceRpm)
