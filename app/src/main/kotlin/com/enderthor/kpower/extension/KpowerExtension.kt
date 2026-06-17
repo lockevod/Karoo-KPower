@@ -96,6 +96,11 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
             var acquiredForComparison = false
             karooSystem.consumerFlow<RideState>()
                 .combine(applicationContext.comparisonModeFlow()) { state, mode -> state to mode }
+                // Dedup is safe: RideState.Recording/Idle are payload-free objects, so
+                // collapsing identical emissions never drops a real transition. And
+                // engine.onRideState(state) is intentionally called before the comparison
+                // shouldRun gate below, so NP/avg reset + pause-freeze work even when
+                // comparison mode is OFF.
                 .distinctUntilChanged()
                 .collect { (state, mode) ->
                     engine.onRideState(state)

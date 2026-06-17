@@ -267,6 +267,8 @@ class PowerEstimationEngine(
         engineJob?.cancel(); engineJob = null; pipelineJob = null; metricJob = null
         _hasSample.value = false
         latestInstantW = Double.NaN
+        _powerEmaW.value = Double.NaN
+        _instantW.value = Double.NaN
     }
 
     private fun calculatePowerBike(

@@ -23,10 +23,10 @@ class EstimatedPowerSource(
         activeScope?.cancel()
         val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         activeScope = scope
+        engine.acquire()
 
         scope.launch {
             try {
-                engine.acquire()
                 emitter.onNext(OnConnectionStatus(ConnectionStatus.SEARCHING))
                 delay(2000)
                 emitter.onNext(OnConnectionStatus(ConnectionStatus.CONNECTED))
