@@ -3,10 +3,19 @@ package com.enderthor.kpower.extension
 
 import io.hammerhead.karooext.KarooSystemService
 import io.hammerhead.karooext.extension.KarooExtension
+import io.hammerhead.karooext.extension.DataTypeImpl
 import io.hammerhead.karooext.internal.Emitter
+import io.hammerhead.karooext.models.DataType
+import io.hammerhead.karooext.models.DeveloperField
 import io.hammerhead.karooext.models.Device
 import io.hammerhead.karooext.models.DeviceEvent
+import io.hammerhead.karooext.models.FieldValue
+import io.hammerhead.karooext.models.FitEffect
+import io.hammerhead.karooext.models.RideState
+import io.hammerhead.karooext.models.StreamState
 import io.hammerhead.karooext.models.UserProfile
+import io.hammerhead.karooext.models.WriteToRecordMesg
+import io.hammerhead.karooext.models.WriteToSessionMesg
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -14,6 +23,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.isActive
@@ -27,6 +38,7 @@ import com.enderthor.kpower.data.WEATHER_MAX_AGE_MS
 import com.enderthor.kpower.data.WEATHER_MIN_MOVE_KM
 import com.enderthor.kpower.data.WEATHER_RETRY_DELAY_MS
 import com.enderthor.kpower.vdevice.EstimatedPowerSource
+import com.enderthor.kpower.vdevice.PowerEstimationEngine
 
 import timber.log.Timber
 
@@ -38,6 +50,24 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
 
     private val supervisor = SupervisorJob()
     private val serviceScope = CoroutineScope(Dispatchers.IO + supervisor)
+
+    private val engine: PowerEstimationEngine by lazy {
+        PowerEstimationEngine(karooSystem, applicationContext, serviceScope)
+    }
+
+    override val types: List<DataTypeImpl> by lazy {
+        listOf(
+            EstimatedPowerDataType(extension, TYPE_EST_INSTANT, engine, { applicationContext.comparisonModeFlow() }) { it.instantW },
+            EstimatedPowerDataType(extension, TYPE_EST_3S, engine, { applicationContext.comparisonModeFlow() }) { it.power3sW },
+            EstimatedPowerDataType(extension, TYPE_EST_NP, engine, { applicationContext.comparisonModeFlow() }) { it.npW },
+            EstimatedPowerDataType(extension, TYPE_EST_AVG, engine, { applicationContext.comparisonModeFlow() }) { it.avgW },
+        )
+    }
+
+    private val fieldEstPower = DeveloperField(0, 136, "est_power", "W")
+    private val fieldEstPower3s = DeveloperField(1, 136, "est_power_3s", "W")
+    private val fieldEstNp = DeveloperField(2, 136, "est_np", "W")
+    private val fieldEstAvg = DeveloperField(3, 136, "est_avg", "W")
 
     override fun onCreate() {
         super.onCreate()
@@ -57,6 +87,25 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
 
         serviceScope.launch {
             weatherRefreshLoop()
+        }
+
+        // Mantiene el engine vivo (acquire) mientras (toggle ON && Recording) aunque la
+        // fuente de potencia activa sea el potenciómetro real; y le pasa el RideState para
+        // resetear NP/media en Idle->Recording y congelar en pausa.
+        serviceScope.launch {
+            var acquiredForComparison = false
+            karooSystem.consumerFlow<RideState>()
+                .combine(applicationContext.comparisonModeFlow()) { state, mode -> state to mode }
+                .distinctUntilChanged()
+                .collect { (state, mode) ->
+                    engine.onRideState(state)
+                    val shouldRun = mode && state is RideState.Recording
+                    if (shouldRun && !acquiredForComparison) {
+                        engine.acquire(); acquiredForComparison = true
+                    } else if (!shouldRun && acquiredForComparison) {
+                        engine.release(); acquiredForComparison = false
+                    }
+                }
         }
     }
 
@@ -176,17 +225,43 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
         val job: Job = serviceScope.launch {
             delay(2000L)
             Timber.d("Start scan")
-            emitter.onNext(EstimatedPowerSource(extension, 2000, karooSystem, applicationContext).source)
+            emitter.onNext(EstimatedPowerSource.buildDevice(extension, 2000, engine).source)
         }
-        emitter.setCancellable {
-            job.cancel()
-        }
+        emitter.setCancellable { job.cancel() }
     }
 
     override fun connectDevice(uid: String, emitter: Emitter<DeviceEvent>) {
         Timber.d("Connect Device")
-        EstimatedPowerSource.fromUid(extension, uid, karooSystem, applicationContext)
-            ?.connect(emitter, extension)
+        EstimatedPowerSource.fromUid(extension, uid, engine)?.connect(emitter, extension)
+    }
+
+    override fun startFit(emitter: Emitter<FitEffect>) {
+        val job = serviceScope.launch {
+            // Cadenciado por ELAPSED_TIME (1 Hz mientras se graba; se detiene en pausa).
+            // Solo escribe cuando el modo comparación está ON.
+            karooSystem.streamDataFlow(DataType.Type.ELAPSED_TIME)
+                .combine(applicationContext.comparisonModeFlow()) { elapsed, mode -> elapsed to mode }
+                .collect { (elapsed, mode) ->
+                    if (!mode || elapsed !is StreamState.Streaming) return@collect
+
+                    val instant = engine.instantW.value
+                    val p3s = engine.power3sW.value
+                    val recordValues = buildList {
+                        if (!instant.isNaN()) add(FieldValue(fieldEstPower, instant))
+                        if (!p3s.isNaN()) add(FieldValue(fieldEstPower3s, p3s))
+                    }
+                    if (recordValues.isNotEmpty()) emitter.onNext(WriteToRecordMesg(recordValues))
+
+                    val np = engine.npW.value
+                    val avg = engine.avgW.value
+                    val sessionValues = buildList {
+                        if (!np.isNaN()) add(FieldValue(fieldEstNp, np))
+                        if (!avg.isNaN()) add(FieldValue(fieldEstAvg, avg))
+                    }
+                    if (sessionValues.isNotEmpty()) emitter.onNext(WriteToSessionMesg(sessionValues))
+                }
+        }
+        emitter.setCancellable { job.cancel() }
     }
 
     override fun onDestroy() {
