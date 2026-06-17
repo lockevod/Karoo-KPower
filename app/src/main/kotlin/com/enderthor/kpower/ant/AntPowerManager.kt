@@ -165,12 +165,8 @@ class AntPowerManager(private val context: Context) {
         }
     }
 
-    /**
-     * Cancel the bridge, reset all stable sinks to NaN/null, and close the raw ANT channel for [dn].
-     * Must be called under synchronized(meters) (release holds it).
-     */
-    private fun dropMeter(dn: Int) {
-        bridges.remove(dn)?.cancel()
+    /** Reset all stable sinks for [dn] to their "no data" value (NaN / null). */
+    private fun resetSinks(dn: Int) {
         powerFlows[dn]?.value = Double.NaN
         cadenceFlows[dn]?.value = Double.NaN
         power3sFlows[dn]?.value = Double.NaN
@@ -180,7 +176,24 @@ class AntPowerManager(private val context: Context) {
         tePsFlows[dn]?.value = null
         forceLeftFlows[dn]?.value = null
         forceRightFlows[dn]?.value = null
+    }
+
+    /**
+     * Cancel the bridge and close the raw ANT channel for [dn]. Must be called under
+     * synchronized(meters) (release holds it). The sinks are reset in the bridge job's completion
+     * handler — AFTER its child collectors have fully stopped — so a late in-flight emission cannot
+     * resurrect a stale value on a sink (the toggle path masks this by reconnecting, but a source
+     * device may release without any reconnect). If a new meter for [dn] was created meanwhile, its
+     * bridge owns the sinks, so we skip the reset.
+     */
+    private fun dropMeter(dn: Int) {
         meters.remove(dn)?.disconnect()
+        val job = bridges.remove(dn)
+        if (job == null) { resetSinks(dn); return }
+        job.invokeOnCompletion {
+            synchronized(meters) { if (!meters.containsKey(dn)) resetSinks(dn) }
+        }
+        job.cancel()
     }
 
     /** Register [token] as a holder of [dn]'s channel and ensure the channel is open. */
