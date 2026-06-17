@@ -119,7 +119,7 @@ class RealPowerSource(
             antManager: com.enderthor.kpower.ant.AntPowerManager,
         ): RealPowerSource? =
             uid.substringAfterLast("-").toIntOrNull()?.let {
-                RealPowerSource(extension, it, "Real Power #$it", antManager)
+                RealPowerSource(extension, it, "KPower: Real #$it", antManager)
             }
     }
 }

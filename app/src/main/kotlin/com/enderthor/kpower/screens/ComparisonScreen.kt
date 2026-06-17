@@ -127,7 +127,8 @@ fun ComparisonScreen() {
                             Text(
                                 text = "Reads advanced pedaling metrics (power phase, PCO, balance, " +
                                     "torque effectiveness…) from the recorded ANT+ meter and writes them " +
-                                    "to the FIT. The Karoo does not record these. Needs a recorded meter.",
+                                    "to the FIT. The Karoo does not record these. Needs a recorded meter. " +
+                                    "Live dynamics fields update only while recording.",
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }

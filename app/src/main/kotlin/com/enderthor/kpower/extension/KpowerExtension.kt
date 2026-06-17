@@ -334,7 +334,7 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
             savedMeters.forEach { sm ->
                 emitter.onNext(
                     com.enderthor.kpower.vdevice.RealPowerSource
-                        .buildDevice(extension, sm.deviceNumber, sm.label, antManager).source
+                        .buildDevice(extension, sm.deviceNumber, "KPower: ${sm.label}", antManager).source
                 )
             }
         }

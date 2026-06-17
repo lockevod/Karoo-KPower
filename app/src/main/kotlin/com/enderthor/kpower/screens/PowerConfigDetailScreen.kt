@@ -15,8 +15,10 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.enderthor.kpower.R
 import com.enderthor.kpower.data.BikePosition
 import com.enderthor.kpower.data.ConfigData
 import com.enderthor.kpower.data.KarooSurface
@@ -180,6 +182,12 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                     }
                 }
             }
+
+            Text(
+                text = stringResource(R.string.primary_source_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
 
             // Campos "de entrada" que DERIVAN Crr/Cd/área (preset, altura, neumático):
             // solo en modo Simple. En Avanzado se editan los valores manuales directamente

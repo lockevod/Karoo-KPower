@@ -14,7 +14,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.enderthor.kpower.R
 import com.enderthor.kpower.ant.AntDeviceInfo
 import com.enderthor.kpower.ant.AntPowerManager
 import com.enderthor.kpower.ant.SavedMeter
@@ -56,7 +58,7 @@ fun LazyListScope.antScanItems(
     }
     item {
         Text(
-            "Record up to $MAX_METERS meters alongside the estimate.",
+            "Record one extra meter alongside the estimate.",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 8.dp),
         )
@@ -69,6 +71,14 @@ fun LazyListScope.antScanItems(
             "Recorded meters",
             style = MaterialTheme.typography.titleSmall,
             modifier = Modifier.padding(horizontal = 8.dp),
+        )
+    }
+    item {
+        Text(
+            stringResource(R.string.meter_double_pair_warning),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
         )
     }
     if (saved.isEmpty()) {
@@ -125,7 +135,7 @@ fun LazyListScope.antScanItems(
     if (atCap) {
         item {
             Text(
-                "Maximum $MAX_METERS meters",
+                "Maximum: $MAX_METERS meter",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
             )
