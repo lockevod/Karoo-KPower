@@ -15,6 +15,4 @@
     <string name="real1_desc">Real ANT+ power meter 1</string>
     <string name="real2_name">PM2 Power</string>
     <string name="real2_desc">Real ANT+ power meter 2</string>
-    <string name="real3_name">PM3 Power</string>
-    <string name="real3_desc">Real ANT+ power meter 3</string>
 </resources>

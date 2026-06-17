@@ -88,7 +88,6 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
             EstimatedPowerDataType(extension, TYPE_EST_AVG, engine, { applicationContext.comparisonModeFlow() }) { it.avgW },
             RealPowerDataType(extension, 0, { applicationContext.comparisonModeFlow() }) { slotPowerFlow(0) },
             RealPowerDataType(extension, 1, { applicationContext.comparisonModeFlow() }) { slotPowerFlow(1) },
-            RealPowerDataType(extension, 2, { applicationContext.comparisonModeFlow() }) { slotPowerFlow(2) },
         )
     }
 
