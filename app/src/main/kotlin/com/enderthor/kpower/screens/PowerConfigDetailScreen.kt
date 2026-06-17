@@ -10,6 +10,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -19,8 +20,10 @@ import com.enderthor.kpower.data.BikePosition
 import com.enderthor.kpower.data.ConfigData
 import com.enderthor.kpower.data.KarooSurface
 import com.enderthor.kpower.data.TreadType
+import com.enderthor.kpower.extension.antMetersFlow
 import com.enderthor.kpower.extension.consumerFlow
 import com.enderthor.kpower.extension.isHeadwindInstalled
+import com.enderthor.kpower.extension.knownProfilesFlow
 import com.enderthor.kpower.extension.toDoubleLocale
 import com.enderthor.kpower.vdevice.estimateCrr
 import com.enderthor.kpower.vdevice.estimateFrontalArea
@@ -63,7 +66,14 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
     var tubeless by remember { mutableStateOf(configdata.tubeless) }
     var preferHeadwind by remember { mutableStateOf(configdata.preferHeadwind) }
     var useRouteSurface by remember { mutableStateOf(configdata.useRouteSurface) }
+    var karooProfileId by remember { mutableStateOf(configdata.karooProfileId) }
+    var primarySource by remember { mutableStateOf(configdata.primarySource) }
+    var primaryRealDeviceNumber by remember { mutableStateOf(configdata.primaryRealDeviceNumber) }
     val headwindInstalled = remember { ctx.isHeadwindInstalled() }
+
+    val detailCtx = androidx.compose.ui.platform.LocalContext.current
+    val knownProfiles by detailCtx.knownProfilesFlow().collectAsState(initial = emptyList())
+    val savedMeters by detailCtx.antMetersFlow().collectAsState(initial = emptyList())
 
     var riderWeightKg by remember { mutableStateOf(0.0) }
     var riderFtp by remember { mutableStateOf(0) }
@@ -109,7 +119,10 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
         configdata.id, title, isActive, bikeMass, rollingResistanceCoefficient, dragCoefficient,
         frontalArea, powerLoss, headwind, isOpenWeather, apikey, ftp, surface, isforcepower,
         bikePosition, riderHeight, tyreWidth, tyrePressure, treadType, useProfileFtp, simpleMode, useKarooTemp, tubeless,
-        preferHeadwind, useRouteSurface
+        preferHeadwind, useRouteSurface,
+        karooProfileId = karooProfileId,
+        primarySource = primarySource,
+        primaryRealDeviceNumber = primaryRealDeviceNumber,
     )
 
     Column(modifier = Modifier
@@ -121,6 +134,43 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
             .verticalScroll(rememberScrollState())
             .fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Title") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+
+            apply {
+                val profileOptions = listOf(DropdownOption("", "None")) +
+                    knownProfiles.map { DropdownOption(it.id, it.name) }
+                val selectedProfile by remember(karooProfileId, knownProfiles) {
+                    mutableStateOf(profileOptions.find { it.id == (karooProfileId ?: "") } ?: profileOptions.first())
+                }
+                KarooKeyDropdown(remotekey = "Link to Karoo profile", options = profileOptions, selectedOption = selectedProfile) { opt ->
+                    karooProfileId = if (opt.id.isEmpty()) null else opt.id
+                }
+            }
+
+            apply {
+                val sourceOptions = listOf(
+                    DropdownOption("ESTIMATE", "Estimated"),
+                    DropdownOption("EXTERNAL", "External (other Karoo sensor)"),
+                ) + savedMeters.map { DropdownOption("REAL:${it.deviceNumber}", it.label) }
+                val currentSourceId = when {
+                    primarySource == "ESTIMATE" -> "ESTIMATE"
+                    primarySource == "EXTERNAL" -> "EXTERNAL"
+                    primarySource == "REAL" && primaryRealDeviceNumber != null -> "REAL:$primaryRealDeviceNumber"
+                    else -> "ESTIMATE"
+                }
+                val selectedSource by remember(primarySource, primaryRealDeviceNumber, savedMeters) {
+                    mutableStateOf(sourceOptions.find { it.id == currentSourceId } ?: sourceOptions.first())
+                }
+                KarooKeyDropdown(remotekey = "Primary power source", options = sourceOptions, selectedOption = selectedSource) { opt ->
+                    when {
+                        opt.id == "ESTIMATE" -> { primarySource = "ESTIMATE"; primaryRealDeviceNumber = null }
+                        opt.id == "EXTERNAL" -> { primarySource = "EXTERNAL"; primaryRealDeviceNumber = null }
+                        opt.id.startsWith("REAL:") -> {
+                            primarySource = "REAL"
+                            primaryRealDeviceNumber = opt.id.removePrefix("REAL:").toIntOrNull()
+                        }
+                    }
+                }
+            }
 
             // Campos "de entrada" que DERIVAN Crr/Cd/área (preset, altura, neumático):
             // solo en modo Simple. En Avanzado se editan los valores manuales directamente
