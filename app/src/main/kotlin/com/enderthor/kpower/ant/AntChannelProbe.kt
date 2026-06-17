@@ -64,28 +64,47 @@ class AntChannelProbe(private val context: Context) {
             val legacy = provider.isLegacyInterfaceInUse
             Timber.tag(TAG).w("numChannelsAvailable=%d legacyInUse=%b", avail, legacy)
             if (avail <= 0 && !legacy) {
-                Timber.tag(TAG).e("NO FREE ANT CHANNELS -> raw cycling-dynamics channel NOT feasible on this Karoo")
-                return
+                Timber.tag(TAG).e("WARNING: numChannelsAvailable=0 — but still probing PUBLIC + PRIVATE acquire to confirm")
             }
-            val ch = provider.acquireChannelOnPrivateNetwork(context, NetworkKey(antPlusKey))
-            channel = ch
-            Timber.tag(TAG).w("acquired ANT channel OK")
-            ch.setChannelEventHandler(object : IAntChannelEventHandler {
-                override fun onReceiveMessage(type: MessageFromAntType?, msg: AntMessageParcel?) {
-                    if (type == MessageFromAntType.BROADCAST_DATA && msg != null) {
-                        val payload = BroadcastDataMessage(msg).payload
-                        val page = payload[0].toInt() and 0xFF
-                        Timber.tag(TAG).w("PAGE 0x%02X payload=%s", page, payload.joinToString(" ") { String.format("%02X", it) })
+
+            // STEP 1: prove RAW channel acquisition works at all on the PUBLIC network.
+            // If this succeeds, channels ARE available to third-party apps and the only block
+            // is the private/ANT+ network key (rejected by the Karoo's ANT Radio Service).
+            try {
+                val pub = provider.acquireChannel(context, com.dsi.ant.channel.PredefinedNetwork.PUBLIC)
+                Timber.tag(TAG).w("PUBLIC acquireChannel OK -> raw channel acquisition WORKS (channels available)")
+                runCatching { pub.release() }
+            } catch (e: Throwable) {
+                Timber.tag(TAG).e(e, "PUBLIC acquireChannel FAILED: %s", e.javaClass.simpleName)
+            }
+
+            // STEP 2: attempt the private (ANT+) network acquire. Expected to fail on the Karoo
+            // with IllegalArgumentException (invalid/null network key) if third-party ANT+ is blocked.
+            try {
+                val ch = provider.acquireChannelOnPrivateNetwork(context, NetworkKey(antPlusKey))
+                channel = ch
+                Timber.tag(TAG).w("PRIVATE acquireChannelOnPrivateNetwork OK -> acquired ANT+ channel")
+                ch.setChannelEventHandler(object : IAntChannelEventHandler {
+                    override fun onReceiveMessage(type: MessageFromAntType?, msg: AntMessageParcel?) {
+                        if (type == MessageFromAntType.BROADCAST_DATA && msg != null) {
+                            val payload = BroadcastDataMessage(msg).payload
+                            val page = payload[0].toInt() and 0xFF
+                            Timber.tag(TAG).w("PAGE 0x%02X payload=%s", page, payload.joinToString(" ") { String.format("%02X", it) })
+                        }
                     }
-                }
-                override fun onChannelDeath() { Timber.tag(TAG).e("ANT channel death") }
-            })
-            ch.assign(ChannelType.SLAVE_RECEIVE_ONLY); delay(100)
-            ch.setChannelId(ChannelId(0, 11, 0)); delay(100)   // wildcard device, type 11 = bike power, wildcard tx
-            ch.setRfFrequency(57); delay(100)                  // 2457 MHz (ANT+)
-            ch.setPeriod(8182); delay(100)                     // 4.005 Hz (ANT+ power)
-            ch.open()
-            Timber.tag(TAG).w("ANT channel OPEN — listening; watch for PAGE 0xE0/0xE1/0xE2 (cycling dynamics)")
+                    override fun onChannelDeath() { Timber.tag(TAG).e("ANT channel death") }
+                })
+                ch.assign(ChannelType.SLAVE_RECEIVE_ONLY); delay(100)
+                ch.setChannelId(ChannelId(0, 11, 0)); delay(100)   // wildcard device, type 11 = bike power, wildcard tx
+                ch.setRfFrequency(57); delay(100)                  // 2457 MHz (ANT+)
+                ch.setPeriod(8182); delay(100)                     // 4.005 Hz (ANT+ power)
+                ch.open()
+                Timber.tag(TAG).w("ANT channel OPEN — listening; watch for PAGE 0xE0/0xE1/0xE2 (cycling dynamics)")
+            } catch (e: Throwable) {
+                Timber.tag(TAG).e(e, "PRIVATE acquireChannelOnPrivateNetwork FAILED: %s", e.javaClass.simpleName)
+            }
+
+            Timber.tag(TAG).w("SUMMARY: if PUBLIC ok but PRIVATE failed with invalid-key -> Karoo blocks third-party ANT+ raw channels (cycling dynamics NOT feasible via public API)")
         } catch (e: Throwable) {
             Timber.tag(TAG).e(e, "ANT probe failed: %s", e.javaClass.simpleName)
         }
