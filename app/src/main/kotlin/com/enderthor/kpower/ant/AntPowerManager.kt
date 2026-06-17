@@ -8,6 +8,7 @@ import com.dsi.ant.plugins.antplus.pccbase.MultiDeviceSearch.MultiDeviceSearchRe
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import timber.log.Timber
 import java.util.EnumSet
 
@@ -19,6 +20,14 @@ class AntPowerManager(private val context: Context) {
 
     private var search: MultiDeviceSearch? = null
     private val meters = LinkedHashMap<Int, AntPowerMeter>()
+
+    private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
+    private val powerFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
+    private val bridges = HashMap<Int, kotlinx.coroutines.Job>()
+
+    /** Stable power flow for a device number (survives connect/disconnect; NaN when not streaming). */
+    fun powerFlow(deviceNumber: Int): kotlinx.coroutines.flow.StateFlow<Double> =
+        powerFlows.getOrPut(deviceNumber) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
 
     /** Live reader for a device number, or null if not connected. */
     fun meter(deviceNumber: Int): AntPowerMeter? = synchronized(meters) { meters[deviceNumber] }
@@ -59,10 +68,17 @@ class AntPowerManager(private val context: Context) {
     @Synchronized
     fun connectMeters(deviceNumbers: List<Int>) {
         synchronized(meters) {
-            (meters.keys - deviceNumbers.toSet()).toList().forEach { meters.remove(it)?.disconnect() }
+            (meters.keys - deviceNumbers.toSet()).toList().forEach { dn ->
+                bridges.remove(dn)?.cancel()
+                powerFlows[dn]?.value = Double.NaN
+                meters.remove(dn)?.disconnect()
+            }
             deviceNumbers.forEach { dn ->
                 if (!meters.containsKey(dn)) {
-                    meters[dn] = AntPowerMeter(context, dn).also { it.connect() }
+                    val m = AntPowerMeter(context, dn).also { it.connect() }
+                    meters[dn] = m
+                    val sink = powerFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
+                    bridges[dn] = scope.launch { m.power.collect { sink.value = it } }
                 }
             }
         }
@@ -71,6 +87,12 @@ class AntPowerManager(private val context: Context) {
     @Synchronized
     fun disconnectAll() {
         stopScan()
-        synchronized(meters) { meters.values.forEach { it.disconnect() }; meters.clear() }
+        synchronized(meters) {
+            bridges.values.forEach { it.cancel() }
+            bridges.clear()
+            powerFlows.values.forEach { it.value = Double.NaN }
+            meters.values.forEach { it.disconnect() }
+            meters.clear()
+        }
     }
 }

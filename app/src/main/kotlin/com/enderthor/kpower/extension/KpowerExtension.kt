@@ -65,12 +65,17 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
     // Token estable del consumidor "modo comparación" para el ref-count del engine.
     private val comparisonToken = Any()
 
+    // The display resolves the slot->device mapping once per stream subscribe, so a slot
+    // REassignment mid-ride only takes effect on the next re-subscribe. But it no longer
+    // latches blank: the returned flow is stable (NaN until the meter connects, then live),
+    // so the field lights up when the meter connects. The FIT writer remains the per-tick
+    // source of truth.
     private fun slotPowerFlow(slot: Int): kotlinx.coroutines.flow.StateFlow<Double>? {
         val saved = runCatching {
             kotlinx.coroutines.runBlocking { applicationContext.antMetersFlow().first() }
         }.getOrNull()
         val dn = saved?.firstOrNull { it.slot == slot }?.deviceNumber ?: return null
-        return antManager.meter(dn)?.power
+        return antManager.powerFlow(dn)   // stable: NaN until the meter connects, then live
     }
 
     override val types: List<DataTypeImpl> by lazy {
@@ -327,6 +332,7 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
     }
 
     override fun onDestroy() {
+        runCatching { antManager.disconnectAll() }
         runCatching { serviceScope.cancel() }
         karooSystem.disconnect()
         super.onDestroy()
