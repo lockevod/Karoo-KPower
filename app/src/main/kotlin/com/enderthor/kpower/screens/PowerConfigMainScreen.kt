@@ -17,9 +17,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.CornerSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FabPosition
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -141,6 +145,7 @@ fun ConfigDataAppNavHost(modifier: Modifier = Modifier, navController: NavHostCo
             MainScreen(
                 configDatas,
                 onNavigateToConfigData = { configdata -> navController.navigate(route = "configData/${configdata.id}") },
+                onNavigateToCreate = { navController.navigate("create") },
             )
         }
     }
@@ -151,12 +156,17 @@ fun ConfigDataAppNavHost(modifier: Modifier = Modifier, navController: NavHostCo
 fun MainScreen(
     configDatas: MutableList<ConfigData>,
     onNavigateToConfigData: (r: ConfigData) -> Unit,
+    onNavigateToCreate: () -> Unit = {},
 ) {
 
     Scaffold(
         topBar = { TopAppBar(title = {Text("Config")}) },
         floatingActionButtonPosition = FabPosition.End,
-
+        floatingActionButton = {
+            FloatingActionButton(onClick = onNavigateToCreate) {
+                Icon(Icons.Default.Add, contentDescription = "Add bike")
+            }
+        },
         content = {
             Column(
                 Modifier

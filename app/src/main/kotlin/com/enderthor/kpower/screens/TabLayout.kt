@@ -19,7 +19,7 @@ fun TabLayout(
 ) {
     // La ayuda en-app se eliminó (estaba desfasada); la documentación vive en el README de
     // GitHub. Dos secciones de nivel superior: "Bikes" (lista/detalle de configuraciones) y
-    // "Comparison / Real meters" (modo comparación + escaneo ANT+).
+    // "Comparison" (modo comparación + escaneo ANT+).
     var tab by remember { mutableStateOf(0) }
     Column(modifier = Modifier.fillMaxSize()) {
         TabRow(selectedTabIndex = tab) {
@@ -31,7 +31,7 @@ fun TabLayout(
             Tab(
                 selected = tab == 1,
                 onClick = { tab = 1 },
-                text = { Text("Comparison / Real meters") }
+                text = { Text("Comparison") }
             )
         }
         when (tab) {
