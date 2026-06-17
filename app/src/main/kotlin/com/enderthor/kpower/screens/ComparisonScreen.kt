@@ -40,6 +40,10 @@ fun ComparisonScreen() {
     val ctx = LocalContext.current
     val antManager = remember { AntPowerManager(ctx) }
 
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose { antManager.disconnectAll() }
+    }
+
     Scaffold(
         topBar = { TopAppBar(title = { Text("Comparison / Real meters") }) },
         content = { padding ->

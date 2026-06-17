@@ -71,9 +71,15 @@ class PowerEstimationEngine(
     val hasSample: StateFlow<Boolean> = _hasSample.asStateFlow()
 
     private val _estimateIsPrimary = MutableStateFlow(false)
-    /** True when KPower's virtual device is the Karoo's active power source (bound in the profile). */
+    /** True while KPower's virtual device has >=1 live connection (the Karoo binds it as the
+     *  active power source). Counter so overlapping connect/disconnect (rebind) settle correctly. */
     val estimateIsPrimary: StateFlow<Boolean> = _estimateIsPrimary.asStateFlow()
-    fun setVirtualDeviceConnected(connected: Boolean) { _estimateIsPrimary.value = connected }
+    private val virtualConnections = java.util.concurrent.atomic.AtomicInteger(0)
+    fun setVirtualDeviceConnected(connected: Boolean) {
+        val n = if (connected) virtualConnections.incrementAndGet() else virtualConnections.decrementAndGet().coerceAtLeast(0)
+        if (!connected && virtualConnections.get() < 0) virtualConnections.set(0)
+        _estimateIsPrimary.value = n > 0
+    }
 
     private val accelerationTracker = AccelerationTracker()
     private val gradeSmoother = GradeSmoother()

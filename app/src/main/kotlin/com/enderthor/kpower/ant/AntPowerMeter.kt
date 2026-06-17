@@ -30,6 +30,12 @@ class AntPowerMeter(
     @Volatile private var pcc: AntPlusBikePowerPcc? = null
     @Volatile private var releaseHandle: PccReleaseHandle<AntPlusBikePowerPcc>? = null
 
+    /** Timestamp (ms) of the most recent ANT event; 0 until the first sample arrives. */
+    @Volatile private var lastEventMs: Long = 0L
+
+    /** Bounded retry counter for transient access failures (radio contention). */
+    @Volatile private var attempts = 0
+
     fun connect() {
         releaseHandle = AntPlusBikePowerPcc.requestAccess(
             context,
@@ -37,29 +43,57 @@ class AntPowerMeter(
             0,
             { result, code, _ ->
                 if (code == RequestAccessResult.SUCCESS && result != null) {
+                    attempts = 0
                     pcc = result
                     subscribe(result)
                 } else {
                     Timber.w("ANT power #%d access: %s", deviceNumber, code)
+                    maybeRetry(code)
                 }
             },
             { state -> if (state == DeviceState.DEAD) reset() },
         )
     }
 
+    /**
+     * Retry on transient access failures (CHANNEL_NOT_AVAILABLE / SEARCH timeouts caused by radio
+     * contention). Bounded to 3 attempts. Do NOT retry on terminal results
+     * (DEPENDENCY_NOT_INSTALLED / USER_CANCELLED / DEVICE_ALREADY_IN_USE). The ANT plugin callback
+     * fires on its own thread; an immediate re-requestAccess from here is acceptable and leak-free.
+     */
+    private fun maybeRetry(code: RequestAccessResult?) {
+        val transient = code == RequestAccessResult.CHANNEL_NOT_AVAILABLE ||
+            code == RequestAccessResult.SEARCH_TIMEOUT ||
+            code == RequestAccessResult.OTHER_FAILURE
+        if (transient && attempts < 3) {
+            attempts++
+            Timber.d("ANT power #%d retry %d after %s", deviceNumber, attempts, code)
+            connect()
+        }
+    }
+
     private fun subscribe(p: AntPlusBikePowerPcc) {
         p.subscribeCalculatedPowerEvent { _, _, _, calculatedPower ->
             _power.value = calculatedPower.toDouble()
+            lastEventMs = System.currentTimeMillis()
         }
         p.subscribeCalculatedTorqueEvent { _, _, _, calculatedTorque ->
             _torque.value = calculatedTorque.toDouble()
+            lastEventMs = System.currentTimeMillis()
         }
         p.subscribeCalculatedCrankCadenceEvent { _, _, _, calculatedCadence ->
             _cadence.value = calculatedCadence.toDouble()
+            lastEventMs = System.currentTimeMillis()
         }
         p.subscribePedalPowerBalanceEvent { _, _, rightPedalIndicator, pedalPowerPercentage ->
             _balanceRightPct.value = if (rightPedalIndicator) pedalPowerPercentage.toDouble() else Double.NaN
+            lastEventMs = System.currentTimeMillis()
         }
+    }
+
+    /** Reset values to NaN if no ANT event arrived within [staleMs] (silent dropout w/o DEAD). */
+    fun expireIfStale(nowMs: Long, staleMs: Long = 5_000L) {
+        if (lastEventMs != 0L && nowMs - lastEventMs > staleMs) reset()
     }
 
     private fun reset() {

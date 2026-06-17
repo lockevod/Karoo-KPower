@@ -8,6 +8,7 @@ import com.dsi.ant.plugins.antplus.pccbase.MultiDeviceSearch.MultiDeviceSearchRe
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import timber.log.Timber
 import java.util.EnumSet
@@ -78,7 +79,18 @@ class AntPowerManager(private val context: Context) {
                     val m = AntPowerMeter(context, dn).also { it.connect() }
                     meters[dn] = m
                     val sink = powerFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
-                    bridges[dn] = scope.launch { m.power.collect { sink.value = it } }
+                    bridges[dn] = scope.launch {
+                        // mirror power into the stable sink
+                        launch { m.power.collect { sink.value = it } }
+                        // watchdog: expire stale values (no event for >5s) so the FIT records a
+                        // gap, not frozen watts. Both child launches live under this one
+                        // bridges[dn] job, so cancelling it stops the mirror and the watchdog.
+                        while (isActive) {
+                            kotlinx.coroutines.delay(1_000)
+                            m.expireIfStale(System.currentTimeMillis())
+                            sink.value = m.power.value
+                        }
+                    }
                 }
             }
         }

@@ -54,11 +54,15 @@ fun AntScanScreen(manager: AntPowerManager) {
                         checked = isSaved,
                         onCheckedChange = { checked ->
                             val next = if (checked) {
-                                if (isSaved || saved.size >= MAX_METERS) saved
-                                else saved + SavedMeter(dev.deviceNumber, dev.name, saved.size)
+                                if (isSaved) saved
+                                else {
+                                    val usedSlots = saved.map { it.slot }.toSet()
+                                    val freeSlot = (0 until MAX_METERS).firstOrNull { it !in usedSlots }
+                                    if (freeSlot == null) saved  // already at cap
+                                    else saved + SavedMeter(dev.deviceNumber, dev.name, freeSlot)
+                                }
                             } else {
                                 saved.filterNot { it.deviceNumber == dev.deviceNumber }
-                                    .mapIndexed { i, m -> m.copy(slot = i) }
                             }
                             scope.launch { saveAntMeters(ctx, next) }
                         },
