@@ -6,6 +6,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -14,6 +15,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,9 +39,11 @@ fun AntScanScreen(manager: AntPowerManager) {
     val scope = rememberCoroutineScope()
     val detected by manager.detectedDevices.collectAsState()
     val saved by ctx.antMetersFlow().collectAsState(initial = emptyList())
+    var scanning by remember { mutableStateOf(false) }
 
+    // Manual scan only — never auto-start, so opening this screen mid-ride doesn't start a
+    // MultiDeviceSearch that contends with the recording meter on the single ANT radio.
     DisposableEffect(Unit) {
-        manager.startScan()
         onDispose { manager.stopScan() }
     }
 
@@ -92,9 +98,31 @@ fun AntScanScreen(manager: AntPowerManager) {
 
             item { Spacer(Modifier.height(12.dp)) }
 
-            // Section 2 — Available (scanning…), detected devices not already saved.
+            // Section 2 — Available, detected devices not already saved (manual scan).
             item {
-                Text("Available (scanning…)", style = MaterialTheme.typography.titleSmall)
+                Text("Available", style = MaterialTheme.typography.titleSmall)
+            }
+            item {
+                Button(
+                    onClick = {
+                        if (scanning) {
+                            manager.stopScan(); scanning = false
+                        } else {
+                            manager.startScan(); scanning = true
+                        }
+                    },
+                    modifier = Modifier.padding(4.dp),
+                ) {
+                    Text(if (scanning) "Stop" else "Scan")
+                }
+            }
+            item {
+                Text(
+                    "Don't scan while recording a ride — it can disrupt the meter you're recording.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                )
             }
             if (atCap) {
                 item {
@@ -107,7 +135,7 @@ fun AntScanScreen(manager: AntPowerManager) {
             } else if (available.isEmpty()) {
                 item {
                     Text(
-                        "Scanning…",
+                        if (scanning) "Scanning…" else "Tap Scan to find meters.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(4.dp),
                     )

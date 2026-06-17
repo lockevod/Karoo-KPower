@@ -21,7 +21,11 @@ class PowerSourceMetrics {
     val npW: StateFlow<Double> = _npW.asStateFlow()
     val avgW: StateFlow<Double> = _avgW.asStateFlow()
 
-    /** One sample/second. [recording] gates NP/avg accumulation (3s smooths always). */
+    /** One sample/second. [recording] gates NP/avg accumulation (3s smooths always).
+     *  NaN samples (sensor dropout) are skipped: they don't advance the NP 30s window or the
+     *  average, so NP/avg reflect pedaling/valid seconds. Every source (estimate and real meters)
+     *  treats dropouts the same way, so the comparison stays apples-to-apples — though absolute NP
+     *  may differ slightly from a head unit that counts elapsed seconds across a dropout. */
     fun tick(instantW: Double, recording: Boolean) {
         if (instantW.isNaN()) return
         _power3sW.value = ma3s.add(instantW)

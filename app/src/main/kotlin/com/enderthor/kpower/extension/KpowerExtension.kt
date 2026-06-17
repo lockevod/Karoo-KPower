@@ -330,7 +330,7 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                     val instant = engine.instantW.value
                     val p3s = engine.power3sW.value
                     val recordValues = mutableListOf<FieldValue>().apply {
-                        if (writeEstimateFields(estPrimary)) {
+                        if (writeEstimateFields(primarySrc, estPrimary)) {
                             if (!instant.isNaN()) add(FieldValue(fieldEstPower, instant))
                             if (!p3s.isNaN()) add(FieldValue(fieldEstPower3s, p3s))
                         }
@@ -350,7 +350,7 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                     }
                     if (recordValues.isNotEmpty()) emitter.onNext(WriteToRecordMesg(recordValues))
 
-                    if (writeEstimateFields(estPrimary)) {
+                    if (writeEstimateFields(primarySrc, estPrimary)) {
                         val np = engine.npW.value
                         val avg = engine.avgW.value
                         if (np != lastSesNp || avg != lastSesAvg) {

@@ -160,7 +160,7 @@ Open **Comparison / Real meters** and switch on **Comparison mode**. While it's 
 
 ### Add the extra real ANT+ power meter
 
-Open the *Comparison / Real meters* tab — it scans for ANT+ power meters automatically; **Add** the one you want and it appears under **Recorded meters**, where you can delete it anytime (even if the meter isn't switched on / broadcasting). The recorded meter is written as extra FIT columns `pm1_power`, `pm1_cad`, `pm1_balance`, `pm1_torque`, and is also exposed as **Real Power / Real Power 3s / Real NP / Real Avg Power** data fields (the same set as the estimate). ANT+ is broadcast, so KPower can listen to the meter at the same time as the Karoo — no need to unpair anything.
+Open the *Comparison / Real meters* tab and tap **Scan** to find ANT+ power meters; **Add** the one you want and it appears under **Recorded meters**, where you can delete it anytime (even if the meter isn't switched on / broadcasting). Don't scan while recording a ride. The recorded meter is written as extra FIT columns `pm1_power`, `pm1_cad`, `pm1_balance`, `pm1_torque`, and is also exposed as **Real Power / Real Power 3s / Real NP / Real Avg Power** data fields (the same set as the estimate). ANT+ is broadcast, so KPower can listen to the meter at the same time as the Karoo — no need to unpair anything.
 
 ### How to compare afterwards
 
