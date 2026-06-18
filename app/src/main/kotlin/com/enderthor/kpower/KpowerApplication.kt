@@ -2,6 +2,7 @@ package com.enderthor.kpower
 
 import android.app.Application
 import android.util.Log
+import com.enderthor.kpower.extension.FileLogTree
 import timber.log.Timber
 import timber.log.Timber.DebugTree
 import timber.log.Timber.Forest.plant
@@ -43,6 +44,13 @@ class KpowerApplication : Application() {
 
             })
         }
+
+        // Diagnostic file logging: planted in ALL builds (release included), OFF by default.
+        // FileLogTree.log() is a single volatile read when disabled, so this is cheap until the
+        // rider toggles it on. enabled is driven from diagnosticLogFlow() in KpowerExtension.
+        FileLogTree.start(applicationContext)
+        plant(FileLogTree)
+
         Timber.d("Starting KCustom App")
     }
 }

@@ -120,6 +120,16 @@ suspend fun saveRecordDynamics(context: Context, enabled: Boolean) {
 fun Context.recordDynamicsFlow(): Flow<Boolean> =
     dataStore.data.map { it[recordDynamicsKey] ?: false }.distinctUntilChanged()
 
+val diagnosticLogKey = booleanPreferencesKey("diagnosticLog")
+
+suspend fun saveDiagnosticLog(context: Context, enabled: Boolean) {
+    context.dataStore.edit { it[diagnosticLogKey] = enabled }
+}
+
+/** Toggle global (off por defecto): escribe logs de diagnóstico a fichero (FileLogTree). */
+fun Context.diagnosticLogFlow(): Flow<Boolean> =
+    dataStore.data.map { it[diagnosticLogKey] ?: false }.distinctUntilChanged()
+
 suspend fun saveAntMeters(context: Context, meters: List<com.enderthor.kpower.ant.SavedMeter>) {
     context.dataStore.edit { it[antMetersKey] = Json.encodeToString(meters) }
 }

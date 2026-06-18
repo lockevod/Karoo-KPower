@@ -151,6 +151,11 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
             karooSystem.updateLastKnownGps(this@KpowerExtension)
         }
 
+        // Drive the diagnostic file logger from the rider's toggle (off by default).
+        serviceScope.launch {
+            applicationContext.diagnosticLogFlow().collect { FileLogTree.enabled = it }
+        }
+
         serviceScope.launch {
             weatherRefreshLoop()
         }
@@ -176,6 +181,9 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
         // resetear NP/media en Idle->Recording y congelar en pausa.
         serviceScope.launch {
             var acquiredForComparison = false
+            // Tracks the previous recording state so FileLogTree.newRide fires exactly once on the
+            // Idle/Paused -> Recording transition (not on every emission of this combine).
+            var wasRecording = false
             kotlinx.coroutines.flow.combine(
                 karooSystem.consumerFlow<RideState>(),
                 applicationContext.comparisonModeFlow(),
@@ -192,6 +200,12 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                     engine.onRideState(state)
                     antManager.onRideState(state)
                     isRecording = state is RideState.Recording
+                    // New per-ride diagnostic log on the transition INTO Recording (no-op when the
+                    // toggle is off). Fires once per ride start, not on every emission.
+                    if (isRecording && !wasRecording) {
+                        FileLogTree.newRide(System.currentTimeMillis())
+                    }
+                    wasRecording = isRecording
                     val dyn = recordDynamics
                     // Estimate engine acquire/release stays tied to COMPARISON mode only;
                     // dynamics recording does not need the estimate engine running.
