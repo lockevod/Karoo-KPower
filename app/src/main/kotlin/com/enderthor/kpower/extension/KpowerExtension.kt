@@ -243,11 +243,18 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                     // Estimate engine acquire/release stays tied to COMPARISON mode only;
                     // dynamics recording does not need the estimate engine running.
                     val shouldRunComparison = mode && state is RideState.Recording
-                    // Raw ANT meters connect when at least one saved meter is ENABLED (its real
-                    // power + dynamics are recorded/shown every ride) AND we are recording.
+                    // Raw ANT meters connect when at least one saved meter is ENABLED AND we are in an
+                    // ACTIVE ride session — Recording OR Paused. We include Paused (not just Recording)
+                    // so the rider can see live real power on the ride screen during a stop/autopause
+                    // without the channel flapping closed-open every traffic light. We deliberately do
+                    // NOT include Idle: Idle covers BOTH "ride screen, not yet recording" AND "in the
+                    // settings/scan screen", and keeping the channel open in Idle starves the ANT+ scan
+                    // (MultiDeviceSearch) and drains the radio off-ride. So real power appears once the
+                    // ride is started; before that the field shows `---`.
                     // Comparison mode no longer drives the meter connection — it only drives the
                     // estimate engine, acquired separately via shouldRunComparison above.
-                    val shouldConnect = meters.any { it.enabled } && state is RideState.Recording
+                    val inActiveRide = state is RideState.Recording || state is RideState.Paused
+                    val shouldConnect = meters.any { it.enabled } && inActiveRide
                     if (shouldRunComparison && !acquiredForComparison) {
                         engine.acquire(comparisonToken); acquiredForComparison = true
                     } else if (!shouldRunComparison && acquiredForComparison) {

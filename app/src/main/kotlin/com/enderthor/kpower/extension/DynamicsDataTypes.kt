@@ -64,10 +64,13 @@ class DynamicsDataType(
                 .sample(1.seconds)
                 .distinctUntilChanged()
                 .collect { (enabled, value) ->
-                    if (!enabled || value.isNaN()) {
-                        emitter.onNext(StreamState.NotAvailable)
-                    } else {
-                        emitter.onNext(
+                    when {
+                        // No enabled meter at all → genuinely "no device".
+                        !enabled -> emitter.onNext(StreamState.NotAvailable)
+                        // Meter present but this metric isn't streaming yet (not in an active ride,
+                        // connecting, coasting, or the meter doesn't send this page) → SEARCHING.
+                        value.isNaN() -> emitter.onNext(StreamState.Searching)
+                        else -> emitter.onNext(
                             StreamState.Streaming(
                                 DataPoint(dataTypeId, values = mapOf(DataType.Field.SINGLE to value))
                             )

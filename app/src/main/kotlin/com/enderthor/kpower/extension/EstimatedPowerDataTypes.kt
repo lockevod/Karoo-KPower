@@ -56,7 +56,9 @@ class EstimatedPowerDataType(
                 .distinctUntilChanged()
                 .collect { (hasSample, value) ->
                     if (!hasSample || value.isNaN()) {
-                        emitter.onNext(StreamState.NotAvailable)
+                        // The estimate is a computed value, never a "device" — while it's warming up
+                        // (no sample yet) show SEARCHING rather than a "no device" NotAvailable.
+                        emitter.onNext(StreamState.Searching)
                     } else {
                         emitter.onNext(
                             StreamState.Streaming(
