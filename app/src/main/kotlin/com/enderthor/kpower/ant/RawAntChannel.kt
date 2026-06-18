@@ -110,6 +110,8 @@ class RawAntChannel(
         // Forget the dead channel so open() acquires a brand-new one instead of reusing it.
         val dead = channel
         channel = null
+        runCatching { dead?.close() }
+        runCatching { dead?.unassign() }
         runCatching { dead?.release() }
         scope.launch {
             delay(REOPEN_BACKOFF_MS)
@@ -120,8 +122,11 @@ class RawAntChannel(
     fun stop() {
         stopped = true
         scope.launch {
-            runCatching { channel?.close() }
-            runCatching { channel?.unassign() }
+            val ch = channel
+            channel = null
+            runCatching { ch?.close() }
+            runCatching { ch?.unassign() }
+            runCatching { ch?.release() }
             runCatching { context.unbindService(conn) }
         }.invokeOnCompletion {
             // Cancel the scope only AFTER cleanup runs, so the channel teardown + unbind complete.
