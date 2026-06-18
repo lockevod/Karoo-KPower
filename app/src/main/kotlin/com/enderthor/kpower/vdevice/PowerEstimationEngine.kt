@@ -190,7 +190,12 @@ class PowerEstimationEngine(
                                 else GpsCoordinates(lastLat, lastLon)
                                     .distanceTo(GpsCoordinates(loc.lat, loc.lng)) * 1000.0
                             if (movedM >= SURFACE_MIN_MOVE_M && now - lastMs >= SURFACE_MIN_INTERVAL_MS) {
-                                liveSurfaceSample = surfaceReader.classifyAt(loc.lat, loc.lng)?.let { it to now }
+                                val classified = surfaceReader.classifyAt(loc.lat, loc.lng)
+                                liveSurfaceSample = classified?.let { it to now }
+                                if (FileLogTree.enabled) Timber.tag("SURFACE").d(
+                                    "classifyAt(%.5f,%.5f) -> %s",
+                                    loc.lat, loc.lng, classified?.name ?: "Unknown(->preset)"
+                                )
                                 lastLat = loc.lat; lastLon = loc.lng; lastMs = now
                             }
                         }
@@ -328,7 +333,7 @@ class PowerEstimationEngine(
             frontalArea = config.frontalArea.toDoubleLocale(),
             ftp = ftp,
             isPedaling = isPedaling,
-            surface = effectiveSurface(config, freshLiveSurface()).factor,
+            surface = resolveSurfaceForCalc(config).factor,
             isforcepower = isforcepower,
             temperatureC = temperatureC,
             pressurePa = pressurePa,
@@ -338,4 +343,32 @@ class PowerEstimationEngine(
 
     private fun freshLiveSurface(): KarooSurface? =
         liveSurfaceSample?.takeIf { System.currentTimeMillis() - it.second < SURFACE_MAX_AGE_MS }?.first
+
+    @Volatile private var lastSurfaceLogKey: String? = null
+
+    /**
+     * Effective surface used by the calc, plus a diagnostic log (when logging is on) that makes the
+     * source explicit so deviations can be correlated: whether it's the LIVE map classification or a
+     * fallback to the rider's PRESET (feature off / no map data). Logged only on change → no spam.
+     */
+    private fun resolveSurfaceForCalc(config: ConfigData): KarooSurface {
+        val live = freshLiveSurface()
+        val effective = effectiveSurface(config, live)
+        if (FileLogTree.enabled) {
+            val source = when {
+                !config.useRouteSurface -> "preset(feature-off)"
+                live == null -> "preset(no-live-data)"
+                else -> "live-map"
+            }
+            val key = "${effective.name}/$source"
+            if (key != lastSurfaceLogKey) {
+                lastSurfaceLogKey = key
+                Timber.tag("SURFACE").d(
+                    "effective=%s (factor=%.2f) source=%s preset=%s",
+                    effective.name, effective.factor, source, config.surface.name
+                )
+            }
+        }
+        return effective
+    }
 }
