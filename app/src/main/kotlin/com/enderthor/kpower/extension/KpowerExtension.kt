@@ -151,9 +151,13 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
             karooSystem.updateLastKnownGps(this@KpowerExtension)
         }
 
-        // Drive the diagnostic file logger from the rider's toggle (off by default).
+        // Drive the diagnostic file logger from the rider's toggle (off by default). On turn-OFF,
+        // flush the tail and close the writer so the last seconds aren't lost and the fd isn't leaked.
         serviceScope.launch {
-            applicationContext.diagnosticLogFlow().collect { FileLogTree.enabled = it }
+            applicationContext.diagnosticLogFlow().collect { on ->
+                FileLogTree.enabled = on
+                if (!on) FileLogTree.flushAndClose()
+            }
         }
 
         serviceScope.launch {

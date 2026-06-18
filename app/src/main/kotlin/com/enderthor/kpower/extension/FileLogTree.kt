@@ -24,19 +24,27 @@ import java.time.format.DateTimeFormatter
  * Threading (adapted from KGhost's FileLogTree, simplified — no Telegram/sessionId/upload):
  *  - An in-memory ring buffer drained by a single background IO coroutine, so there is NO file I/O
  *    on the calling (Timber) thread.
- *  - A [BufferedWriter] is kept open for the duration of each file (one open/close per ride, not
- *    per flush). Each flush drains the buffer with a single [BufferedWriter.flush] — no
- *    FileOutputStream open/close every second.
- *  - The [buffer] uses a plain [synchronized] block (held briefly on the log path) so Timber
- *    callers are never blocked on I/O.
+ *  - A [BufferedWriter] is kept open across flushes; [writer]/[writerFile] are touched ONLY from the
+ *    flush loop, so they need no synchronisation. The buffer uses a brief [synchronized] block.
+ *  - [logFile] is read AND written under the [buffer] lock so that a [newRide] file-swap and the
+ *    banner it enqueues stay consistent with the drain (otherwise a flush in flight could write the
+ *    new ride's banner into the previous ride's file).
  *
  * Data availability:
  *  - [FLUSH_INTERVAL_MS] = 1 s while [enabled] — data is on disk within a second, readable mid-ride.
  *  - While disabled the loop idle-polls every [IDLE_POLL_MS].
  *  - [newRide] triggers an immediate flush via a [Channel] so the ride-start banner hits disk fast.
+ *  - [flushAndClose] (called when the toggle goes OFF) drains the tail and CLOSES the writer, so the
+ *    last seconds aren't lost and the file descriptor isn't leaked until process death.
  *
- * Storage: app-scoped external dir `…/Android/data/com.enderthor.kpower/files/logs` (NO runtime
- * permission needed; readable via Android Studio Device Explorer / a file manager).
+ * Storage bounds (only relevant while logging is ON):
+ *  - A single file is rotated once it exceeds [MAX_FILE_BYTES] (so one long ride can't grow one file
+ *    without limit).
+ *  - Old `.log` files are purged to stay within BOTH [MAX_LOG_FILES] and [MAX_TOTAL_BYTES]; the
+ *    currently-active file is never deleted.
+ *
+ * Storage location: app-scoped external dir `…/Android/data/com.enderthor.kpower/files/logs` (NO
+ * runtime permission needed; readable via Android Studio Device Explorer / a file manager).
  *
  * Cost when [enabled] is false: a single volatile read per log call.
  */
@@ -50,15 +58,23 @@ object FileLogTree : Timber.Tree() {
     private const val FLUSH_INTERVAL_MS = 1_000L   // 1 s: data on disk fast, visible mid-ride
     private const val IDLE_POLL_MS = 60_000L       // 60 s: slow poll while logging is OFF
     private const val MAX_LOG_FILES = 6
+    private const val MAX_FILE_BYTES = 5L * 1024 * 1024    // 5 MB: rotate a single file past this
+    private const val MAX_TOTAL_BYTES = 40L * 1024 * 1024  // 40 MB: total .log budget across files
 
     private val buffer = ArrayDeque<String>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val ts = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS").withZone(ZoneId.systemDefault())
-    private val rideFmt = DateTimeFormatter.ofPattern("yyyy-MM-dd-HHmmss").withZone(ZoneId.systemDefault())
+    // Millis in the ride stamp so two rides started in the same second can't collide on one filename.
+    private val rideFmt = DateTimeFormatter.ofPattern("yyyy-MM-dd-HHmmss-SSS").withZone(ZoneId.systemDefault())
 
-    // Signals the flush loop to wake up immediately (e.g. on newRide).
+    // Signals the flush loop to wake up immediately (e.g. on newRide / flushAndClose).
     // CONFLATED: multiple signals before the loop wakes collapse to one flush.
     private val flushSignal = Channel<Unit>(Channel.CONFLATED)
+
+    @Volatile private var logDir: File? = null
+    // Current file = "<baseName>.log" (part 0) or "<baseName>-p<part>.log" after a size rotation.
+    private var baseName: String = "kpower"
+    private var part: Int = 0
 
     @Volatile
     private var logFile: File? = null
@@ -66,9 +82,18 @@ object FileLogTree : Timber.Tree() {
     @Volatile
     private var started = false
 
+    /** Requested by [flushAndClose]; consumed by the flush loop AFTER a final drain. */
+    @Volatile
+    private var closeRequested = false
+
     // ── Persistent writer — accessed ONLY from the flush loop (no lock needed) ──────────────────
     private var writer: BufferedWriter? = null
     private var writerFile: File? = null   // which file the writer is currently opened for
+
+    private fun currentFile(): File? {
+        val dir = logDir ?: return null
+        return File(dir, if (part == 0) "$baseName.log" else "$baseName-p$part.log")
+    }
 
     /**
      * Resolve the log directory and start the background flush loop. Call ONCE (from the
@@ -79,7 +104,10 @@ object FileLogTree : Timber.Tree() {
         started = true
         val dir = File(context.getExternalFilesDir(null) ?: context.filesDir, "logs")
         runCatching { dir.mkdirs() }
-        logFile = File(dir, "kpower.log")
+        logDir = dir
+        baseName = "kpower"
+        part = 0
+        logFile = currentFile()
         scope.launch {
             while (true) {
                 // Wait for either a flush signal (immediate) or the periodic interval.
@@ -90,6 +118,7 @@ object FileLogTree : Timber.Tree() {
                     delay(if (enabled) FLUSH_INTERVAL_MS else IDLE_POLL_MS)
                 }
                 flush()
+                if (closeRequested) { closeWriter(); closeRequested = false }
             }
         }
     }
@@ -103,14 +132,17 @@ object FileLogTree : Timber.Tree() {
      */
     fun newRide(epochMs: Long) {
         if (!enabled) return
-        val dir = logFile?.parentFile ?: return
+        val dir = logDir ?: return
         val stamp = rideFmt.format(Instant.ofEpochMilli(epochMs))
-        logFile = File(dir, "kpower-$stamp.log")
+        // Swap the file AND enqueue the banner under the same lock the flush drain uses, so the
+        // banner can't be drained into the previous ride's file.
         synchronized(buffer) {
+            baseName = "kpower-$stamp"
+            part = 0
+            logFile = currentFile()
             if (buffer.size >= MAX_BUFFER) buffer.removeFirst()
             buffer.addLast("${ts.format(Instant.now())} I/kpower: ===== RIDE START ($stamp) =====")
         }
-        // Wake the flush loop immediately so banner + any pre-ride lines hit disk right away.
         flushSignal.trySend(Unit)
         scope.launch { purgeOldLogs(dir) }
     }
@@ -130,46 +162,85 @@ object FileLogTree : Timber.Tree() {
         }
     }
 
+    /** Drain the tail and close the writer (called when logging is turned OFF). */
+    fun flushAndClose() {
+        closeRequested = true
+        flushSignal.trySend(Unit)
+    }
+
     /**
-     * Drain the buffer to the current log file.
-     *
-     * Called ONLY from the flush-loop coroutine (Dispatchers.IO), so [writer] / [writerFile]
-     * need no synchronisation — there is exactly one writer at a time.
+     * Drain the buffer to the current log file. Called ONLY from the flush-loop coroutine, so
+     * [writer]/[writerFile]/[part] mutations here need no extra synchronisation (single writer).
      */
     private fun flush() {
-        val targetFile = logFile ?: return
-        // Re-open the writer when the log file changes (newRide sets a new logFile).
+        val targetFile: File
+        val lines: List<String>
+        synchronized(buffer) {
+            if (buffer.isEmpty()) return
+            targetFile = logFile ?: return
+            lines = buffer.toList()
+            buffer.clear()
+        }
+        // Re-open the writer when the target file changed (newRide / rotation).
         if (writerFile != targetFile) {
             runCatching { writer?.close() }
             writer = runCatching { FileWriter(targetFile, /* append= */ true).buffered() }.getOrNull()
             writerFile = targetFile
         }
         val w = writer ?: return
-        val lines: List<String>
-        synchronized(buffer) {
-            if (buffer.isEmpty()) return
-            lines = buffer.toList()
-            buffer.clear()
-        }
         runCatching {
             lines.forEach { line -> w.write(line); w.newLine() }
             w.flush()   // flush to OS; keep the writer open for the next cycle
         }.onFailure {
-            // Writer broken — reset so the next cycle re-opens a fresh one.
             runCatching { writer?.close() }
             writer = null
             writerFile = null
         }
+        // Rotate if this file has grown past the per-file cap, so a single ride can't grow one
+        // file without bound. Purge afterwards to keep the total byte budget mid-ride.
+        val wf = writerFile
+        if (wf != null && runCatching { wf.length() }.getOrDefault(0L) > MAX_FILE_BYTES) {
+            rotate()
+            logDir?.let { purgeOldLogs(it) }
+        }
     }
 
-    /** Delete the oldest `.log` files in [dir] so at most [MAX_LOG_FILES] remain. */
+    /** Move to the next file part (closes the current writer; next flush re-opens). */
+    private fun rotate() {
+        runCatching { writer?.flush() }
+        runCatching { writer?.close() }
+        writer = null
+        writerFile = null
+        synchronized(buffer) {
+            part += 1
+            logFile = currentFile()
+        }
+    }
+
+    private fun closeWriter() {
+        runCatching { writer?.flush() }
+        runCatching { writer?.close() }
+        writer = null
+        writerFile = null
+    }
+
+    /**
+     * Delete the oldest `.log` files so at most [MAX_LOG_FILES] remain AND the total stays within
+     * [MAX_TOTAL_BYTES]. The currently-active file is never deleted.
+     */
     private fun purgeOldLogs(dir: File) {
         runCatching {
-            val logs = dir.listFiles { f -> f.name.endsWith(".log") } ?: return
-            if (logs.size <= MAX_LOG_FILES) return
-            logs.sortedBy { it.lastModified() }
-                .take(logs.size - MAX_LOG_FILES)
-                .forEach { it.delete() }
+            val logs = (dir.listFiles { f -> f.name.endsWith(".log") } ?: return)
+                .sortedBy { it.lastModified() }
+            val active = logFile
+            var count = logs.size
+            var total = logs.sumOf { runCatching { it.length() }.getOrDefault(0L) }
+            for (f in logs) {
+                if (count <= MAX_LOG_FILES && total <= MAX_TOTAL_BYTES) break
+                if (f == active) continue
+                val len = runCatching { f.length() }.getOrDefault(0L)
+                if (f.delete()) { count -= 1; total -= len }
+            }
         }
     }
 
