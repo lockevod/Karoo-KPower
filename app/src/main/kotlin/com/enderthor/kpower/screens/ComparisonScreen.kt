@@ -119,9 +119,11 @@ fun ComparisonScreen() {
                         shape = RoundedCornerShape(corner = CornerSize(10.dp))
                     ) {
                         Column(Modifier.padding(10.dp)) {
+                            val hasMeter = saved.isNotEmpty()
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Switch(
                                     checked = recordDynamics,
+                                    enabled = hasMeter,
                                     onCheckedChange = { enabled ->
                                         scope.launch { saveRecordDynamics(ctx, enabled) }
                                     }
@@ -136,6 +138,14 @@ fun ComparisonScreen() {
                                     "Live dynamics fields update only while recording.",
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            if (!hasMeter) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "Add a recorded meter below first.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
                                 text = stringResource(R.string.dynamics_only_hint),

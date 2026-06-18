@@ -1,8 +1,11 @@
 <resources>
     <string name="app_name">KPower</string>
     <string name="extension_name">KPower</string>
-    <string name="drag_coefficient_desc">Drag Coefficient. Only useful if you have a real power meter</string>
-    <string name="drag_coefficient">CDrag</string>
+    <string name="drag_coefficient_desc">Cd (aero drag coefficient). Only useful if you have a real power meter</string>
+    <string name="drag_coefficient">Cd</string>
+    <string name="profile_power_source_hint">To show power, add the “KPower” sensor as the power source in this Karoo ride profile.</string>
+    <string name="weather_provider_label">Weather provider</string>
+    <string name="weather_provider_switch">Use OpenWeather (needs API key); off = OpenMeteo (free)</string>
     <string name="est_instant_name">Est. Power</string>
     <string name="est_instant_desc">KPower estimated instantaneous power (requires Comparison mode)</string>
     <string name="est_3s_name">Est. Power 3s</string>

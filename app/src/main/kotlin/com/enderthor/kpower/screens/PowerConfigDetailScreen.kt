@@ -137,6 +137,8 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
             .padding(5.dp)
             .verticalScroll(rememberScrollState())
             .fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Bike", style = MaterialTheme.typography.titleSmall)
+
             OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Title") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
 
             apply {
@@ -150,6 +152,12 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                 }
             }
 
+            Text(
+                text = stringResource(R.string.profile_power_source_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
             if (knownProfiles.isEmpty()) {
                 Text(
                     text = "No Karoo profiles seen yet — open each ride profile once on the Karoo (or start a ride with it) and it will appear here.",
@@ -161,7 +169,7 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
             apply {
                 val sourceOptions = listOf(
                     DropdownOption("ESTIMATE", "Estimated"),
-                    DropdownOption("EXTERNAL", "External (other Karoo sensor)"),
+                    DropdownOption("EXTERNAL", "Other sensor (paired in Karoo)"),
                 ) + savedMeters.map { DropdownOption("REAL:${it.deviceNumber}", it.label) }
                 val currentSourceId = when {
                     primarySource == "ESTIMATE" -> "ESTIMATE"
@@ -203,7 +211,24 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                         applyPreset(BikePosition.valueOf(opt.id))
                     }
                 }
+            }
 
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(checked = simpleMode, onCheckedChange = { simpleMode = it })
+                Spacer(modifier = Modifier.width(10.dp))
+                Text("Simple mode (hide advanced)")
+            }
+
+            OutlinedTextField(value = bikeMass, modifier = Modifier.fillMaxWidth(),
+                onValueChange = { bikeMass = it },
+                label = { Text("Bike Mass") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true
+            )
+
+            Text("Tyres & surface", style = MaterialTheme.typography.titleSmall)
+
+            if (simpleMode) {
                 OutlinedTextField(value = riderHeight, modifier = Modifier.fillMaxWidth(),
                     onValueChange = { riderHeight = it; recomputeArea() },
                     label = { Text("Rider height") }, suffix = { Text("cm") },
@@ -245,25 +270,6 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                 }
             }
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Switch(checked = useProfileFtp, onCheckedChange = { useProfileFtp = it })
-                Spacer(modifier = Modifier.width(10.dp))
-                Text("Use FTP from Karoo profile?")
-            }
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Switch(checked = simpleMode, onCheckedChange = { simpleMode = it })
-                Spacer(modifier = Modifier.width(10.dp))
-                Text("Simple mode (hide advanced)")
-            }
-
-            OutlinedTextField(value = bikeMass, modifier = Modifier.fillMaxWidth(),
-                onValueChange = { bikeMass = it },
-                label = { Text("Bike Mass") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                singleLine = true
-            )
-
             apply {
                 val dropdownOptions = KarooSurface.entries.toList()
                     .map { unit -> DropdownOption(unit.factor.toString(), unit.surface) }
@@ -271,14 +277,94 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                     mutableStateOf(dropdownOptions.find { option -> option.id == surface.factor.toString() }!!)
                 }
                 KarooKeyDropdown(
-                    remotekey = "Surface", options = dropdownOptions, selectedOption = dropdownInitialSelection
+                    remotekey = if (useRouteSurface) "Default surface (used if the map can't be read)" else "Surface",
+                    options = dropdownOptions, selectedOption = dropdownInitialSelection
                 ) { selectedOption ->
                     surface =
                         KarooSurface.entries.find { unit -> unit.factor.toString() == selectedOption.id }!!
                 }
             }
 
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(checked = useRouteSurface, onCheckedChange = { useRouteSurface = it })
+                Spacer(modifier = Modifier.width(10.dp))
+                Text("Auto surface from offline maps")
+            }
+
+            if (useRouteSurface) {
+                Text(
+                    text = "KPower reads the OSM surface under you from the offline maps " +
+                        "(/offline/maps) and adjusts the Crr live (paved/standard/gravel/sand). " +
+                        "Needs offline maps for the area and storage permission; otherwise it keeps " +
+                        "the surface you selected above.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Text("Rider & FTP", style = MaterialTheme.typography.titleSmall)
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(checked = useProfileFtp, onCheckedChange = { useProfileFtp = it })
+                Spacer(modifier = Modifier.width(10.dp))
+                Text("Use FTP from Karoo profile?")
+            }
+
+            OutlinedTextField(
+                value = if (useProfileFtp && riderFtp > 0) riderFtp.toString() else ftp,
+                modifier = Modifier.fillMaxWidth(),
+                onValueChange = { if (!useProfileFtp) ftp = it },
+                label = { Text(if (useProfileFtp) "FTP (from Karoo profile)" else "FTP") },
+                suffix = { Text("W") },
+                enabled = !useProfileFtp,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true
+            )
+
+            Text("Weather", style = MaterialTheme.typography.titleSmall)
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(checked = preferHeadwind, onCheckedChange = { preferHeadwind = it })
+                Spacer(modifier = Modifier.width(10.dp))
+                Text("Use Headwind weather if installed")
+            }
+
+            if (preferHeadwind) {
+                Text(
+                    text = if (headwindInstalled)
+                        "Headwind detected: KPower will take temperature, pressure and wind from it and skip its own weather lookups. Wind assumes Headwind's default unit (km/h metric / mph imperial); if you set it to m/s or knots in Headwind, wind will be wrong."
+                    else
+                        "Headwind not installed: KPower will use its own weather (OpenMeteo/OpenWeather below).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            // Weather-provider switch + API key are expert knobs hidden in Simple mode, and
+            // are also hidden when Headwind is installed and selected (it supplies weather).
+            if (!simpleMode && !(preferHeadwind && headwindInstalled)) {
+                Text(stringResource(R.string.weather_provider_label), style = MaterialTheme.typography.bodySmall)
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Switch(checked = isOpenWeather, onCheckedChange = {
+                        isOpenWeather = it
+                       // if (it) isActive = false
+                    })
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(stringResource(R.string.weather_provider_switch))
+                }
+
+                OutlinedTextField(value = apikey.toString(), modifier = Modifier.fillMaxWidth(),
+                    onValueChange = { apikey = it },
+                    label = { Text("API OpenWeather") },
+                    singleLine = true,
+                    enabled = isOpenWeather
+                )
+            }
+
             if (!simpleMode) {
+                Text("Advanced", style = MaterialTheme.typography.titleSmall)
+
                 OutlinedTextField(value = rollingResistanceCoefficient, modifier = Modifier.fillMaxWidth(),
                     onValueChange = { rollingResistanceCoefficient = it },
                     label = { Text("Crr") },
@@ -288,7 +374,7 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
 
                 OutlinedTextField(value = dragCoefficient, modifier = Modifier.fillMaxWidth(),
                     onValueChange = { dragCoefficient = it },
-                    label = { Text("Cdr") },
+                    label = { Text("Cd (aero)") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true
                 )
@@ -314,75 +400,14 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                     Spacer(modifier = Modifier.width(10.dp))
                     Text("Use Karoo temperature sensor as fallback?")
                 }
-            }
 
-            OutlinedTextField(
-                value = if (useProfileFtp && riderFtp > 0) riderFtp.toString() else ftp,
-                modifier = Modifier.fillMaxWidth(),
-                onValueChange = { if (!useProfileFtp) ftp = it },
-                label = { Text(if (useProfileFtp) "FTP (from Karoo profile)" else "FTP") },
-                suffix = { Text("W") },
-                enabled = !useProfileFtp,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                singleLine = true
-            )
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Switch(checked = preferHeadwind, onCheckedChange = { preferHeadwind = it })
-                Spacer(modifier = Modifier.width(10.dp))
-                Text("Use Headwind weather if installed")
-            }
-
-            if (preferHeadwind) {
-                Text(
-                    text = if (headwindInstalled)
-                        "Headwind detected: KPower will take temperature, pressure and wind from it and skip its own weather lookups. Wind assumes Headwind's default unit (km/h metric / mph imperial); if you set it to m/s or knots in Headwind, wind will be wrong."
-                    else
-                        "Headwind not installed: KPower will use its own weather (OpenMeteo/OpenWeather below).",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Switch(checked = useRouteSurface, onCheckedChange = { useRouteSurface = it })
-                Spacer(modifier = Modifier.width(10.dp))
-                Text("Auto surface from offline maps")
-            }
-
-            if (useRouteSurface) {
-                Text(
-                    text = "KPower reads the OSM surface under you from the offline maps " +
-                        "(/offline/maps) and adjusts the Crr live (paved/standard/gravel/sand). " +
-                        "Needs offline maps for the area and storage permission; otherwise it keeps " +
-                        "the surface you selected above.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            OutlinedTextField(value = apikey.toString(), modifier = Modifier.fillMaxWidth(),
-                onValueChange = { apikey = it },
-                label = { Text("API OpenWeather") },
-                singleLine = true,
-                enabled = isOpenWeather
-            )
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Switch(checked = isOpenWeather, onCheckedChange = {
-                    isOpenWeather = it
-                   // if (it) isActive = false
-                })
-                Spacer(modifier = Modifier.width(10.dp))
-                Text("OpenMeteo or OpenWeather(checked)?")
-            }
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Switch(checked = isforcepower, onCheckedChange = {
-                    isforcepower = it
-                })
-                Spacer(modifier = Modifier.width(10.dp))
-                Text("Ignore low cadence (always calculate power)?")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Switch(checked = isforcepower, onCheckedChange = {
+                        isforcepower = it
+                    })
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text("Ignore low cadence (always calculate power)?")
+                }
             }
 
             FilledTonalButton(modifier = Modifier

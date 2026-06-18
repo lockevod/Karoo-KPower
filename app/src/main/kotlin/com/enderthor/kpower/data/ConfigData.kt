@@ -57,10 +57,10 @@ enum class KarooSurface(
     val surface: String,
     val factor: Double,
 ) {
-    ASPHALT("Asphalt/Concrete", 0.75),
-    STANDARD("Standard/Mix/Gravel", 0.93),
-    GRAVEL("Mountain Mix", 1.05),
-    SAND("Mountain Off Road/Sand", 2.20),
+    ASPHALT("Asphalt / concrete", 0.75),
+    STANDARD("Smooth gravel / hardpack", 0.93),
+    GRAVEL("Gravel / dirt", 1.05),
+    SAND("Sand / mud / soft", 2.20),
 }
 
 // tubelessFactor: reducción de Crr al montar tubeless vs cámara, según datos de

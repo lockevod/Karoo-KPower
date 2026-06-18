@@ -167,7 +167,7 @@ fun MainScreen(
 ) {
 
     Scaffold(
-        topBar = { TopAppBar(title = {Text("Config")}) },
+        topBar = { TopAppBar(title = {Text("Bikes")}) },
         floatingActionButtonPosition = FabPosition.End,
         floatingActionButton = {
             FloatingActionButton(onClick = onNavigateToCreate) {
@@ -210,7 +210,7 @@ fun MainScreen(
                     }
                 }
 
-                if (configDatas.isEmpty()) Text(modifier = Modifier.padding(5.dp), text = "No configuration added.")
+                if (configDatas.isEmpty()) Text(modifier = Modifier.padding(5.dp), text = "No bikes yet — tap + to add one.")
 
             }
         }
