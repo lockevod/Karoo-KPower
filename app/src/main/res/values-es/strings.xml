@@ -50,8 +50,8 @@
     <string name="bikes_empty">Aún no hay bicis — toca + para añadir una.</string>
 
     <!-- Comparison screen -->
-    <string name="comparison_mode_label">Modo comparación</string>
-    <string name="comparison_mode_desc">Expone 4 campos de datos de potencia estimada y los escribe en el FIT (est_power, est_power_3s, est_np, est_avg). Para comparar con un potenciómetro real. Off por defecto — aumenta batería/CPU y el tamaño del FIT.</string>
+    <string name="comparison_mode_label">Grabar estimada (FIT)</string>
+    <string name="comparison_mode_desc">Graba la potencia estimada de KPower en el FIT como campos extra (est_power, est_np…) para compararla con un medidor real. Off por defecto.</string>
     <string name="dynamics_auto_info">Las dinámicas de pedaleo de un medidor grabado se escriben en el FIT automáticamente durante la ruta (el Karoo no puede grabarlas).</string>
     <string name="diagnostic_log_path_prefix">Registro: </string>
 

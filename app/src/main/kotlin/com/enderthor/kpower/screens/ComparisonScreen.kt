@@ -78,58 +78,7 @@ fun ComparisonScreen() {
                     .fillMaxSize()
                     .background(MaterialTheme.colorScheme.background)
             ) {
-                // First item: comparison-mode toggle card.
-                item {
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(5.dp),
-                        shape = RoundedCornerShape(corner = CornerSize(10.dp))
-                    ) {
-                        Column(Modifier.padding(10.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Switch(
-                                    checked = comparisonMode,
-                                    onCheckedChange = { enabled ->
-                                        scope.launch { saveComparisonMode(ctx, enabled) }
-                                    }
-                                )
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Text(stringResource(R.string.comparison_mode_label))
-                            }
-                            Text(
-                                text = stringResource(R.string.comparison_mode_desc),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-
-                // Second item: cycling-dynamics info note. Dynamics from a recorded meter are
-                // written to the FIT automatically — no opt-in toggle needed.
-                item {
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(5.dp),
-                        shape = RoundedCornerShape(corner = CornerSize(10.dp))
-                    ) {
-                        Column(Modifier.padding(10.dp)) {
-                            Text(
-                                text = stringResource(R.string.dynamics_auto_info),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(
-                                text = stringResource(R.string.dynamics_only_hint),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-
-                // ANT+ scan UI — same LazyColumn, no nested scroll.
+                // ANT+ scan UI first (the main content of this tab) — same LazyColumn, no nested scroll.
                 antScanItems(
                     manager = antManager,
                     saved = saved,
@@ -165,6 +114,58 @@ fun ComparisonScreen() {
                         scope.launch { saveAntMeters(ctx, next) }
                     },
                 )
+
+                // Cycling-dynamics info note. Dynamics from a recorded meter are written to the FIT
+                // automatically — no opt-in toggle needed.
+                item {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(5.dp),
+                        shape = RoundedCornerShape(corner = CornerSize(10.dp))
+                    ) {
+                        Column(Modifier.padding(10.dp)) {
+                            Text(
+                                text = stringResource(R.string.dynamics_auto_info),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = stringResource(R.string.dynamics_only_hint),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
+                // Comparison toggle (near the bottom): just enables writing the ESTIMATE to the FIT.
+                item {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(5.dp),
+                        shape = RoundedCornerShape(corner = CornerSize(10.dp))
+                    ) {
+                        Column(Modifier.padding(10.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Switch(
+                                    checked = comparisonMode,
+                                    onCheckedChange = { enabled ->
+                                        scope.launch { saveComparisonMode(ctx, enabled) }
+                                    }
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(stringResource(R.string.comparison_mode_label))
+                            }
+                            Text(
+                                text = stringResource(R.string.comparison_mode_desc),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
 
                 // Last item: diagnostic-logging toggle (kept at the very bottom).
                 item {

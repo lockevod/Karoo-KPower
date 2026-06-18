@@ -50,8 +50,8 @@
     <string name="bikes_empty">No bikes yet — tap + to add one.</string>
 
     <!-- Comparison screen -->
-    <string name="comparison_mode_label">Comparison mode</string>
-    <string name="comparison_mode_desc">Exposes 4 estimated-power data fields and writes them to the FIT (est_power, est_power_3s, est_np, est_avg). For comparing against a real power meter. Off by default — increases battery/CPU and FIT size.</string>
+    <string name="comparison_mode_label">Log estimated power (FIT)</string>
+    <string name="comparison_mode_desc">Writes KPower\'s estimated power to the FIT as extra fields (est_power, est_np…) to compare against a real meter. Off by default.</string>
     <string name="dynamics_auto_info">Cycling dynamics from a recorded meter are written to the FIT automatically during rides (the Karoo can\'t record them itself).</string>
     <string name="diagnostic_log_path_prefix">Log: </string>
 
