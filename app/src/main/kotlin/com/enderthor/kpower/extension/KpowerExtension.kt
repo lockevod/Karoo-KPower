@@ -113,20 +113,22 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
     }
 
     // Memoize per (slot,kind): names/units are fixed, so a new DeveloperField every FIT
-    // tick was a needless allocation. Single-threaded (FIT collect loop) so a plain map is fine.
-    private val meterFieldCache = HashMap<Pair<Int, Int>, DeveloperField>()
+    // tick was a needless allocation. ConcurrentHashMap + computeIfAbsent: the FIT collect loop is
+    // normally the only writer, but if the host ever overlaps two startFit subscriptions a plain
+    // HashMap could ConcurrentModificationException mid-recording — this makes it crash-proof.
+    private val meterFieldCache = java.util.concurrent.ConcurrentHashMap<Pair<Int, Int>, DeveloperField>()
     private fun meterField(slot: Int, kind: Int, name: String, units: String) =
-        meterFieldCache.getOrPut(slot to kind) {
+        meterFieldCache.computeIfAbsent(slot to kind) {
             DeveloperField(
                 (com.enderthor.kpower.ant.fitFieldBase(slot) + kind).toShort(), 136, name, units,
             )
         }
 
     // Memoized DeveloperField cache for cycling-dynamics fields (single meter). Numbers come from
-    // DynField (8..). Single-threaded (FIT collect loop) so a plain map is fine.
-    private val dynFieldCache = HashMap<Int, DeveloperField>()
+    // DynField (32..). ConcurrentHashMap for the same overlap-safety reason as meterFieldCache.
+    private val dynFieldCache = java.util.concurrent.ConcurrentHashMap<Int, DeveloperField>()
     private fun dynField(num: Int, name: String, units: String) =
-        dynFieldCache.getOrPut(num) { DeveloperField(num.toShort(), 136, name, units) }
+        dynFieldCache.computeIfAbsent(num) { DeveloperField(num.toShort(), 136, name, units) }
 
     private val fieldEstPower = DeveloperField(0, 136, "est_power", "W")
     private val fieldEstPower3s = DeveloperField(1, 136, "est_power_3s", "W")

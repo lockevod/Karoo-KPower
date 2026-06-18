@@ -33,6 +33,6 @@
     <string name="dyn_peakpp_left_desc">Real meter left peak power-phase start angle, degrees (requires Cycling dynamics)</string>
     <string name="dyn_peakpp_right_name">Real Peak PP Start R</string>
     <string name="dyn_peakpp_right_desc">Real meter right peak power-phase start angle, degrees (requires Cycling dynamics)</string>
-    <string name="meter_double_pair_warning">Tip: to feed this meter to the Karoo, pair the “KPower: Real …” sensor in your ride profile — don\'t also pair the meter natively, or power will be recorded twice.</string>
-    <string name="primary_source_hint">This only tells KPower which source the Karoo records as power (so it isn\'t duplicated in the FIT). You still pick the actual sensor in your Karoo ride profile.</string>
+    <string name="meter_double_pair_warning">Tip: to feed this meter to the Karoo, pair the sensor named “KPower: …” (your meter\'s name with a KPower prefix) in your ride profile — don\'t also pair the meter natively, or power will be recorded twice.</string>
+    <string name="primary_source_hint">This only tells KPower which source the Karoo records as power (so it isn\'t duplicated in the FIT). You still pick the actual sensor in your Karoo ride profile. Estimated needs Comparison mode on; a real meter must be added on the Comparison tab first; External means another sensor you pair directly in the Karoo.</string>
 </resources>
