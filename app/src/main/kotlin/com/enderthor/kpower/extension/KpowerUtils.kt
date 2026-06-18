@@ -1,7 +1,6 @@
 package com.enderthor.kpower.extension
 
 import io.hammerhead.karooext.models.StreamState
-import timber.log.Timber
 
 
 fun StreamState?.getValueOrDefault(): Double {
@@ -12,11 +11,11 @@ fun StreamState?.getValueOrDefault(): Double {
     }
 }
 
-fun String.toDoubleLocale(): Double {
-    return try {
-        replace(',', '.').toDouble()
-    } catch (e: NumberFormatException) {
-        Timber.e(e, "Error convirtiendo '$this' a Double")
-        0.0
-    }
-}
+/**
+ * Parse a user-entered number (comma or dot decimal) to Double. Empty/blank/invalid/non-finite
+ * input → 0.0, WITHOUT throwing or logging — these fields are routinely empty (e.g. rider height on
+ * a new bike), so this must be quiet noise-free. `toDoubleOrNull` avoids the exception entirely;
+ * the `isFinite` guard blocks "NaN"/"Infinity" text from poisoning the power maths.
+ */
+fun String.toDoubleLocale(): Double =
+    trim().replace(',', '.').toDoubleOrNull()?.takeIf { it.isFinite() } ?: 0.0
