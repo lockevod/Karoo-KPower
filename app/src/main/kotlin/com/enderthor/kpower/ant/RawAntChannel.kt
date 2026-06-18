@@ -41,8 +41,17 @@ class RawAntChannel(
     /** Set true by stop(); after this no new channel may be opened or reopened. */
     @Volatile private var stopped = false
 
-    /** Radio-level channel-death count; we stop reopening after MAX_DEATHS to avoid tight loops. */
-    @Volatile private var deaths = 0
+    /**
+     * CONSECUTIVE open/death failures since the link was last healthy. Reset to 0 the moment we
+     * receive a real broadcast page (the only proof the link actually works — an open() that
+     * succeeds but never delivers data still counts against the budget). We stop retrying after
+     * [MAX_FAILURES] to avoid a tight death/reopen loop; a later connect() (e.g. next ride) starts
+     * fresh.
+     */
+    @Volatile private var failures = 0
+
+    /** Guards against two open() attempts running at once (death-retry racing a late rebind). */
+    @Volatile private var opening = false
 
     // ── Diagnostic ANT page logging (purely additive; only touched when FileLogTree.enabled) ─────
     /** Lifetime count of every page seen, keyed by page number, for the periodic SUMMARY line. */
@@ -115,68 +124,102 @@ class RawAntChannel(
      * released immediately and we return without opening, so no orphan channel is left.
      */
     private suspend fun open() {
-        if (stopped) return
-        runCatching {
-            val provider: AntChannelProvider = antService?.channelProvider ?: return
-            val ch = provider.acquireChannel(context, PredefinedNetwork.ANT_PLUS)
-            // stop() may have raced the async bind/acquire: if so, give the slot straight back.
-            if (stopped) {
-                runCatching { ch.close() }
-                runCatching { ch.release() }
-                return
-            }
-            channel = ch
-            ch.setChannelEventHandler(object : IAntChannelEventHandler {
-                override fun onReceiveMessage(type: MessageFromAntType?, msg: AntMessageParcel?) {
-                    if (type == MessageFromAntType.BROADCAST_DATA && msg != null) {
-                        runCatching {
-                            val payload = BroadcastDataMessage(msg).payload
-                            // Diagnostic ANT page logging — gated so it costs ~nothing when off.
-                            if (com.enderthor.kpower.extension.FileLogTree.enabled) logPage(payload)
-                            onPayload(payload)
+        if (stopped || opening) return
+        opening = true
+        try {
+            runCatching {
+                // The ANT Radio Service can be mid-restart (ChannelNotAvailableException
+                // SERVICE_INITIALIZING) or not yet rebound — treat a null provider as a transient
+                // failure and retry, don't give up silently.
+                val provider: AntChannelProvider = antService?.channelProvider
+                    ?: throw IllegalStateException("ANT channelProvider not ready")
+                val ch = provider.acquireChannel(context, PredefinedNetwork.ANT_PLUS)
+                // stop() may have raced the async bind/acquire: if so, give the slot straight back.
+                if (stopped) {
+                    runCatching { ch.close() }
+                    runCatching { ch.release() }
+                    return
+                }
+                channel = ch
+                ch.setChannelEventHandler(object : IAntChannelEventHandler {
+                    override fun onReceiveMessage(type: MessageFromAntType?, msg: AntMessageParcel?) {
+                        if (type == MessageFromAntType.BROADCAST_DATA && msg != null) {
+                            // Receiving a page proves the link is healthy — clear the failure budget
+                            // so a death hours later still gets a full set of retries.
+                            failures = 0
+                            runCatching {
+                                val payload = BroadcastDataMessage(msg).payload
+                                // Diagnostic ANT page logging — gated so it costs ~nothing when off.
+                                if (com.enderthor.kpower.extension.FileLogTree.enabled) logPage(payload)
+                                onPayload(payload)
+                            }
                         }
                     }
+                    override fun onChannelDeath() { reopenAfterDeath() }
+                })
+                ch.assign(ChannelType.SLAVE_RECEIVE_ONLY); delay(50)
+                ch.setChannelId(ChannelId(deviceNumber, 11, 0)); delay(50)  // SPECIFIC device, type 11
+                ch.setRfFrequency(57); delay(50)
+                ch.setPeriod(8182); delay(50)
+                // Re-check right before open(): a stop() during the configure delays must win.
+                if (stopped) {
+                    runCatching { ch.close() }
+                    runCatching { ch.unassign() }
+                    runCatching { ch.release() }
+                    return
                 }
-                override fun onChannelDeath() { reopenAfterDeath() }
-            })
-            ch.assign(ChannelType.SLAVE_RECEIVE_ONLY); delay(50)
-            ch.setChannelId(ChannelId(deviceNumber, 11, 0)); delay(50)  // SPECIFIC device, type 11
-            ch.setRfFrequency(57); delay(50)
-            ch.setPeriod(8182); delay(50)
-            // Re-check right before open(): a stop() during the configure delays must win.
-            if (stopped) {
-                runCatching { ch.close() }
-                runCatching { ch.unassign() }
-                runCatching { ch.release() }
-                return
+                ch.open()
+                Timber.d("RawAntChannel #%d open", deviceNumber)
+                if (com.enderthor.kpower.extension.FileLogTree.enabled)
+                    Timber.tag("ANTLOG").d("dev=%d channel open (type=11 rf=57 period=8182)", deviceNumber)
+            }.onFailure { e ->
+                Timber.e(e, "RawAntChannel #%d open failed", deviceNumber)
+                // Drop any half-acquired channel, then back off and retry — the failure is usually
+                // transient (service restarting). scheduleReopen() enforces the budget/backoff.
+                val dead = channel
+                channel = null
+                runCatching { dead?.close() }
+                runCatching { dead?.unassign() }
+                runCatching { dead?.release() }
+                scheduleReopen(e.message ?: "open failure")
             }
-            ch.open()
-            Timber.d("RawAntChannel #%d open", deviceNumber)
-            if (com.enderthor.kpower.extension.FileLogTree.enabled)
-                Timber.tag("ANTLOG").d("dev=%d channel open (type=11 rf=57 period=8182)", deviceNumber)
-        }.onFailure { Timber.e(it, "RawAntChannel #%d open failed", deviceNumber) }
+        } finally {
+            opening = false
+        }
     }
 
     /**
-     * I1 recovery: on a radio-level channel death, forget the dead channel and reopen a fresh one
-     * after a 1s backoff. Capped at MAX_DEATHS reopen attempts to avoid a tight death/reopen loop;
-     * past the cap we just log and stay dead until the next connect().
+     * I1 recovery: on a radio-level channel death, forget the dead channel and schedule a fresh
+     * reopen. Shares the [failures] budget/backoff with open()-failure so a SERVICE_INITIALIZING
+     * (ANT service restart) is ridden out rather than giving up after one try.
      */
     private fun reopenAfterDeath() {
-        Timber.w("RawAntChannel #%d death (#%d)", deviceNumber, deaths + 1)
+        Timber.w("RawAntChannel #%d death", deviceNumber)
         if (stopped) return
-        if (++deaths > MAX_DEATHS) {
-            Timber.e("RawAntChannel #%d exceeded %d deaths; not reopening", deviceNumber, MAX_DEATHS)
-            return
-        }
         // Forget the dead channel so open() acquires a brand-new one instead of reusing it.
         val dead = channel
         channel = null
         runCatching { dead?.close() }
         runCatching { dead?.unassign() }
         runCatching { dead?.release() }
+        scheduleReopen("channel death")
+    }
+
+    /**
+     * Back off and retry open(), with the delay growing per consecutive failure (capped) so a
+     * multi-second ANT-service restart is survived. Gives up after [MAX_FAILURES] consecutive
+     * failures with no data in between; the next connect() resets the channel and the budget.
+     */
+    private fun scheduleReopen(reason: String) {
+        if (stopped) return
+        if (++failures > MAX_FAILURES) {
+            Timber.e("RawAntChannel #%d gave up after %d consecutive failures (%s)", deviceNumber, failures - 1, reason)
+            return
+        }
+        val backoff = (REOPEN_BACKOFF_MS * failures).coerceAtMost(MAX_BACKOFF_MS)
+        Timber.w("RawAntChannel #%d reopen in %dms (failure #%d: %s)", deviceNumber, backoff, failures, reason)
         scope.launch {
-            delay(REOPEN_BACKOFF_MS)
+            delay(backoff)
             if (!stopped) open()
         }
     }
@@ -197,8 +240,11 @@ class RawAntChannel(
     }
 
     private companion object {
-        const val MAX_DEATHS = 5
+        // ~10 retries with backoff growing 1s,2s,…,5s,5s gives ~40s of recovery attempts — enough
+        // to ride out an ANT Radio Service restart (SERVICE_INITIALIZING) without giving up.
+        const val MAX_FAILURES = 10
         const val REOPEN_BACKOFF_MS = 1000L
+        const val MAX_BACKOFF_MS = 5000L
 
         /** Pages we know how to decode (parser pages + ANT+ common pages); others are UNKNOWN. */
         val KNOWN_PAGES = setOf(0x10, 0x13, 0x14, 0xE0, 0xE1, 0xE2, 0x50, 0x51)
