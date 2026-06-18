@@ -77,7 +77,6 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
 
     val detailCtx = androidx.compose.ui.platform.LocalContext.current
     val knownProfiles by detailCtx.knownProfilesFlow().collectAsState(initial = emptyList())
-    val savedMeters by detailCtx.antMetersFlow().collectAsState(initial = emptyList())
 
     var riderWeightKg by remember { mutableStateOf(0.0) }
     var riderFtp by remember { mutableStateOf(0) }
@@ -169,38 +168,6 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
             // ride-profile stream, so a profile only appears here after it's been opened/ridden once.
             Text(
                 text = stringResource(R.string.no_profiles_hint),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            apply {
-                val sourceOptions = listOf(
-                    DropdownOption("ESTIMATE", stringResource(R.string.source_estimated)),
-                    DropdownOption("EXTERNAL", stringResource(R.string.source_external)),
-                ) + savedMeters.map { DropdownOption("REAL:${it.deviceNumber}", it.label) }
-                val currentSourceId = when {
-                    primarySource == "ESTIMATE" -> "ESTIMATE"
-                    primarySource == "EXTERNAL" -> "EXTERNAL"
-                    primarySource == "REAL" && primaryRealDeviceNumber != null -> "REAL:$primaryRealDeviceNumber"
-                    else -> "ESTIMATE"
-                }
-                val selectedSource by remember(primarySource, primaryRealDeviceNumber, savedMeters) {
-                    mutableStateOf(sourceOptions.find { it.id == currentSourceId } ?: sourceOptions.first())
-                }
-                KarooKeyDropdown(remotekey = stringResource(R.string.dropdown_primary_source), options = sourceOptions, selectedOption = selectedSource) { opt ->
-                    when {
-                        opt.id == "ESTIMATE" -> { primarySource = "ESTIMATE"; primaryRealDeviceNumber = null }
-                        opt.id == "EXTERNAL" -> { primarySource = "EXTERNAL"; primaryRealDeviceNumber = null }
-                        opt.id.startsWith("REAL:") -> {
-                            primarySource = "REAL"
-                            primaryRealDeviceNumber = opt.id.removePrefix("REAL:").toIntOrNull()
-                        }
-                    }
-                }
-            }
-
-            Text(
-                text = stringResource(R.string.primary_source_hint),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

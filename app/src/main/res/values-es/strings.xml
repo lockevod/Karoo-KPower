@@ -37,13 +37,12 @@
     <string name="dyn_peakpp_right_name">Inicio FP pico real D</string>
     <string name="dyn_peakpp_right_desc">Ángulo de inicio de la fase de potencia pico derecha del potenciómetro real, en grados (requiere dinámicas de pedaleo)</string>
     <string name="meter_double_pair_warning">Consejo: para enviar este potenciómetro al Karoo, empareja el sensor llamado “KPower: …” (el nombre de tu potenciómetro con el prefijo KPower) en tu perfil de ruta — no emparejes además el potenciómetro de forma nativa, o la potencia se grabará dos veces.</string>
-    <string name="primary_source_hint">Avanzado. Ponlo igual que el sensor de potencia que elegiste en este perfil de ruta del Karoo, para que KPower no escriba esa misma potencia dos veces en el FIT. NO empareja nada — el sensor lo emparejas en el perfil del Karoo. Si tienes dudas, déjalo en Estimada.</string>
     <string name="diagnostic_log_label">Registro de diagnóstico</string>
     <string name="diagnostic_log_desc">Graba un archivo de registro detallado en cada salida (cada página ANT+ incluidas las desconocidas, valores interpretados y eventos de conexión) para poder analizarlo después. Off por defecto — consume algo más de batería y almacenamiento.</string>
     <string name="dynamics_only_hint">¿Solo quieres dinámicas, sin estimación de potencia? En tu perfil de ruta del Karoo elige “KPower: …” (tu potenciómetro) como fuente de potencia en lugar de “KPowerv2”, y deja el modo comparación en Off. El estimador queda desactivado — no se ejecuta ninguna estimación ni consulta meteorológica.</string>
 
     <!-- Tabs -->
-    <string name="tab_bikes">Bicis</string>
+    <string name="tab_bikes">Estimador</string>
     <string name="tab_comparison">Medidor real</string>
 
     <!-- Main / bikes list -->
@@ -72,16 +71,13 @@
     <string name="ant_add">Añadir</string>
 
     <!-- Detail screen -->
-    <string name="cfg_title_create">Crear configuración de potencia</string>
-    <string name="cfg_title_edit">Editar configuración de potencia</string>
+    <string name="cfg_title_create">Nuevo perfil de estimador</string>
+    <string name="cfg_title_edit">Perfil de estimador</string>
     <string name="section_bike">Bici</string>
     <string name="cfg_name">Nombre</string>
     <string name="dropdown_none">Ninguno</string>
     <string name="dropdown_link_profile">Vincular al perfil del Karoo</string>
     <string name="no_profiles_hint">Un perfil de ruta del Karoo solo aparece aquí después de abrirlo (o iniciar una salida con él) una vez — KPower aprende los perfiles según los usas.</string>
-    <string name="source_estimated">Estimada</string>
-    <string name="source_external">Otro sensor (emparejado en el Karoo)</string>
-    <string name="dropdown_primary_source">Fuente de potencia principal</string>
     <string name="dropdown_position">Posición</string>
     <string name="simple_mode_label">Modo simple (ocultar avanzado)</string>
     <string name="cfg_bike_mass">Peso de la bici</string>

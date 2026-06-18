@@ -37,13 +37,12 @@
     <string name="dyn_peakpp_right_name">Real Peak PP Start R</string>
     <string name="dyn_peakpp_right_desc">Real meter right peak power-phase start angle, degrees (requires Cycling dynamics)</string>
     <string name="meter_double_pair_warning">Tip: to feed this meter to the Karoo, pair the sensor named “KPower: …” (your meter\'s name with a KPower prefix) in your ride profile — don\'t also pair the meter natively, or power will be recorded twice.</string>
-    <string name="primary_source_hint">Advanced. Set this to match the power sensor you chose in this Karoo ride profile, so KPower doesn\'t write that same power twice in the FIT. It does NOT pair anything — you pair the sensor in the Karoo profile. If unsure, leave it on Estimated.</string>
     <string name="diagnostic_log_label">Diagnostic logging</string>
     <string name="diagnostic_log_desc">Records a detailed log file for each ride (every ANT+ page including unknown ones, parsed values, and connection events) so it can be analysed later. Off by default — it uses some extra battery and storage.</string>
     <string name="dynamics_only_hint">Only want dynamics, no power estimation? In your Karoo ride profile pick “KPower: …” (your meter) as the power source instead of “KPowerv2”, and leave Comparison mode off. The estimator then stays off — no estimation or weather lookups run.</string>
 
     <!-- Tabs -->
-    <string name="tab_bikes">Bikes</string>
+    <string name="tab_bikes">Estimator</string>
     <string name="tab_comparison">Real meter</string>
 
     <!-- Main / bikes list -->
@@ -72,16 +71,13 @@
     <string name="ant_add">Add</string>
 
     <!-- Detail screen -->
-    <string name="cfg_title_create">Create Power Config</string>
-    <string name="cfg_title_edit">Edit Power Config</string>
+    <string name="cfg_title_create">New estimator profile</string>
+    <string name="cfg_title_edit">Estimator profile</string>
     <string name="section_bike">Bike</string>
     <string name="cfg_name">Title</string>
     <string name="dropdown_none">None</string>
     <string name="dropdown_link_profile">Link to Karoo profile</string>
     <string name="no_profiles_hint">A Karoo ride profile only appears here after you open it (or start a ride with it) once — KPower learns profiles as you use them.</string>
-    <string name="source_estimated">Estimated</string>
-    <string name="source_external">Other sensor (paired in Karoo)</string>
-    <string name="dropdown_primary_source">Primary power source</string>
     <string name="dropdown_position">Position</string>
     <string name="simple_mode_label">Simple mode (hide advanced)</string>
     <string name="cfg_bike_mass">Bike Mass</string>
