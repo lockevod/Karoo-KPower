@@ -67,6 +67,7 @@
     <string name="ant_scanning">Scanning…</string>
     <string name="ant_tap_scan">Tap Scan to find meters.</string>
     <string name="ant_remove">Remove</string>
+    <string name="ant_rename">Rename</string>
     <string name="ant_add">Add</string>
     <string name="meter_enable_label">Record</string>
 

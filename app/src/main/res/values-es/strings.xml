@@ -67,6 +67,7 @@
     <string name="ant_scanning">Buscando…</string>
     <string name="ant_tap_scan">Toca Scan para encontrar potenciómetros.</string>
     <string name="ant_remove">Quitar</string>
+    <string name="ant_rename">Renombrar</string>
     <string name="ant_add">Añadir</string>
     <string name="meter_enable_label">Grabar</string>
 

@@ -6,6 +6,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -37,6 +38,7 @@ const val MAX_METERS = 1
  * [onAdd]       Called when the user taps Add on a detected device.
  * [onDelete]    Called when the user taps Delete on a saved meter.
  * [onToggleEnabled] Called when the per-meter Record switch is toggled.
+ * [onRename]    Called when the user taps the rename (edit) icon on a saved meter.
  */
 fun LazyListScope.antScanItems(
     manager: AntPowerManager,
@@ -47,6 +49,7 @@ fun LazyListScope.antScanItems(
     onAdd: (AntDeviceInfo) -> Unit,
     onDelete: (SavedMeter) -> Unit,
     onToggleEnabled: (SavedMeter, Boolean) -> Unit,
+    onRename: (SavedMeter) -> Unit,
 ) {
     val atCap = saved.size >= MAX_METERS
     val available = detected.filterNot { dev -> saved.any { it.deviceNumber == dev.deviceNumber } }
@@ -112,7 +115,9 @@ fun LazyListScope.antScanItems(
                     checked = m.enabled,
                     onCheckedChange = { newValue -> onToggleEnabled(m, newValue) },
                 )
-                Spacer(Modifier.width(4.dp))
+                IconButton(onClick = { onRename(m) }) {
+                    Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.ant_rename))
+                }
                 IconButton(onClick = { onDelete(m) }) {
                     Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.ant_remove))
                 }

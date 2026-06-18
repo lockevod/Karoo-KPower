@@ -12,12 +12,15 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CornerSize
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -67,6 +70,8 @@ fun ComparisonScreen() {
     val detected by antManager.detectedDevices.collectAsState()
     val saved by ctx.antMetersFlow().collectAsState(initial = emptyList())
     var scanning by remember { mutableStateOf(false) }
+    // Meter currently being renamed (null = no dialog).
+    var renaming by remember { mutableStateOf<SavedMeter?>(null) }
 
     Scaffold(
         topBar = { TopAppBar(title = { Text(stringResource(R.string.tab_comparison)) }) },
@@ -114,6 +119,7 @@ fun ComparisonScreen() {
                         }
                         scope.launch { saveAntMeters(ctx, next) }
                     },
+                    onRename = { renaming = it },
                 )
 
                 // Short cycling-dynamics note, right after the ANT meters block. Dynamics from an
@@ -187,6 +193,37 @@ fun ComparisonScreen() {
                         }
                     }
                 }
+            }
+
+            // Rename a saved meter. ANT+ power meters usually advertise only a device number, so
+            // let the rider give it a friendly name (shown as "KPW <name>" when pairing in the Karoo).
+            renaming?.let { meter ->
+                var draft by remember(meter.deviceNumber) { mutableStateOf(meter.label) }
+                AlertDialog(
+                    onDismissRequest = { renaming = null },
+                    title = { Text(stringResource(R.string.ant_rename)) },
+                    text = {
+                        OutlinedTextField(
+                            value = draft,
+                            onValueChange = { draft = it },
+                            singleLine = true,
+                            label = { Text(stringResource(R.string.cfg_name)) },
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            val newLabel = draft.trim().ifEmpty { meter.label }
+                            val next = saved.map {
+                                if (it.deviceNumber == meter.deviceNumber) it.copy(label = newLabel) else it
+                            }
+                            scope.launch { saveAntMeters(ctx, next) }
+                            renaming = null
+                        }) { Text(stringResource(R.string.btn_save)) }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { renaming = null }) { Text(stringResource(R.string.btn_cancel)) }
+                    },
+                )
             }
         }
     )
