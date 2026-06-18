@@ -64,12 +64,12 @@
     <string name="ant_recorded_meters">Potenciómetros grabados</string>
     <string name="ant_no_meters">Aún no hay potenciómetros grabados — elige uno abajo.</string>
     <string name="ant_available">Disponibles</string>
-    <string name="ant_scan">Buscar</string>
-    <string name="ant_stop">Parar</string>
+    <string name="ant_scan">Scan</string>
+    <string name="ant_stop">Stop</string>
     <string name="ant_scan_warning">No busques mientras grabas una salida — puede interrumpir el potenciómetro que estás grabando.</string>
     <string name="ant_max_meters">Máximo: %1$d potenciómetro</string>
     <string name="ant_scanning">Buscando…</string>
-    <string name="ant_tap_scan">Toca Buscar para encontrar potenciómetros.</string>
+    <string name="ant_tap_scan">Toca Scan para encontrar potenciómetros.</string>
     <string name="ant_remove">Quitar</string>
     <string name="ant_add">Añadir</string>
 
@@ -97,7 +97,7 @@
     <string name="dropdown_default_surface">Superficie por defecto (se usa si no se puede leer el mapa)</string>
     <string name="dropdown_surface">Superficie</string>
     <string name="auto_surface_label">Superficie automática desde mapas offline</string>
-    <string name="auto_surface_desc">KPower lee la superficie OSM bajo ti desde los mapas offline (/offline/maps) y ajusta el Crr en directo (asfaltada/estándar/grava/arena). Necesita mapas offline de la zona y permiso de almacenamiento; si no, mantiene la superficie que elegiste arriba.</string>
+    <string name="auto_surface_desc">KPower lee la superficie OSM bajo ti desde los mapas offline (/offline/maps) y ajusta el Crr en directo (asphalt/standard/gravel/sand). Necesita mapas offline de la zona y permiso de almacenamiento; si no, mantiene la superficie que elegiste arriba.</string>
     <string name="section_rider_ftp">Ciclista y FTP</string>
     <string name="use_profile_ftp_label">¿Usar el FTP del perfil del Karoo?</string>
     <string name="cfg_ftp_from_profile">FTP (del perfil del Karoo)</string>
