@@ -35,8 +35,12 @@ class RealPowerSource(
         activeScope?.cancel()
         val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         activeScope = scope
-        val token = this
-        antManager.acquire(deviceNumber, token)
+        // NOTE: we do NOT acquire the raw ANT channel here. The channel's lifecycle is owned solely
+        // by the ride-state gate in KpowerExtension (open only while the meter is ENABLED and the ride
+        // is RECORDING). This source just reads the stable power/cadence sinks. Acquiring here would
+        // (a) keep the radio + a channel open off-ride (battery) and (b) survive a meter delete until
+        // the host unpairs, starving the ANT+ scan — both seen on hardware ("scan, add, delete, then
+        // scan finds nothing"). Off-ride the sinks are NaN, so this source reports SEARCHING.
 
         scope.launch {
             try {
@@ -111,7 +115,6 @@ class RealPowerSource(
 
         emitter.setCancellable {
             if (BuildConfig.DEBUG) Timber.w("Stopping connect coroutine")
-            antManager.release(deviceNumber, token)
             scope.cancel()
             if (activeScope === scope) activeScope = null
         }

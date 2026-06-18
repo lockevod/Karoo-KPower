@@ -175,13 +175,21 @@ class RawAntPowerMeter(
                 _cadence.value = tp.cadenceRpm
                 _torque.value = tp.torqueNm
                 lastTorqueEventChangeMs = now
-            } else if (lastTorqueEventChangeMs != 0L && now - lastTorqueEventChangeMs > COAST_MS) {
-                // No new crank event for a while → coasting/stopped.
+            } else if (now - lastTorqueEventChangeMs > COAST_MS) {
+                // No new crank event for a while → coasting/stopped. Zero power/cadence/torque AND
+                // clear the cycling-dynamics models so the FIT records a gap, not the last frozen
+                // TE/PS/angles/position (those pages stop while coasting but their StateFlows would
+                // otherwise hold the last value until the 5s stale reset).
                 _power.value = 0.0; _cadence.value = 0.0; _torque.value = 0.0
+                _tePs.value = null; _forceAngleLeft.value = null; _forceAngleRight.value = null
+                _pedalPosition.value = null; _barycenter.value = null
             }
             // else: repeated frame within the coast window → hold the last values.
-        } else if (_cadence.value.isNaN()) {
-            d.cadenceRpm?.let { _cadence.value = it }   // seed cadence before the 2nd frame
+        } else {
+            // First torque frame: seed cadence and START the coast timer, so an all-implausible
+            // stream (every torquePower rejected by the clamp) still coasts to 0 instead of holding.
+            if (_cadence.value.isNaN()) d.cadenceRpm?.let { _cadence.value = it }
+            lastTorqueEventChangeMs = now
         }
         prevTorque = d
         lastEventMs = now
@@ -203,7 +211,10 @@ class RawAntPowerMeter(
         _balanceRightPct.value = Double.NaN; _torque.value = Double.NaN
         _forceAngleLeft.value = null; _forceAngleRight.value = null
         _pedalPosition.value = null; _tePs.value = null; _barycenter.value = null
-        prevTorque = null; lastTorqueEventChangeMs = 0L; torquePageSeen = false
+        // prevTorque cleared so the next frame re-seeds (no stale delta). torquePageSeen is LATCHED:
+        // it's device identity (this meter reports power via torque pages), so a >5s dropout must not
+        // flip it back and let a 0x10 power=0 frame momentarily publish 0 W on reacquire.
+        prevTorque = null; lastTorqueEventChangeMs = 0L
     }
 
     fun disconnect() {
