@@ -1,4 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cross-extension consumption: every DataType below is addressable by any other Karoo extension via
+  KarooSystemService.streamDataFlow(DataType.dataTypeId("kpower", "<typeId>")), which resolves to the
+  id "TYPE_EXT::kpower::<typeId>" (e.g. TYPE_EXT::kpower::real-power-0, TYPE_EXT::kpower::dyn-balance-0).
+  The estimated fields run the estimator on demand; the real-meter / dynamics fields only stream while
+  a meter is enabled AND the ride is recording (battery gate). Real power+cadence are ALSO exposed as a
+  standard pairable POWER/CADENCE sensor ("KPW …"), which is the most interoperable path for power.
+-->
 <ExtensionInfo
     displayName="@string/extension_name"
     icon="@drawable/ic_power_hr"
