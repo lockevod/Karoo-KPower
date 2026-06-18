@@ -88,26 +88,39 @@ class AntPowerManager(private val context: Context) {
     fun startScan() {
         stopScan()
         _detectedDevices.value = emptyList()
-        search = MultiDeviceSearch(
-            context,
-            EnumSet.of(DeviceType.BIKE_POWER),
-            object : MultiDeviceSearch.SearchCallbacks {
-                override fun onSearchStarted(rssiSupport: MultiDeviceSearch.RssiSupport?) {}
-                override fun onDeviceFound(result: MultiDeviceSearchResult?) {
-                    result ?: return
-                    val info = AntDeviceInfo(
-                        name = result.deviceDisplayName ?: "Power #${result.antDeviceNumber}",
-                        deviceNumber = result.antDeviceNumber,
-                    )
-                    if (_detectedDevices.value.none { it.deviceNumber == info.deviceNumber }) {
-                        _detectedDevices.value = _detectedDevices.value + info
+        // Diagnostic: the scan uses antpluginlib's MultiDeviceSearch, which needs the ANT+ Plugins
+        // Service (a different app than the ANT Radio Service the raw channel uses). If it's missing,
+        // the search returns nothing / USER_CANCELLED no matter what. Log its presence to disambiguate
+        // "meter asleep" from "plugins service missing".
+        val pluginsInstalled = runCatching {
+            context.packageManager.getPackageInfo("com.dsi.ant.plugins.antplus", 0); true
+        }.getOrDefault(false)
+        Timber.d("ANT startScan: searching BIKE_POWER (ANT+ Plugins Service installed=%b)", pluginsInstalled)
+        search = runCatching {
+            MultiDeviceSearch(
+                context,
+                EnumSet.of(DeviceType.BIKE_POWER),
+                object : MultiDeviceSearch.SearchCallbacks {
+                    override fun onSearchStarted(rssiSupport: MultiDeviceSearch.RssiSupport?) {
+                        Timber.d("ANT search started (rssi=%s)", rssiSupport)
                     }
-                }
-                override fun onSearchStopped(reason: RequestAccessResult?) {
-                    Timber.d("ANT scan stopped: %s", reason)
-                }
-            },
-        )
+                    override fun onDeviceFound(result: MultiDeviceSearchResult?) {
+                        result ?: return
+                        Timber.d("ANT device found: %s #%d", result.deviceDisplayName, result.antDeviceNumber)
+                        val info = AntDeviceInfo(
+                            name = result.deviceDisplayName ?: "Power #${result.antDeviceNumber}",
+                            deviceNumber = result.antDeviceNumber,
+                        )
+                        if (_detectedDevices.value.none { it.deviceNumber == info.deviceNumber }) {
+                            _detectedDevices.value = _detectedDevices.value + info
+                        }
+                    }
+                    override fun onSearchStopped(reason: RequestAccessResult?) {
+                        Timber.d("ANT scan stopped: %s", reason)
+                    }
+                },
+            )
+        }.onFailure { Timber.e(it, "ANT MultiDeviceSearch failed to start") }.getOrNull()
     }
 
     @Synchronized

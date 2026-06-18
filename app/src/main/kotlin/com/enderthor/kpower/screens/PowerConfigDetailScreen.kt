@@ -165,13 +165,13 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            if (knownProfiles.isEmpty()) {
-                Text(
-                    text = stringResource(R.string.no_profiles_hint),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+            // Always shown (not only when empty): KPower learns profiles via the Karoo's
+            // ride-profile stream, so a profile only appears here after it's been opened/ridden once.
+            Text(
+                text = stringResource(R.string.no_profiles_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
 
             apply {
                 val sourceOptions = listOf(

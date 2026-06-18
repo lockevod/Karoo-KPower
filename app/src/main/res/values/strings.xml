@@ -80,7 +80,7 @@
     <string name="cfg_name">Title</string>
     <string name="dropdown_none">None</string>
     <string name="dropdown_link_profile">Link to Karoo profile</string>
-    <string name="no_profiles_hint">No Karoo profiles seen yet — open each ride profile once on the Karoo (or start a ride with it) and it will appear here.</string>
+    <string name="no_profiles_hint">A Karoo ride profile only appears here after you open it (or start a ride with it) once — KPower learns profiles as you use them.</string>
     <string name="source_estimated">Estimated</string>
     <string name="source_external">Other sensor (paired in Karoo)</string>
     <string name="dropdown_primary_source">Primary power source</string>
