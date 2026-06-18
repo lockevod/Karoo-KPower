@@ -29,18 +29,23 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 
 import kotlinx.coroutines.launch
 
+import com.enderthor.kpower.R
 import com.enderthor.kpower.ant.AntPowerManager
 import com.enderthor.kpower.ant.SavedMeter
+import com.enderthor.kpower.extension.FileLogTree
 import com.enderthor.kpower.extension.antMetersFlow
 import com.enderthor.kpower.extension.clearPrimaryRealMeter
 import com.enderthor.kpower.extension.comparisonModeFlow
+import com.enderthor.kpower.extension.diagnosticLogFlow
 import com.enderthor.kpower.extension.recordDynamicsFlow
 import com.enderthor.kpower.extension.saveAntMeters
 import com.enderthor.kpower.extension.saveComparisonMode
+import com.enderthor.kpower.extension.saveDiagnosticLog
 import com.enderthor.kpower.extension.saveRecordDynamics
 
 
@@ -61,6 +66,7 @@ fun ComparisonScreen() {
     // LazyListScope extension.
     val comparisonMode by ctx.comparisonModeFlow().collectAsState(initial = false)
     val recordDynamics by ctx.recordDynamicsFlow().collectAsState(initial = false)
+    val diagnosticLog by ctx.diagnosticLogFlow().collectAsState(initial = false)
     val detected by antManager.detectedDevices.collectAsState()
     val saved by ctx.antMetersFlow().collectAsState(initial = emptyList())
     var scanning by remember { mutableStateOf(false) }
@@ -127,6 +133,39 @@ fun ComparisonScreen() {
                                     "torque effectiveness…) from the recorded ANT+ meter and writes them " +
                                     "to the FIT. The Karoo does not record these. Needs a recorded meter. " +
                                     "Live dynamics fields update only while recording.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
+                // Third item: diagnostic-logging toggle card.
+                item {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(5.dp),
+                        shape = RoundedCornerShape(corner = CornerSize(10.dp))
+                    ) {
+                        Column(Modifier.padding(10.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Switch(
+                                    checked = diagnosticLog,
+                                    onCheckedChange = { enabled ->
+                                        scope.launch { saveDiagnosticLog(ctx, enabled) }
+                                    }
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(stringResource(R.string.diagnostic_log_label))
+                            }
+                            Text(
+                                text = stringResource(R.string.diagnostic_log_desc),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "Log: " + FileLogTree.pathHint(),
+                                style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
