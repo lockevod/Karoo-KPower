@@ -69,7 +69,8 @@
     <string name="ant_remove">Remove</string>
     <string name="ant_rename">Rename</string>
     <string name="ant_add">Add</string>
-    <string name="meter_enable_label">Record</string>
+    <string name="meter_status_recording">recording</string>
+    <string name="meter_status_off">not recording</string>
 
     <!-- Detail screen -->
     <string name="cfg_title_create">New estimator profile</string>

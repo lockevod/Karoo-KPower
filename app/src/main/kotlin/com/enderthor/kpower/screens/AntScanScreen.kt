@@ -8,6 +8,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.Button
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -97,24 +98,27 @@ fun LazyListScope.antScanItems(
         }
     } else {
         items(saved) { m: SavedMeter ->
+            // Switch leads on the left; name + (device number · status) stacked in the middle;
+            // rename/remove icons on the right. Reads clearly on the narrow screen.
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    "${m.label}  (#${m.deviceNumber})",
-                    modifier = Modifier.weight(1f),
-                )
-                Text(
-                    stringResource(R.string.meter_enable_label),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.width(4.dp))
                 Switch(
                     checked = m.enabled,
                     onCheckedChange = { newValue -> onToggleEnabled(m, newValue) },
                 )
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(m.label, style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "#${m.deviceNumber} · " + stringResource(
+                            if (m.enabled) R.string.meter_status_recording else R.string.meter_status_off
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 IconButton(onClick = { onRename(m) }) {
                     Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.ant_rename))
                 }
@@ -125,7 +129,12 @@ fun LazyListScope.antScanItems(
         }
     }
 
-    item { Spacer(Modifier.height(12.dp)) }
+    // Divider between saved meters and the (always-visible) scan section.
+    item {
+        Spacer(Modifier.height(12.dp))
+        HorizontalDivider(modifier = Modifier.padding(horizontal = 8.dp))
+        Spacer(Modifier.height(12.dp))
+    }
 
     // Section 2 — Available, detected devices not already saved (manual scan).
     item {

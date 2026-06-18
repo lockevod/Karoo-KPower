@@ -69,7 +69,8 @@
     <string name="ant_remove">Quitar</string>
     <string name="ant_rename">Renombrar</string>
     <string name="ant_add">Añadir</string>
-    <string name="meter_enable_label">Grabar</string>
+    <string name="meter_status_recording">grabando</string>
+    <string name="meter_status_off">sin grabar</string>
 
     <!-- Detail screen -->
     <string name="cfg_title_create">Nuevo perfil de estimador</string>
