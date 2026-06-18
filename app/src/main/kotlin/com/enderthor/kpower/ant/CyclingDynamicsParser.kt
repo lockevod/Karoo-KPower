@@ -7,6 +7,8 @@ package com.enderthor.kpower.ant
  */
 object CyclingDynamicsParser {
     const val PAGE_POWER_ONLY = 0x10
+    const val PAGE_WHEEL_TORQUE = 0x11
+    const val PAGE_CRANK_TORQUE = 0x12
     const val PAGE_TE_PS = 0x13
     const val PAGE_TORQUE_BARYCENTER = 0x14
     const val PAGE_RIGHT_FORCE_ANGLE = 0xE0
@@ -88,5 +90,43 @@ object CyclingDynamicsParser {
         if (p.size < 2 || p.u(0) != PAGE_TORQUE_BARYCENTER) return null
         val raw = p.u(1)
         return TorqueBarycenterData(angleDeg = if (raw == 0xFF) null else raw * 0.5 + 30.0)
+    }
+
+    /** 0x11 wheel torque / 0x12 crank torque: raw accumulators (deltas give power, see [torquePower]). */
+    fun parseTorque(p: ByteArray): TorqueData? {
+        if (p.size < 8) return null
+        val page = p.u(0)
+        if (page != PAGE_WHEEL_TORQUE && page != PAGE_CRANK_TORQUE) return null
+        val cad = p.u(3)
+        return TorqueData(
+            isCrank = page == PAGE_CRANK_TORQUE,
+            eventCount = p.u(1),
+            ticks = p.u(2),
+            cadenceRpm = if (cad == 0xFF) null else cad.toDouble(),
+            accumPeriod = (p.u(5) shl 8) or p.u(4),
+            accumTorque = (p.u(7) shl 8) or p.u(6),
+        )
+    }
+
+    /**
+     * Power/cadence/torque from the delta between two consecutive torque pages (ANT+ Bicycle Power
+     * §13). 8-bit event count and 16-bit period/torque accumulators are masked so a rollover is a
+     * normal positive delta. Returns null when no new rotation event occurred (Δevent == 0) or the
+     * period didn't advance — the caller decides whether to hold the last value or coast to zero.
+     *
+     *   Power (W)    = 128π · Δtorque / Δperiod   (Δtorque raw 1/32 Nm, Δperiod raw 1/2048 s)
+     *   Cadence(rpm) = 60 · 2048 · Δevent / Δperiod
+     *   Torque (Nm)  = (Δtorque / 32) / Δevent
+     */
+    fun torquePower(prev: TorqueData, curr: TorqueData): TorquePower? {
+        val dEvent = (curr.eventCount - prev.eventCount) and 0xFF
+        val dPeriod = (curr.accumPeriod - prev.accumPeriod) and 0xFFFF
+        val dTorque = (curr.accumTorque - prev.accumTorque) and 0xFFFF
+        if (dEvent == 0 || dPeriod == 0) return null
+        return TorquePower(
+            powerW = 128.0 * Math.PI * dTorque / dPeriod,
+            cadenceRpm = 60.0 * 2048.0 * dEvent / dPeriod,
+            torqueNm = (dTorque / 32.0) / dEvent,
+        )
     }
 }

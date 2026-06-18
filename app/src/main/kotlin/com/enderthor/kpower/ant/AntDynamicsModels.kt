@@ -48,3 +48,26 @@ data class PedalPositionData(
 
 /** 0x14 torque barycenter angle (deg). */
 data class TorqueBarycenterData(val angleDeg: Double?)
+
+/**
+ * 0x11 Standard Wheel Torque / 0x12 Standard Crank Torque. Torque-based meters (e.g. Garmin
+ * Rally/Vector) broadcast power HERE, not in the 0x10 power-only page (whose instantaneous-power
+ * field they leave at 0). Power/cadence are derived from the DELTA between two consecutive pages —
+ * see [CyclingDynamicsParser.torquePower] — so these are raw accumulators, not ready-to-use values.
+ * accumPeriod is in 1/2048 s units; accumTorque is in 1/32 Nm units; both are 16-bit and roll over.
+ */
+data class TorqueData(
+    val isCrank: Boolean,
+    val eventCount: Int,   // b1, 8-bit rolling
+    val ticks: Int,        // b2 wheel/crank ticks (unused for power; kept for completeness)
+    val cadenceRpm: Double?, // b3, 0xFF = invalid
+    val accumPeriod: Int,  // b4-5 LE, 1/2048 s, 16-bit rolling
+    val accumTorque: Int,  // b6-7 LE, 1/32 Nm, 16-bit rolling
+)
+
+/** Power/cadence/torque derived from the delta between two consecutive torque pages. */
+data class TorquePower(
+    val powerW: Double,
+    val cadenceRpm: Double,
+    val torqueNm: Double,
+)

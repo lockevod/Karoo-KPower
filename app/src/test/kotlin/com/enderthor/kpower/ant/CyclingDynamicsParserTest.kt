@@ -108,4 +108,45 @@ class CyclingDynamicsParserTest {
     @Test fun wrongPage_returnsNull() {
         assertNull(CyclingDynamicsParser.parseForceAngle(bytes(0x10, 0, 0, 0, 0, 0, 0, 0), isLeft = false))
     }
+
+    // ── Crank/wheel torque (0x11/0x12) — how Garmin Rally/Vector broadcast power ────────────────
+    @Test fun parseTorque_crank_realCapture() {
+        // dev 6593: 12 1E 1E 29 FB 77 49 1D -> event 0x1E, cadence 0x29=41, period 0x77FB, torque 0x1D49
+        val d = CyclingDynamicsParser.parseTorque(bytes(0x12, 0x1E, 0x1E, 0x29, 0xFB, 0x77, 0x49, 0x1D))!!
+        assertTrue(d.isCrank)
+        assertEquals(41.0, d.cadenceRpm!!, 0.0)
+        assertEquals(0x77FB, d.accumPeriod)
+        assertEquals(0x1D49, d.accumTorque)
+    }
+
+    @Test fun parseTorque_wrongPage_null() {
+        assertNull(CyclingDynamicsParser.parseTorque(bytes(0x10, 0, 0, 0, 0, 0, 0, 0)))
+        assertNull(CyclingDynamicsParser.parseTorque(bytes(0x12, 0, 0)))   // too short
+    }
+
+    @Test fun torquePower_90rpm_200W() {
+        // 90 rpm, 200 W over one crank event: period = 2048/1.5 = 1365 raw; torque = 200*1365/(128π) ≈ 679 raw.
+        val prev = TorqueData(true, eventCount = 10, ticks = 10, cadenceRpm = null, accumPeriod = 0, accumTorque = 0)
+        val curr = TorqueData(true, eventCount = 11, ticks = 11, cadenceRpm = null, accumPeriod = 1365, accumTorque = 679)
+        val tp = CyclingDynamicsParser.torquePower(prev, curr)!!
+        assertEquals(200.0, tp.powerW, 1.0)
+        assertEquals(90.0, tp.cadenceRpm, 0.5)
+        assertEquals(21.2, tp.torqueNm, 0.2)
+    }
+
+    @Test fun torquePower_handlesRollover() {
+        // event 8-bit and period/torque 16-bit wrap to a normal positive delta.
+        val prev = TorqueData(true, eventCount = 0xFF, ticks = 0, cadenceRpm = null, accumPeriod = 0xFFF0, accumTorque = 0xFFE0)
+        val curr = TorqueData(true, eventCount = 0x00, ticks = 0, cadenceRpm = null, accumPeriod = 0x0001, accumTorque = 0x0040)
+        val tp = CyclingDynamicsParser.torquePower(prev, curr)!!
+        // dEvent=1, dPeriod=(0x0001-0xFFF0)&0xFFFF=17, dTorque=(0x0040-0xFFE0)&0xFFFF=96
+        assertEquals(128.0 * Math.PI * 96 / 17, tp.powerW, 0.5)
+        assertTrue(tp.powerW > 0)
+    }
+
+    @Test fun torquePower_noNewEvent_returnsNull() {
+        // Repeated frame (Δevent == 0) -> caller holds/coasts, parser returns null.
+        val d = TorqueData(true, eventCount = 5, ticks = 5, cadenceRpm = 40.0, accumPeriod = 100, accumTorque = 200)
+        assertNull(CyclingDynamicsParser.torquePower(d, d))
+    }
 }

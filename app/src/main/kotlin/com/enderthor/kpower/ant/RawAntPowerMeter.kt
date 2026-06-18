@@ -69,6 +69,19 @@ class RawAntPowerMeter(
     /** Timestamp (ms) of the most recent ANT event; 0 until the first sample arrives. */
     @Volatile private var lastEventMs: Long = 0L
 
+    // ── Torque-based power (0x11/0x12) state ────────────────────────────────────────────────────
+    /** Previous torque page, for the delta that yields power/cadence. Null until the first one. */
+    private var prevTorque: TorqueData? = null
+    /** Wall-clock of the last NEW rotation event (Δevent>0); drives coast-to-zero when pedalling stops. */
+    private var lastTorqueEventChangeMs: Long = 0L
+    /**
+     * True once any torque page has arrived. A torque-based meter (Garmin Rally/Vector, most
+     * crank/spider meters) ALSO emits the 0x10 power-only page but with its instantaneous-power
+     * field at 0 — so once we've seen a torque page we IGNORE 0x10's power and let the torque path
+     * own power/cadence/torque (0x10 still provides balance).
+     */
+    @Volatile private var torquePageSeen = false
+
     fun connect() {
         // Capture and detach the old channel BEFORE starting the new one. Its async stop() now
         // races nothing: the old channel's own `stopped` guard prevents an orphan, and the field
@@ -84,11 +97,20 @@ class RawAntPowerMeter(
         when (p[0].toInt() and 0xFF) {
             CyclingDynamicsParser.PAGE_POWER_ONLY -> {
                 val d = CyclingDynamicsParser.parsePowerOnly(p) ?: return
-                _power.value = d.powerW ?: Double.NaN
-                _cadence.value = d.cadenceRpm ?: Double.NaN
+                // A torque-based meter also sends 0x10 but with power=0; once we've seen a torque
+                // page, that path owns power/cadence/torque and we take only balance from 0x10.
+                if (!torquePageSeen) {
+                    _power.value = d.powerW ?: Double.NaN
+                    _cadence.value = d.cadenceRpm ?: Double.NaN
+                    _torque.value = computeTorque(d.powerW, d.cadenceRpm)
+                } else if (_cadence.value.isNaN()) {
+                    d.cadenceRpm?.let { _cadence.value = it }   // seed cadence before 2nd torque frame
+                }
                 _balanceRightPct.value = d.balanceRightPct ?: Double.NaN
-                _torque.value = computeTorque(d.powerW, d.cadenceRpm)
                 lastEventMs = System.currentTimeMillis()
+            }
+            CyclingDynamicsParser.PAGE_WHEEL_TORQUE, CyclingDynamicsParser.PAGE_CRANK_TORQUE -> {
+                CyclingDynamicsParser.parseTorque(p)?.let { onTorquePage(it) }
             }
             CyclingDynamicsParser.PAGE_TE_PS -> {
                 CyclingDynamicsParser.parseTePs(p)?.let { _tePs.value = it }
@@ -124,6 +146,34 @@ class RawAntPowerMeter(
         }
     }
 
+    /**
+     * Torque-page (0x11/0x12) handler: derive power/cadence/torque from the delta to the previous
+     * page. When no new rotation event has arrived for [COAST_MS] (rider stopped pedalling), coast
+     * power/cadence/torque to 0 instead of holding the last value forever.
+     */
+    private fun onTorquePage(d: TorqueData) {
+        torquePageSeen = true
+        val now = System.currentTimeMillis()
+        val prev = prevTorque
+        if (prev != null) {
+            val tp = CyclingDynamicsParser.torquePower(prev, d)
+            if (tp != null) {
+                _power.value = tp.powerW
+                _cadence.value = tp.cadenceRpm
+                _torque.value = tp.torqueNm
+                lastTorqueEventChangeMs = now
+            } else if (lastTorqueEventChangeMs != 0L && now - lastTorqueEventChangeMs > COAST_MS) {
+                // No new crank event for a while → coasting/stopped.
+                _power.value = 0.0; _cadence.value = 0.0; _torque.value = 0.0
+            }
+            // else: repeated frame within the coast window → hold the last values.
+        } else if (_cadence.value.isNaN()) {
+            d.cadenceRpm?.let { _cadence.value = it }   // seed cadence before the 2nd frame
+        }
+        prevTorque = d
+        lastEventMs = now
+    }
+
     /** τ = P / (2π·rpm/60). NaN if power null or cadence null/≤0. */
     private fun computeTorque(powerW: Double?, cadenceRpm: Double?): Double {
         if (powerW == null || cadenceRpm == null || cadenceRpm <= 0.0) return Double.NaN
@@ -140,10 +190,16 @@ class RawAntPowerMeter(
         _balanceRightPct.value = Double.NaN; _torque.value = Double.NaN
         _forceAngleLeft.value = null; _forceAngleRight.value = null
         _pedalPosition.value = null; _tePs.value = null; _barycenter.value = null
+        prevTorque = null; lastTorqueEventChangeMs = 0L; torquePageSeen = false
     }
 
     fun disconnect() {
         runCatching { channel?.stop() }
         channel = null; reset()
+    }
+
+    private companion object {
+        /** Hold the last torque-derived power for this long without a new crank event, then coast to 0. */
+        const val COAST_MS = 3_000L
     }
 }
