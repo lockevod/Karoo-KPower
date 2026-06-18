@@ -174,6 +174,24 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
             applicationContext.antMetersFlow().collect { savedMetersSnapshot = it }
         }
 
+        // Brand auto-detect: once a connected meter reports its manufacturer (0x50 page), fill in the
+        // saved label IF the rider hasn't named it (still the scan default "Device: N" / number).
+        // Never clobbers a manual rename. Only meaningful while the meter is connected (recording).
+        serviceScope.launch {
+            applicationContext.antMetersFlow()
+                .map { it.firstOrNull { m -> m.enabled }?.deviceNumber }
+                .distinctUntilChanged()
+                .flatMapLatest { dn -> if (dn == null) emptyFlow() else antManager.manufacturerFlow(dn).map { dn to it } }
+                .collect { (dn, brand) ->
+                    if (brand.isNullOrBlank()) return@collect
+                    val current = applicationContext.antMetersFlow().first()
+                    val next = current.map {
+                        if (it.deviceNumber == dn && isAutoMeterLabel(it.label, dn)) it.copy(label = brand) else it
+                    }
+                    if (next != current) saveAntMeters(applicationContext, next)
+                }
+        }
+
         // Mirror the active Karoo ride-profile id (drives bike resolution in the engine)
         // and learn profiles (id+name) so the Settings UI can offer them for mapping.
         serviceScope.launch {
@@ -392,7 +410,17 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
     private fun meterDisplayName(deviceNumber: Int, label: String?): String {
         val clean = label?.trim().orEmpty()
         // A label that is empty or just the device number isn't helpful — fall back to a tagged form.
-        return if (clean.isEmpty() || clean == deviceNumber.toString()) "KPW #$deviceNumber" else "KPW $clean"
+        return if (isAutoMeterLabel(clean, deviceNumber)) "KPW #$deviceNumber" else "KPW $clean"
+    }
+
+    /** True when the label is still the scan default (blank / bare number / "Device: N" / "Power #N"),
+     *  i.e. the rider hasn't named it — so brand auto-detect may safely fill it in. */
+    private fun isAutoMeterLabel(label: String, deviceNumber: Int): Boolean {
+        val l = label.trim()
+        return l.isEmpty() || l == deviceNumber.toString() ||
+            l.equals("Device: $deviceNumber", ignoreCase = true) ||
+            l.startsWith("Device:", ignoreCase = true) ||
+            l == "Power #$deviceNumber"
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)

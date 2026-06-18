@@ -71,3 +71,21 @@ data class TorquePower(
     val cadenceRpm: Double,
     val torqueNm: Double,
 )
+
+/** Common page 0x50: ANT+/FIT manufacturer ID + model number (device identity). */
+data class ManufacturerData(val manufacturerId: Int, val modelNumber: Int)
+
+/**
+ * Best-effort ANT+/FIT manufacturer-ID → brand name for naming a meter. ANT+ power meters advertise
+ * only this numeric ID (no model name string), so we map the common cycling brands and fall back to
+ * "ANT #id" for the rest — the rider can always rename. NOT authoritative; the full FIT manufacturer
+ * list is large and a specific product name (e.g. "Rally") needs the vendor's private table.
+ */
+object AntManufacturers {
+    private val names = mapOf(
+        1 to "Garmin", 6 to "SRM", 7 to "Quarq", 9 to "Saris",
+        32 to "Wahoo", 48 to "Pioneer", 69 to "Stages", 89 to "Tacx",
+        260 to "Zwift", 263 to "Favero",
+    )
+    fun name(id: Int): String = names[id] ?: "ANT #$id"
+}

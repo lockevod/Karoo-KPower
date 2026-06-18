@@ -14,6 +14,7 @@ object CyclingDynamicsParser {
     const val PAGE_RIGHT_FORCE_ANGLE = 0xE0
     const val PAGE_LEFT_FORCE_ANGLE = 0xE1
     const val PAGE_PEDAL_POSITION = 0xE2
+    const val PAGE_MANUFACTURER = 0x50   // common page 0x50: Manufacturer's Identification
 
     private fun ByteArray.u(i: Int) = this[i].toInt() and 0xFF
 
@@ -90,6 +91,15 @@ object CyclingDynamicsParser {
         if (p.size < 2 || p.u(0) != PAGE_TORQUE_BARYCENTER) return null
         val raw = p.u(1)
         return TorqueBarycenterData(angleDeg = if (raw == 0xFF) null else raw * 0.5 + 30.0)
+    }
+
+    /** Common page 0x50: Manufacturer ID (b4-5 LE) + model number (b6-7 LE). Identity, not live data. */
+    fun parseManufacturer(p: ByteArray): ManufacturerData? {
+        if (p.size < 8 || p.u(0) != PAGE_MANUFACTURER) return null
+        return ManufacturerData(
+            manufacturerId = (p.u(5) shl 8) or p.u(4),
+            modelNumber = (p.u(7) shl 8) or p.u(6),
+        )
     }
 
     /** 0x11 wheel torque / 0x12 crank torque: raw accumulators (deltas give power, see [torquePower]). */

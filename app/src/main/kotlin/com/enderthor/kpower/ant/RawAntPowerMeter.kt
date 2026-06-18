@@ -35,6 +35,9 @@ class RawAntPowerMeter(
     private val _pedalPosition = MutableStateFlow<PedalPositionData?>(null)
     private val _tePs = MutableStateFlow<TePsData?>(null)
     private val _barycenter = MutableStateFlow<TorqueBarycenterData?>(null)
+    /** Brand name from the 0x50 manufacturer page; null until seen. Device identity — survives reset. */
+    private val _manufacturerName = MutableStateFlow<String?>(null)
+    val manufacturerName: StateFlow<String?> = _manufacturerName.asStateFlow()
 
     /** Latest parsed Cycling Dynamics models; null until first seen / after a dropout reset. */
     val forceAngleLeft: StateFlow<ForceAngleData?> = _forceAngleLeft.asStateFlow()
@@ -142,6 +145,13 @@ class RawAntPowerMeter(
             CyclingDynamicsParser.PAGE_TORQUE_BARYCENTER -> {
                 CyclingDynamicsParser.parseTorqueBarycenter(p)?.let { _barycenter.value = it }
                 lastEventMs = System.currentTimeMillis()
+            }
+            CyclingDynamicsParser.PAGE_MANUFACTURER -> {
+                // Device identity (brand). Not a "live" value, so it does NOT update lastEventMs and
+                // is not cleared by reset()/expireIfStale.
+                CyclingDynamicsParser.parseManufacturer(p)?.let {
+                    _manufacturerName.value = AntManufacturers.name(it.manufacturerId)
+                }
             }
         }
     }
