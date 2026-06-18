@@ -139,22 +139,22 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
     Column(modifier = Modifier
         .fillMaxSize()
         .background(MaterialTheme.colorScheme.background)) {
-        TopAppBar(title = { Text(if (isCreating) "Create Power Config" else "Edit Power Config") })
+        TopAppBar(title = { Text(if (isCreating) stringResource(R.string.cfg_title_create) else stringResource(R.string.cfg_title_edit)) })
         Column(modifier = Modifier
             .padding(5.dp)
             .verticalScroll(rememberScrollState())
             .fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Bike", style = MaterialTheme.typography.titleSmall)
+            Text(stringResource(R.string.section_bike), style = MaterialTheme.typography.titleSmall)
 
-            OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Title") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+            OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text(stringResource(R.string.cfg_name)) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
 
             apply {
-                val profileOptions = listOf(DropdownOption("", "None")) +
+                val profileOptions = listOf(DropdownOption("", stringResource(R.string.dropdown_none))) +
                     knownProfiles.map { DropdownOption(it.id, it.name) }
                 val selectedProfile by remember(karooProfileId, knownProfiles) {
                     mutableStateOf(profileOptions.find { it.id == (karooProfileId ?: "") } ?: profileOptions.first())
                 }
-                KarooKeyDropdown(remotekey = "Link to Karoo profile", options = profileOptions, selectedOption = selectedProfile) { opt ->
+                KarooKeyDropdown(remotekey = stringResource(R.string.dropdown_link_profile), options = profileOptions, selectedOption = selectedProfile) { opt ->
                     karooProfileId = if (opt.id.isEmpty()) null else opt.id
                 }
             }
@@ -167,7 +167,7 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
 
             if (knownProfiles.isEmpty()) {
                 Text(
-                    text = "No Karoo profiles seen yet — open each ride profile once on the Karoo (or start a ride with it) and it will appear here.",
+                    text = stringResource(R.string.no_profiles_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -175,8 +175,8 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
 
             apply {
                 val sourceOptions = listOf(
-                    DropdownOption("ESTIMATE", "Estimated"),
-                    DropdownOption("EXTERNAL", "Other sensor (paired in Karoo)"),
+                    DropdownOption("ESTIMATE", stringResource(R.string.source_estimated)),
+                    DropdownOption("EXTERNAL", stringResource(R.string.source_external)),
                 ) + savedMeters.map { DropdownOption("REAL:${it.deviceNumber}", it.label) }
                 val currentSourceId = when {
                     primarySource == "ESTIMATE" -> "ESTIMATE"
@@ -187,7 +187,7 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                 val selectedSource by remember(primarySource, primaryRealDeviceNumber, savedMeters) {
                     mutableStateOf(sourceOptions.find { it.id == currentSourceId } ?: sourceOptions.first())
                 }
-                KarooKeyDropdown(remotekey = "Primary power source", options = sourceOptions, selectedOption = selectedSource) { opt ->
+                KarooKeyDropdown(remotekey = stringResource(R.string.dropdown_primary_source), options = sourceOptions, selectedOption = selectedSource) { opt ->
                     when {
                         opt.id == "ESTIMATE" -> { primarySource = "ESTIMATE"; primaryRealDeviceNumber = null }
                         opt.id == "EXTERNAL" -> { primarySource = "EXTERNAL"; primaryRealDeviceNumber = null }
@@ -214,7 +214,7 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                     val selected by remember(bikePosition) {
                         mutableStateOf(positionOptions.first { it.id == bikePosition.name })
                     }
-                    KarooKeyDropdown(remotekey = "Position", options = positionOptions, selectedOption = selected) { opt ->
+                    KarooKeyDropdown(remotekey = stringResource(R.string.dropdown_position), options = positionOptions, selectedOption = selected) { opt ->
                         applyPreset(BikePosition.valueOf(opt.id))
                     }
                 }
@@ -223,39 +223,39 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Switch(checked = simpleMode, onCheckedChange = { simpleMode = it })
                 Spacer(modifier = Modifier.width(10.dp))
-                Text("Simple mode (hide advanced)")
+                Text(stringResource(R.string.simple_mode_label))
             }
 
             OutlinedTextField(value = bikeMass, modifier = Modifier.fillMaxWidth(),
                 onValueChange = { bikeMass = it },
-                label = { Text("Bike Mass") },
+                label = { Text(stringResource(R.string.cfg_bike_mass)) },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 singleLine = true
             )
 
-            Text("Tyres & surface", style = MaterialTheme.typography.titleSmall)
+            Text(stringResource(R.string.section_tyres_surface), style = MaterialTheme.typography.titleSmall)
 
             if (simpleMode) {
                 OutlinedTextField(value = riderHeight, modifier = Modifier.fillMaxWidth(),
                     onValueChange = { riderHeight = it; recomputeArea() },
-                    label = { Text("Rider height") }, suffix = { Text("cm") },
+                    label = { Text(stringResource(R.string.cfg_rider_height)) }, suffix = { Text("cm") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true
                 )
 
                 OutlinedTextField(value = tyreWidth, modifier = Modifier.fillMaxWidth(),
                     onValueChange = { tyreWidth = it; recomputeCrr() },
-                    label = { Text("Tyre width (mm / inch)") },
+                    label = { Text(stringResource(R.string.cfg_tyre_width)) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true
                 )
 
                 OutlinedTextField(value = tyrePressure, modifier = Modifier.fillMaxWidth(),
                     onValueChange = { tyrePressure = it; recomputeCrr() },
-                    label = { Text("Tyre pressure") }, suffix = { Text("bar") },
+                    label = { Text(stringResource(R.string.cfg_tyre_pressure)) }, suffix = { Text("bar") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true
                 )
 
                 Text(
-                    text = "If front and rear differ, enter the rear tyre — it carries most of the weight and dominates rolling resistance.",
+                    text = stringResource(R.string.rear_tyre_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -265,7 +265,7 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                     val selectedTread by remember(treadType) {
                         mutableStateOf(treadOptions.first { it.id == treadType.name })
                     }
-                    KarooKeyDropdown(remotekey = "Tread", options = treadOptions, selectedOption = selectedTread) { opt ->
+                    KarooKeyDropdown(remotekey = stringResource(R.string.dropdown_tread), options = treadOptions, selectedOption = selectedTread) { opt ->
                         treadType = TreadType.valueOf(opt.id); recomputeCrr()
                     }
                 }
@@ -273,7 +273,7 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Switch(checked = tubeless, onCheckedChange = { tubeless = it; recomputeCrr() })
                     Spacer(modifier = Modifier.width(10.dp))
-                    Text("Tubeless tyres?")
+                    Text(stringResource(R.string.tubeless_label))
                 }
             }
 
@@ -284,7 +284,7 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                     mutableStateOf(dropdownOptions.find { option -> option.id == surface.factor.toString() }!!)
                 }
                 KarooKeyDropdown(
-                    remotekey = if (useRouteSurface) "Default surface (used if the map can't be read)" else "Surface",
+                    remotekey = if (useRouteSurface) stringResource(R.string.dropdown_default_surface) else stringResource(R.string.dropdown_surface),
                     options = dropdownOptions, selectedOption = dropdownInitialSelection
                 ) { selectedOption ->
                     surface =
@@ -295,53 +295,50 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Switch(checked = useRouteSurface, onCheckedChange = { useRouteSurface = it })
                 Spacer(modifier = Modifier.width(10.dp))
-                Text("Auto surface from offline maps")
+                Text(stringResource(R.string.auto_surface_label))
             }
 
             if (useRouteSurface) {
                 Text(
-                    text = "KPower reads the OSM surface under you from the offline maps " +
-                        "(/offline/maps) and adjusts the Crr live (paved/standard/gravel/sand). " +
-                        "Needs offline maps for the area and storage permission; otherwise it keeps " +
-                        "the surface you selected above.",
+                    text = stringResource(R.string.auto_surface_desc),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
-            Text("Rider & FTP", style = MaterialTheme.typography.titleSmall)
+            Text(stringResource(R.string.section_rider_ftp), style = MaterialTheme.typography.titleSmall)
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Switch(checked = useProfileFtp, onCheckedChange = { useProfileFtp = it })
                 Spacer(modifier = Modifier.width(10.dp))
-                Text("Use FTP from Karoo profile?")
+                Text(stringResource(R.string.use_profile_ftp_label))
             }
 
             OutlinedTextField(
                 value = if (useProfileFtp && riderFtp > 0) riderFtp.toString() else ftp,
                 modifier = Modifier.fillMaxWidth(),
                 onValueChange = { if (!useProfileFtp) ftp = it },
-                label = { Text(if (useProfileFtp) "FTP (from Karoo profile)" else "FTP") },
+                label = { Text(if (useProfileFtp) stringResource(R.string.cfg_ftp_from_profile) else stringResource(R.string.cfg_ftp)) },
                 suffix = { Text("W") },
                 enabled = !useProfileFtp,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 singleLine = true
             )
 
-            Text("Weather", style = MaterialTheme.typography.titleSmall)
+            Text(stringResource(R.string.section_weather), style = MaterialTheme.typography.titleSmall)
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Switch(checked = preferHeadwind, onCheckedChange = { preferHeadwind = it })
                 Spacer(modifier = Modifier.width(10.dp))
-                Text("Use Headwind weather if installed")
+                Text(stringResource(R.string.use_headwind_label))
             }
 
             if (preferHeadwind) {
                 Text(
                     text = if (headwindInstalled)
-                        "Headwind detected: KPower will take temperature, pressure and wind from it and skip its own weather lookups. Wind assumes Headwind's default unit (km/h metric / mph imperial); if you set it to m/s or knots in Headwind, wind will be wrong."
+                        stringResource(R.string.headwind_detected_hint)
                     else
-                        "Headwind not installed: KPower will use its own weather (OpenMeteo/OpenWeather below).",
+                        stringResource(R.string.headwind_not_installed_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -363,14 +360,14 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
 
                 OutlinedTextField(value = apikey.toString(), modifier = Modifier.fillMaxWidth(),
                     onValueChange = { apikey = it },
-                    label = { Text("API OpenWeather") },
+                    label = { Text(stringResource(R.string.cfg_api_openweather)) },
                     singleLine = true,
                     enabled = isOpenWeather
                 )
             }
 
             if (!simpleMode) {
-                Text("Advanced", style = MaterialTheme.typography.titleSmall)
+                Text(stringResource(R.string.section_advanced), style = MaterialTheme.typography.titleSmall)
 
                 OutlinedTextField(value = rollingResistanceCoefficient, modifier = Modifier.fillMaxWidth(),
                     onValueChange = { rollingResistanceCoefficient = it },
@@ -388,7 +385,7 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
 
                 OutlinedTextField(value = frontalArea, modifier = Modifier.fillMaxWidth(),
                     onValueChange = { frontalArea = it },
-                    label = { Text("Frontal Area") },
+                    label = { Text(stringResource(R.string.cfg_frontal_area)) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true,
                     suffix = { Text("m2") },
@@ -396,7 +393,7 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
 
                 OutlinedTextField(value = powerLoss, modifier = Modifier.fillMaxWidth(),
                     onValueChange = { powerLoss = it },
-                    label = { Text("Power Loss") },
+                    label = { Text(stringResource(R.string.cfg_power_loss)) },
                     suffix = { Text("%") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true
@@ -405,7 +402,7 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Switch(checked = useKarooTemp, onCheckedChange = { useKarooTemp = it })
                     Spacer(modifier = Modifier.width(10.dp))
-                    Text("Use Karoo temperature sensor as fallback?")
+                    Text(stringResource(R.string.use_karoo_temp_label))
                 }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -413,7 +410,7 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                         isforcepower = it
                     })
                     Spacer(modifier = Modifier.width(10.dp))
-                    Text("Ignore low cadence (always calculate power)?")
+                    Text(stringResource(R.string.ignore_low_cadence_label))
                 }
             }
 
@@ -422,9 +419,9 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                 .height(50.dp), onClick = {
                 onSubmit(getUpdatedConfigData())
             }) {
-                Icon(Icons.Default.Done, contentDescription = "Save Power Config")
+                Icon(Icons.Default.Done, contentDescription = stringResource(R.string.btn_save))
                 Spacer(modifier = Modifier.width(5.dp))
-                Text("Save")
+                Text(stringResource(R.string.btn_save))
             }
 
             FilledTonalButton(modifier = Modifier
@@ -432,9 +429,9 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                 .height(50.dp), onClick = {
                 onCancel()
             }) {
-                Icon(Icons.Default.Close, contentDescription = "Cancel Editing")
+                Icon(Icons.Default.Close, contentDescription = stringResource(R.string.btn_cancel))
                 Spacer(modifier = Modifier.width(5.dp))
-                Text("Cancel")
+                Text(stringResource(R.string.btn_cancel))
             }
 
             // Borrar bici: solo al editar una existente. onSubmit(null) lo interpreta la ruta
@@ -448,9 +445,9 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                         contentColor = MaterialTheme.colorScheme.onErrorContainer,
                     ),
                     onClick = { showDeleteConfirm = true }) {
-                    Icon(Icons.Default.Delete, contentDescription = "Delete bike")
+                    Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.btn_delete_bike))
                     Spacer(modifier = Modifier.width(5.dp))
-                    Text("Delete bike")
+                    Text(stringResource(R.string.btn_delete_bike))
                 }
             }
         }
@@ -459,19 +456,19 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
     if (showDeleteConfirm) {
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = false },
-            title = { Text("Delete this bike?") },
-            text = { Text("This removes the bike configuration. This can't be undone.") },
+            title = { Text(stringResource(R.string.delete_bike_confirm_title)) },
+            text = { Text(stringResource(R.string.delete_bike_confirm_text)) },
             confirmButton = {
                 TextButton(onClick = {
                     showDeleteConfirm = false
                     onSubmit(null)
                 }) {
-                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                    Text(stringResource(R.string.btn_delete), color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteConfirm = false }) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.btn_cancel))
                 }
             }
         )

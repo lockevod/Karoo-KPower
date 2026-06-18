@@ -73,7 +73,7 @@ fun ComparisonScreen() {
     var scanning by remember { mutableStateOf(false) }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("Comparison") }) },
+        topBar = { TopAppBar(title = { Text(stringResource(R.string.tab_comparison)) }) },
         content = { padding ->
             LazyColumn(
                 modifier = Modifier
@@ -98,12 +98,10 @@ fun ComparisonScreen() {
                                     }
                                 )
                                 Spacer(modifier = Modifier.width(10.dp))
-                                Text("Comparison mode")
+                                Text(stringResource(R.string.comparison_mode_label))
                             }
                             Text(
-                                text = "Exposes 4 estimated-power data fields and writes them to the FIT " +
-                                    "(est_power, est_power_3s, est_np, est_avg). For comparing against a real " +
-                                    "power meter. Off by default — increases battery/CPU and FIT size.",
+                                text = stringResource(R.string.comparison_mode_desc),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
@@ -129,19 +127,16 @@ fun ComparisonScreen() {
                                     }
                                 )
                                 Spacer(modifier = Modifier.width(10.dp))
-                                Text("Record cycling dynamics")
+                                Text(stringResource(R.string.record_dynamics_label))
                             }
                             Text(
-                                text = "Reads advanced pedaling metrics (power phase, PCO, balance, " +
-                                    "torque effectiveness…) from the recorded ANT+ meter and writes them " +
-                                    "to the FIT. The Karoo does not record these. Needs a recorded meter. " +
-                                    "Live dynamics fields update only while recording.",
+                                text = stringResource(R.string.record_dynamics_desc),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             if (!hasMeter) {
                                 Spacer(modifier = Modifier.height(6.dp))
                                 Text(
-                                    text = "Add a recorded meter below first.",
+                                    text = stringResource(R.string.record_dynamics_need_meter),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -181,7 +176,7 @@ fun ComparisonScreen() {
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                text = "Log: " + FileLogTree.pathHint(),
+                                text = stringResource(R.string.diagnostic_log_path_prefix) + FileLogTree.pathHint(),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

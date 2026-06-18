@@ -11,7 +11,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
+import com.enderthor.kpower.R
 
 
 @Composable
@@ -26,12 +28,12 @@ fun TabLayout(
             Tab(
                 selected = tab == 0,
                 onClick = { tab = 0 },
-                text = { Text("Bikes") }
+                text = { Text(stringResource(R.string.tab_bikes)) }
             )
             Tab(
                 selected = tab == 1,
                 onClick = { tab = 1 },
-                text = { Text("Comparison") }
+                text = { Text(stringResource(R.string.tab_comparison)) }
             )
         }
         when (tab) {

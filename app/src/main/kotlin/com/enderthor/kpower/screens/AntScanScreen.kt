@@ -51,14 +51,14 @@ fun LazyListScope.antScanItems(
     item {
         Spacer(Modifier.height(8.dp))
         Text(
-            "ANT+ power meters",
+            stringResource(R.string.ant_meters_title),
             style = MaterialTheme.typography.titleMedium,
             modifier = Modifier.padding(horizontal = 8.dp),
         )
     }
     item {
         Text(
-            "Record one extra meter alongside the estimate.",
+            stringResource(R.string.ant_meters_subtitle),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 8.dp),
         )
@@ -68,7 +68,7 @@ fun LazyListScope.antScanItems(
     // Section 1 — Recorded meters (the saved list).
     item {
         Text(
-            "Recorded meters",
+            stringResource(R.string.ant_recorded_meters),
             style = MaterialTheme.typography.titleSmall,
             modifier = Modifier.padding(horizontal = 8.dp),
         )
@@ -84,7 +84,7 @@ fun LazyListScope.antScanItems(
     if (saved.isEmpty()) {
         item {
             Text(
-                "No meters recorded yet — pick one below.",
+                stringResource(R.string.ant_no_meters),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
             )
@@ -100,7 +100,7 @@ fun LazyListScope.antScanItems(
                     modifier = Modifier.weight(1f),
                 )
                 IconButton(onClick = { onDelete(m) }) {
-                    Icon(Icons.Default.Delete, contentDescription = "Remove")
+                    Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.ant_remove))
                 }
             }
         }
@@ -111,7 +111,7 @@ fun LazyListScope.antScanItems(
     // Section 2 — Available, detected devices not already saved (manual scan).
     item {
         Text(
-            "Available",
+            stringResource(R.string.ant_available),
             style = MaterialTheme.typography.titleSmall,
             modifier = Modifier.padding(horizontal = 8.dp),
         )
@@ -121,12 +121,12 @@ fun LazyListScope.antScanItems(
             onClick = onToggleScan,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
         ) {
-            Text(if (scanning) "Stop" else "Scan")
+            Text(if (scanning) stringResource(R.string.ant_stop) else stringResource(R.string.ant_scan))
         }
     }
     item {
         Text(
-            "Don't scan while recording a ride — it can disrupt the meter you're recording.",
+            stringResource(R.string.ant_scan_warning),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 8.dp),
@@ -135,7 +135,7 @@ fun LazyListScope.antScanItems(
     if (atCap) {
         item {
             Text(
-                "Maximum: $MAX_METERS meter",
+                stringResource(R.string.ant_max_meters, MAX_METERS),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
             )
@@ -143,7 +143,7 @@ fun LazyListScope.antScanItems(
     } else if (available.isEmpty()) {
         item {
             Text(
-                if (scanning) "Scanning…" else "Tap Scan to find meters.",
+                if (scanning) stringResource(R.string.ant_scanning) else stringResource(R.string.ant_tap_scan),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
             )
@@ -162,9 +162,9 @@ fun LazyListScope.antScanItems(
                     enabled = !atCap,
                     onClick = { onAdd(dev) },
                 ) {
-                    Icon(Icons.Default.Add, contentDescription = "Add")
+                    Icon(Icons.Default.Add, contentDescription = stringResource(R.string.ant_add))
                     Spacer(Modifier.width(4.dp))
-                    Text("Add")
+                    Text(stringResource(R.string.ant_add))
                 }
             }
         }

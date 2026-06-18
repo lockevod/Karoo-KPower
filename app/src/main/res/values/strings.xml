@@ -41,4 +41,81 @@
     <string name="diagnostic_log_label">Diagnostic logging</string>
     <string name="diagnostic_log_desc">Records a detailed log file for each ride (every ANT+ page including unknown ones, parsed values, and connection events) so it can be analysed later. Off by default — it uses some extra battery and storage.</string>
     <string name="dynamics_only_hint">Only want dynamics, no power estimation? In your Karoo ride profile pick “KPower: …” (your meter) as the power source instead of “KPowerv2”, and leave Comparison mode off. The estimator then stays off — no estimation or weather lookups run.</string>
+
+    <!-- Tabs -->
+    <string name="tab_bikes">Bikes</string>
+    <string name="tab_comparison">Comparison</string>
+
+    <!-- Main / bikes list -->
+    <string name="bikes_add">Add bike</string>
+    <string name="bikes_empty">No bikes yet — tap + to add one.</string>
+
+    <!-- Comparison screen -->
+    <string name="comparison_mode_label">Comparison mode</string>
+    <string name="comparison_mode_desc">Exposes 4 estimated-power data fields and writes them to the FIT (est_power, est_power_3s, est_np, est_avg). For comparing against a real power meter. Off by default — increases battery/CPU and FIT size.</string>
+    <string name="record_dynamics_label">Record cycling dynamics</string>
+    <string name="record_dynamics_desc">Reads advanced pedaling metrics (power phase, PCO, balance, torque effectiveness…) from the recorded ANT+ meter and writes them to the FIT. The Karoo does not record these. Needs a recorded meter. Live dynamics fields update only while recording.</string>
+    <string name="record_dynamics_need_meter">Add a recorded meter below first.</string>
+    <string name="diagnostic_log_path_prefix">Log: </string>
+
+    <!-- ANT+ scan -->
+    <string name="ant_meters_title">ANT+ power meters</string>
+    <string name="ant_meters_subtitle">Record one extra meter alongside the estimate.</string>
+    <string name="ant_recorded_meters">Recorded meters</string>
+    <string name="ant_no_meters">No meters recorded yet — pick one below.</string>
+    <string name="ant_available">Available</string>
+    <string name="ant_scan">Scan</string>
+    <string name="ant_stop">Stop</string>
+    <string name="ant_scan_warning">Don\'t scan while recording a ride — it can disrupt the meter you\'re recording.</string>
+    <string name="ant_max_meters">Maximum: %1$d meter</string>
+    <string name="ant_scanning">Scanning…</string>
+    <string name="ant_tap_scan">Tap Scan to find meters.</string>
+    <string name="ant_remove">Remove</string>
+    <string name="ant_add">Add</string>
+
+    <!-- Detail screen -->
+    <string name="cfg_title_create">Create Power Config</string>
+    <string name="cfg_title_edit">Edit Power Config</string>
+    <string name="section_bike">Bike</string>
+    <string name="cfg_name">Title</string>
+    <string name="dropdown_none">None</string>
+    <string name="dropdown_link_profile">Link to Karoo profile</string>
+    <string name="no_profiles_hint">No Karoo profiles seen yet — open each ride profile once on the Karoo (or start a ride with it) and it will appear here.</string>
+    <string name="source_estimated">Estimated</string>
+    <string name="source_external">Other sensor (paired in Karoo)</string>
+    <string name="dropdown_primary_source">Primary power source</string>
+    <string name="dropdown_position">Position</string>
+    <string name="simple_mode_label">Simple mode (hide advanced)</string>
+    <string name="cfg_bike_mass">Bike Mass</string>
+    <string name="section_tyres_surface">Tyres &amp; surface</string>
+    <string name="cfg_rider_height">Rider height</string>
+    <string name="cfg_tyre_width">Tyre width (mm / inch)</string>
+    <string name="cfg_tyre_pressure">Tyre pressure</string>
+    <string name="rear_tyre_hint">If front and rear differ, enter the rear tyre — it carries most of the weight and dominates rolling resistance.</string>
+    <string name="dropdown_tread">Tread</string>
+    <string name="tubeless_label">Tubeless tyres?</string>
+    <string name="dropdown_default_surface">Default surface (used if the map can\'t be read)</string>
+    <string name="dropdown_surface">Surface</string>
+    <string name="auto_surface_label">Auto surface from offline maps</string>
+    <string name="auto_surface_desc">KPower reads the OSM surface under you from the offline maps (/offline/maps) and adjusts the Crr live (paved/standard/gravel/sand). Needs offline maps for the area and storage permission; otherwise it keeps the surface you selected above.</string>
+    <string name="section_rider_ftp">Rider &amp; FTP</string>
+    <string name="use_profile_ftp_label">Use FTP from Karoo profile?</string>
+    <string name="cfg_ftp_from_profile">FTP (from Karoo profile)</string>
+    <string name="cfg_ftp">FTP</string>
+    <string name="section_weather">Weather</string>
+    <string name="use_headwind_label">Use Headwind weather if installed</string>
+    <string name="headwind_detected_hint">Headwind detected: KPower will take temperature, pressure and wind from it and skip its own weather lookups. Wind assumes Headwind\'s default unit (km/h metric / mph imperial); if you set it to m/s or knots in Headwind, wind will be wrong.</string>
+    <string name="headwind_not_installed_hint">Headwind not installed: KPower will use its own weather (OpenMeteo/OpenWeather below).</string>
+    <string name="cfg_api_openweather">API OpenWeather</string>
+    <string name="section_advanced">Advanced</string>
+    <string name="cfg_frontal_area">Frontal Area</string>
+    <string name="cfg_power_loss">Power Loss</string>
+    <string name="use_karoo_temp_label">Use Karoo temperature sensor as fallback?</string>
+    <string name="ignore_low_cadence_label">Ignore low cadence (always calculate power)?</string>
+    <string name="btn_save">Save</string>
+    <string name="btn_cancel">Cancel</string>
+    <string name="btn_delete_bike">Delete bike</string>
+    <string name="delete_bike_confirm_title">Delete this bike?</string>
+    <string name="delete_bike_confirm_text">This removes the bike configuration. This can\'t be undone.</string>
+    <string name="btn_delete">Delete</string>
 </resources>

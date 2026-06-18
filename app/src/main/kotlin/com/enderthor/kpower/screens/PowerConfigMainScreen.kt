@@ -40,6 +40,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
@@ -51,6 +52,7 @@ import androidx.navigation.navArgument
 
 import kotlinx.coroutines.launch
 
+import com.enderthor.kpower.R
 import com.enderthor.kpower.data.ConfigData
 import com.enderthor.kpower.data.previewConfigData
 import com.enderthor.kpower.extension.loadPreferencesFlow
@@ -167,11 +169,11 @@ fun MainScreen(
 ) {
 
     Scaffold(
-        topBar = { TopAppBar(title = {Text("Bikes")}) },
+        topBar = { TopAppBar(title = {Text(stringResource(R.string.tab_bikes))}) },
         floatingActionButtonPosition = FabPosition.End,
         floatingActionButton = {
             FloatingActionButton(onClick = onNavigateToCreate) {
-                Icon(Icons.Default.Add, contentDescription = "Add bike")
+                Icon(Icons.Default.Add, contentDescription = stringResource(R.string.bikes_add))
             }
         },
         content = {
@@ -210,7 +212,7 @@ fun MainScreen(
                     }
                 }
 
-                if (configDatas.isEmpty()) Text(modifier = Modifier.padding(5.dp), text = "No bikes yet — tap + to add one.")
+                if (configDatas.isEmpty()) Text(modifier = Modifier.padding(5.dp), text = stringResource(R.string.bikes_empty))
 
             }
         }
