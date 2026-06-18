@@ -119,15 +119,22 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
         }
     }
 
-    fun getUpdatedConfigData(): ConfigData = ConfigData(
+    fun getUpdatedConfigData(): ConfigData {
+        // The OpenWeather provider control is hidden in Simple mode and when Headwind is the active
+        // weather source. Don't persist a stranded isOpenWeather=true the rider can no longer see or
+        // turn off (it would keep hitting OpenWeather with an uneditable key); fall back to OpenMeteo.
+        val openWeatherVisible = !simpleMode && !(preferHeadwind && headwindInstalled)
+        val effectiveOpenWeather = isOpenWeather && openWeatherVisible
+        return ConfigData(
         configdata.id, title, isActive, bikeMass, rollingResistanceCoefficient, dragCoefficient,
-        frontalArea, powerLoss, headwind, isOpenWeather, apikey, ftp, surface, isforcepower,
+        frontalArea, powerLoss, headwind, effectiveOpenWeather, apikey, ftp, surface, isforcepower,
         bikePosition, riderHeight, tyreWidth, tyrePressure, treadType, useProfileFtp, simpleMode, useKarooTemp, tubeless,
         preferHeadwind, useRouteSurface,
         karooProfileId = karooProfileId,
         primarySource = primarySource,
         primaryRealDeviceNumber = primaryRealDeviceNumber,
-    )
+        )
+    }
 
     Column(modifier = Modifier
         .fillMaxSize()

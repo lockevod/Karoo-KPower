@@ -66,9 +66,11 @@ class CyclingWattageEstimator(
         val rollingResistanceForce = calculateRollingResistanceForce(slopeAngle)
         val aerodynamicDragForce = calculateAerodynamicDragForce()
         val inertiaForce = totalMass * acceleration
-        // Drivetrain loss: P_wheel / (1 - loss). Clamp loss to [0, 0.5): the field is free text,
-        // and loss >= 1 would yield Infinity/negative power (a user typing "100" meant 100%).
-        val lossFactor = 1.0 - powerLoss.coerceIn(0.0, 0.5)
+        // Drivetrain loss: P_wheel / (1 - loss). The field is free text: clamp to [0, 0.5] and treat
+        // non-finite input (NaN/Infinity from a pasted non-number) as 0, so a bad entry can't drive
+        // the power to NaN/Infinity (coerceIn alone leaves NaN unchanged).
+        val safeLoss = if (powerLoss.isFinite()) powerLoss.coerceIn(0.0, 0.5) else 0.0
+        val lossFactor = 1.0 - safeLoss
         val estimatedPower = (gravityForce + rollingResistanceForce + aerodynamicDragForce +
                 calculateDynamicRollingResistanceForce(slopeAngle) + inertiaForce) * speed / lossFactor
 
