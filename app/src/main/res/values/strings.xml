@@ -3,7 +3,7 @@
     <string name="extension_name">KPower</string>
     <string name="drag_coefficient_desc">Cd (aero drag coefficient). Only useful if you have a real power meter</string>
     <string name="drag_coefficient">Cd</string>
-    <string name="profile_power_source_hint">To show power, add the “KPower” sensor as the power source in this Karoo ride profile.</string>
+    <string name="profile_power_source_hint">To show power, add the “KPW Estim.” sensor as the power source in this Karoo ride profile.</string>
     <string name="weather_provider_label">Weather provider</string>
     <string name="weather_provider_switch">Use OpenWeather (needs API key); off = OpenMeteo (free)</string>
     <string name="est_instant_name">Est. Power</string>
@@ -36,7 +36,7 @@
     <string name="dyn_peakpp_left_desc">Real meter left peak power-phase start angle, degrees (requires a recorded meter)</string>
     <string name="dyn_peakpp_right_name">Real Peak PP Start R</string>
     <string name="dyn_peakpp_right_desc">Real meter right peak power-phase start angle, degrees (requires a recorded meter)</string>
-    <string name="meter_double_pair_warning">Tip: to feed this meter to the Karoo, pair the sensor named “KPower: …” (your meter\'s name with a KPower prefix) in your ride profile — don\'t also pair the meter natively, or power will be recorded twice.</string>
+    <string name="meter_double_pair_warning">Tip: to feed this meter to the Karoo, pair the sensor named “KPW …” (your meter\'s name with a KPW prefix) in your ride profile — don\'t also pair the meter natively, or power will be recorded twice.</string>
     <string name="diagnostic_log_label">Diagnostic logging</string>
     <string name="diagnostic_log_desc">Records a detailed log file for each ride (every ANT+ page including unknown ones, parsed values, and connection events) so it can be analysed later. Off by default — it uses some extra battery and storage.</string>
 

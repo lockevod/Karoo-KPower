@@ -125,14 +125,5 @@ class RealPowerSource(
             antManager: com.enderthor.kpower.ant.AntPowerManager,
         ): RealPowerSource =
             RealPowerSource(extension, deviceNumber, label, antManager)
-
-        fun fromUid(
-            extension: String,
-            uid: String,
-            antManager: com.enderthor.kpower.ant.AntPowerManager,
-        ): RealPowerSource? =
-            uid.substringAfterLast("-").toIntOrNull()?.let {
-                RealPowerSource(extension, it, "KPower: Real #$it", antManager)
-            }
     }
 }

@@ -3,7 +3,7 @@
     <string name="extension_name">KPower</string>
     <string name="drag_coefficient_desc">Cd (coeficiente aerodinámico). Solo útil si tienes un potenciómetro real</string>
     <string name="drag_coefficient">Cd</string>
-    <string name="profile_power_source_hint">Para mostrar potencia, añade el sensor “KPower” como fuente de potencia en este perfil de ruta del Karoo.</string>
+    <string name="profile_power_source_hint">Para mostrar potencia, añade el sensor “KPW Estim.” como fuente de potencia en este perfil de ruta del Karoo.</string>
     <string name="weather_provider_label">Proveedor meteorológico</string>
     <string name="weather_provider_switch">Usar OpenWeather (necesita clave API); Off = OpenMeteo (gratis)</string>
     <string name="est_instant_name">Pot. est.</string>
@@ -36,7 +36,7 @@
     <string name="dyn_peakpp_left_desc">Ángulo de inicio de la fase de potencia pico izquierda del potenciómetro real, en grados (requiere un medidor grabado)</string>
     <string name="dyn_peakpp_right_name">Inicio FP pico real D</string>
     <string name="dyn_peakpp_right_desc">Ángulo de inicio de la fase de potencia pico derecha del potenciómetro real, en grados (requiere un medidor grabado)</string>
-    <string name="meter_double_pair_warning">Consejo: para enviar este potenciómetro al Karoo, empareja el sensor llamado “KPower: …” (el nombre de tu potenciómetro con el prefijo KPower) en tu perfil de ruta — no emparejes además el potenciómetro de forma nativa, o la potencia se grabará dos veces.</string>
+    <string name="meter_double_pair_warning">Consejo: para enviar este potenciómetro al Karoo, empareja el sensor llamado “KPW …” (el nombre de tu potenciómetro con el prefijo KPW) en tu perfil de ruta — no emparejes además el potenciómetro de forma nativa, o la potencia se grabará dos veces.</string>
     <string name="diagnostic_log_label">Registro de diagnóstico</string>
     <string name="diagnostic_log_desc">Graba un archivo de registro detallado en cada salida (cada página ANT+ incluidas las desconocidas, valores interpretados y eventos de conexión) para poder analizarlo después. Off por defecto — consume algo más de batería y almacenamiento.</string>
 

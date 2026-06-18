@@ -13,7 +13,7 @@ class EstimatedPowerSource(
     private val engine: PowerEstimationEngine,
 ) {
     val source by lazy {
-        Device(extension, "estimated-power-$hr", listOf(DataType.Source.POWER), "KPower_Est")
+        Device(extension, "estimated-power-$hr", listOf(DataType.Source.POWER), "KPW Estim.")
     }
 
     @Volatile private var activeScope: CoroutineScope? = null

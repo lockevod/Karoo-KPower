@@ -86,6 +86,11 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
     // weather loop so it skips the expensive GPS/stats/HTTP work when not recording.
     @Volatile private var isRecording = false
 
+    // Latest saved-meters snapshot, kept current by a collector in onCreate. connectDevice() runs on
+    // a host (binder) thread and isn't suspend, so it can't read DataStore inline — it reads this to
+    // resolve a meter's friendly label for the reconnect Device name.
+    @Volatile private var savedMetersSnapshot: List<com.enderthor.kpower.ant.SavedMeter> = emptyList()
+
     override val types: List<DataTypeImpl> by lazy {
         listOf(
             EstimatedPowerDataType(extension, TYPE_EST_INSTANT, engine) { it.instantW },
@@ -161,6 +166,12 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
 
         serviceScope.launch {
             weatherRefreshLoop()
+        }
+
+        // Keep a snapshot of saved meters so connectDevice() (non-suspend, binder thread) can resolve
+        // a meter's friendly label for the reconnect Device name.
+        serviceScope.launch {
+            applicationContext.antMetersFlow().collect { savedMetersSnapshot = it }
         }
 
         // Mirror the active Karoo ride-profile id (drives bike resolution in the engine)
@@ -356,7 +367,7 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
             savedMeters.forEach { sm ->
                 emitter.onNext(
                     com.enderthor.kpower.vdevice.RealPowerSource
-                        .buildDevice(extension, sm.deviceNumber, "KPower: ${sm.label}", antManager).source
+                        .buildDevice(extension, sm.deviceNumber, meterDisplayName(sm.deviceNumber, sm.label), antManager).source
                 )
             }
         }
@@ -366,10 +377,22 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
     override fun connectDevice(uid: String, emitter: Emitter<DeviceEvent>) {
         Timber.d("Connect Device")
         if (uid.startsWith("real-power-")) {
-            com.enderthor.kpower.vdevice.RealPowerSource.fromUid(extension, uid, antManager)?.connect(emitter, extension)
+            val dn = uid.substringAfterLast("-").toIntOrNull() ?: return
+            val saved = savedMetersSnapshot.firstOrNull { it.deviceNumber == dn }
+            com.enderthor.kpower.vdevice.RealPowerSource
+                .buildDevice(extension, dn, meterDisplayName(dn, saved?.label), antManager)
+                .connect(emitter, extension)
         } else {
             EstimatedPowerSource.fromUid(extension, uid, engine)?.connect(emitter, extension)
         }
+    }
+
+    /** Friendly Karoo display name for a real meter: "KPW <name>", or "KPW #<deviceNumber>" when the
+     *  scan gave no usable (non-numeric) name. Keeps the name human-readable instead of a bare number. */
+    private fun meterDisplayName(deviceNumber: Int, label: String?): String {
+        val clean = label?.trim().orEmpty()
+        // A label that is empty or just the device number isn't helpful — fall back to a tagged form.
+        return if (clean.isEmpty() || clean == deviceNumber.toString()) "KPW #$deviceNumber" else "KPW $clean"
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
