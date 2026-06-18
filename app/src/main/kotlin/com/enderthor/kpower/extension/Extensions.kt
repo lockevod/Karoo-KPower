@@ -125,6 +125,24 @@ suspend fun saveAntMeters(context: Context, meters: List<com.enderthor.kpower.an
     context.dataStore.edit { it[antMetersKey] = Json.encodeToString(meters) }
 }
 
+/**
+ * Atomic read-modify-write of the saved meters: decode the current value, apply [transform], and
+ * re-encode — all INSIDE one dataStore.edit {} transaction. Use this for every mutation (add,
+ * delete, rename, enable-toggle, brand auto-detect) so two concurrent writers (e.g. the background
+ * brand-detect collector and a manual rename) can't clobber each other with a stale snapshot.
+ */
+suspend fun updateAntMeters(
+    context: Context,
+    transform: (List<com.enderthor.kpower.ant.SavedMeter>) -> List<com.enderthor.kpower.ant.SavedMeter>,
+) {
+    context.dataStore.edit { prefs ->
+        val current = runCatching {
+            jsonWithUnknownKeys.decodeFromString<List<com.enderthor.kpower.ant.SavedMeter>>(prefs[antMetersKey] ?: "[]")
+        }.getOrDefault(emptyList())
+        prefs[antMetersKey] = Json.encodeToString(transform(current))
+    }
+}
+
 fun Context.antMetersFlow(): Flow<List<com.enderthor.kpower.ant.SavedMeter>> =
     dataStore.data.map { json ->
         try {

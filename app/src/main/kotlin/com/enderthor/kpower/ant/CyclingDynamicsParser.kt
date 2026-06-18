@@ -133,10 +133,20 @@ object CyclingDynamicsParser {
         val dPeriod = (curr.accumPeriod - prev.accumPeriod) and 0xFFFF
         val dTorque = (curr.accumTorque - prev.accumTorque) and 0xFFFF
         if (dEvent == 0 || dPeriod == 0) return null
+        val power = 128.0 * Math.PI * dTorque / dPeriod
+        val cadence = 60.0 * 2048.0 * dEvent / dPeriod
+        // Reject physically-impossible results. After a reacquire that skipped frames, the masked
+        // 8/16-bit deltas can be inconsistent (e.g. events wrapped >256 while period wrapped once),
+        // producing a one-tick spike. Treat that as "no valid delta" (null) so the caller holds/
+        // coasts and the NEXT clean frame recovers — never letting a garbage spike reach the FIT.
+        if (power !in 0.0..MAX_PLAUSIBLE_W || cadence !in 0.0..MAX_PLAUSIBLE_RPM) return null
         return TorquePower(
-            powerW = 128.0 * Math.PI * dTorque / dPeriod,
-            cadenceRpm = 60.0 * 2048.0 * dEvent / dPeriod,
+            powerW = power,
+            cadenceRpm = cadence,
             torqueNm = (dTorque / 32.0) / dEvent,
         )
     }
+
+    private const val MAX_PLAUSIBLE_W = 3000.0     // well above any human sprint; rejects wrap artifacts
+    private const val MAX_PLAUSIBLE_RPM = 250.0     // track sprint tops ~250; above = artifact
 }

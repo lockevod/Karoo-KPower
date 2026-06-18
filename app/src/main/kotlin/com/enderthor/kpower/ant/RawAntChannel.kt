@@ -50,8 +50,9 @@ class RawAntChannel(
      */
     @Volatile private var failures = 0
 
-    /** Guards against two open() attempts running at once (death-retry racing a late rebind). */
-    @Volatile private var opening = false
+    /** Guards against two open() attempts running at once (death-retry racing a late rebind). CAS so
+     *  the check-and-set is atomic — a plain volatile read-then-write let two callers both pass. */
+    private val opening = java.util.concurrent.atomic.AtomicBoolean(false)
 
     // ── Diagnostic ANT page logging (purely additive; only touched when FileLogTree.enabled) ─────
     /** Lifetime count of every page seen, keyed by page number, for the periodic SUMMARY line. */
@@ -145,8 +146,10 @@ class RawAntChannel(
      * released immediately and we return without opening, so no orphan channel is left.
      */
     private suspend fun open() {
-        if (stopped || opening) return
-        opening = true
+        if (stopped) return
+        // Atomically claim the "opening" slot; if another open() is already in flight it is acquiring
+        // a fresh channel, so dropping this attempt is safe (that one will succeed or reschedule).
+        if (!opening.compareAndSet(false, true)) return
         try {
             runCatching {
                 // The ANT Radio Service can be mid-restart (ChannelNotAvailableException
@@ -205,7 +208,7 @@ class RawAntChannel(
                 scheduleReopen(e.message ?: "open failure")
             }
         } finally {
-            opening = false
+            opening.set(false)
         }
     }
 

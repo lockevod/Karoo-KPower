@@ -139,6 +139,7 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
     private val fieldEstNp = DeveloperField(2, 136, "est_np", "W")
     private val fieldEstAvg = DeveloperField(3, 136, "est_avg", "W")
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     override fun onCreate() {
         super.onCreate()
 
@@ -175,8 +176,9 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
         }
 
         // Brand auto-detect: once a connected meter reports its manufacturer (0x50 page), fill in the
-        // saved label IF the rider hasn't named it (still the scan default "Device: N" / number).
-        // Never clobbers a manual rename. Only meaningful while the meter is connected (recording).
+        // saved label IF the rider hasn't named it. Never clobbers a manual rename (userNamed flag).
+        // Only meaningful while the meter is connected (recording). The write is an ATOMIC transform
+        // so it can't clobber a concurrent rename/toggle.
         serviceScope.launch {
             applicationContext.antMetersFlow()
                 .map { it.firstOrNull { m -> m.enabled }?.deviceNumber }
@@ -184,11 +186,12 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                 .flatMapLatest { dn -> if (dn == null) emptyFlow() else antManager.manufacturerFlow(dn).map { dn to it } }
                 .collect { (dn, brand) ->
                     if (brand.isNullOrBlank()) return@collect
-                    val current = applicationContext.antMetersFlow().first()
-                    val next = current.map {
-                        if (it.deviceNumber == dn && isAutoMeterLabel(it.label, dn)) it.copy(label = brand) else it
+                    updateAntMeters(applicationContext) { meters ->
+                        meters.map {
+                            if (it.deviceNumber == dn && !it.userNamed && isAutoMeterLabel(it.label, dn))
+                                it.copy(label = brand) else it
+                        }
                     }
-                    if (next != current) saveAntMeters(applicationContext, next)
                 }
         }
 

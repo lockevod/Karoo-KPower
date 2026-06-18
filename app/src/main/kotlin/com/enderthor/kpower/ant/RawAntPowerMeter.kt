@@ -73,10 +73,13 @@ class RawAntPowerMeter(
     @Volatile private var lastEventMs: Long = 0L
 
     // ── Torque-based power (0x11/0x12) state ────────────────────────────────────────────────────
+    // @Volatile because onPayload runs on the ANT callback thread, and a channel reopen registers a
+    // FRESH event handler that may be invoked from a different thread — volatile publishes the last
+    // delta state across that boundary so a reopen can't read a stale prevTorque and emit a spike.
     /** Previous torque page, for the delta that yields power/cadence. Null until the first one. */
-    private var prevTorque: TorqueData? = null
+    @Volatile private var prevTorque: TorqueData? = null
     /** Wall-clock of the last NEW rotation event (Δevent>0); drives coast-to-zero when pedalling stops. */
-    private var lastTorqueEventChangeMs: Long = 0L
+    @Volatile private var lastTorqueEventChangeMs: Long = 0L
     /**
      * True once any torque page has arrived. A torque-based meter (Garmin Rally/Vector, most
      * crank/spider meters) ALSO emits the 0x10 power-only page but with its instantaneous-power

@@ -45,7 +45,7 @@ import com.enderthor.kpower.extension.FileLogTree
 import com.enderthor.kpower.extension.antMetersFlow
 import com.enderthor.kpower.extension.comparisonModeFlow
 import com.enderthor.kpower.extension.diagnosticLogFlow
-import com.enderthor.kpower.extension.saveAntMeters
+import com.enderthor.kpower.extension.updateAntMeters
 import com.enderthor.kpower.extension.saveComparisonMode
 import com.enderthor.kpower.extension.saveDiagnosticLog
 
@@ -93,31 +93,40 @@ fun ComparisonScreen() {
                         else { antManager.startScan(); scanning = true }
                     },
                     onAdd = { dev ->
-                        if (saved.size >= MAX_METERS) return@antScanItems
-                        if (saved.any { it.deviceNumber == dev.deviceNumber }) return@antScanItems
-                        val usedSlots = saved.map { it.slot }.toSet()
-                        val freeSlot = (0 until MAX_METERS).firstOrNull { it !in usedSlots }
-                            ?: return@antScanItems
-                        val next = saved + SavedMeter(dev.deviceNumber, dev.name, freeSlot)
-                        scope.launch { saveAntMeters(ctx, next) }
+                        // Atomic transform off the CURRENT persisted list (not the stale `saved`
+                        // snapshot), so a concurrent write can't be clobbered.
+                        scope.launch {
+                            updateAntMeters(ctx) { current ->
+                                val usedSlots = current.map { it.slot }.toSet()
+                                val freeSlot = (0 until MAX_METERS).firstOrNull { it !in usedSlots }
+                                if (current.size >= MAX_METERS ||
+                                    current.any { it.deviceNumber == dev.deviceNumber } ||
+                                    freeSlot == null
+                                ) current
+                                else current + SavedMeter(dev.deviceNumber, dev.name, freeSlot)
+                            }
+                        }
                     },
                     onDelete = { m ->
-                        val dn = m.deviceNumber
-                        val next = saved.filterNot { it.deviceNumber == dn }
-                        scope.launch { saveAntMeters(ctx, next) }
+                        scope.launch {
+                            updateAntMeters(ctx) { current -> current.filterNot { it.deviceNumber == m.deviceNumber } }
+                        }
                     },
                     onToggleEnabled = { m, en ->
                         // Only ONE real meter may be active at a time (two enabled meters would
                         // record conflicting power/dynamics into the same FIT slot). Enabling one
                         // therefore disables every other; disabling just clears that one.
-                        val next = saved.map {
-                            when {
-                                it.deviceNumber == m.deviceNumber -> it.copy(enabled = en)
-                                en -> it.copy(enabled = false)
-                                else -> it
+                        scope.launch {
+                            updateAntMeters(ctx) { current ->
+                                current.map {
+                                    when {
+                                        it.deviceNumber == m.deviceNumber -> it.copy(enabled = en)
+                                        en -> it.copy(enabled = false)
+                                        else -> it
+                                    }
+                                }
                             }
                         }
-                        scope.launch { saveAntMeters(ctx, next) }
                     },
                     onRename = { renaming = it },
                 )
@@ -213,10 +222,14 @@ fun ComparisonScreen() {
                     confirmButton = {
                         TextButton(onClick = {
                             val newLabel = draft.trim().ifEmpty { meter.label }
-                            val next = saved.map {
-                                if (it.deviceNumber == meter.deviceNumber) it.copy(label = newLabel) else it
+                            scope.launch {
+                                updateAntMeters(ctx) { current ->
+                                    current.map {
+                                        if (it.deviceNumber == meter.deviceNumber)
+                                            it.copy(label = newLabel, userNamed = true) else it
+                                    }
+                                }
                             }
-                            scope.launch { saveAntMeters(ctx, next) }
                             renaming = null
                         }) { Text(stringResource(R.string.btn_save)) }
                     },

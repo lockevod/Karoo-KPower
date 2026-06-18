@@ -135,19 +135,28 @@ class CyclingDynamicsParserTest {
     }
 
     @Test fun torquePower_handlesRollover() {
-        // event 8-bit and period/torque 16-bit wrap to a normal positive delta.
-        val prev = TorqueData(true, eventCount = 0xFF, ticks = 0, cadenceRpm = null, accumPeriod = 0xFFF0, accumTorque = 0xFFE0)
-        val curr = TorqueData(true, eventCount = 0x00, ticks = 0, cadenceRpm = null, accumPeriod = 0x0001, accumTorque = 0x0040)
+        // 8-bit event and 16-bit period/torque accumulators wrap to a normal positive delta, with
+        // REALISTIC per-event values (90 rpm / 200 W) so the result passes the plausibility clamp.
+        // dEvent=1, dPeriod=1365 (=2048/1.5), dTorque=679 -> ~200 W, ~90 rpm.
+        val prev = TorqueData(true, eventCount = 0xFF, ticks = 0, cadenceRpm = null, accumPeriod = 65035, accumTorque = 65000)
+        val curr = TorqueData(true, eventCount = 0x00, ticks = 1, cadenceRpm = null, accumPeriod = 864, accumTorque = 143)
         val tp = CyclingDynamicsParser.torquePower(prev, curr)!!
-        // dEvent=1, dPeriod=(0x0001-0xFFF0)&0xFFFF=17, dTorque=(0x0040-0xFFE0)&0xFFFF=96
-        assertEquals(128.0 * Math.PI * 96 / 17, tp.powerW, 0.5)
-        assertTrue(tp.powerW > 0)
+        assertEquals(200.0, tp.powerW, 2.0)
+        assertEquals(90.0, tp.cadenceRpm, 1.0)
     }
 
     @Test fun torquePower_noNewEvent_returnsNull() {
         // Repeated frame (Δevent == 0) -> caller holds/coasts, parser returns null.
         val d = TorqueData(true, eventCount = 5, ticks = 5, cadenceRpm = 40.0, accumPeriod = 100, accumTorque = 200)
         assertNull(CyclingDynamicsParser.torquePower(d, d))
+    }
+
+    @Test fun torquePower_rejectsImplausibleSpike() {
+        // Reacquire artifact: dEvent=1 but a tiny dPeriod with a big dTorque -> absurd watts.
+        // 128π·600/3 ≈ 80k W -> must be rejected (null), so a spike never reaches the FIT.
+        val prev = TorqueData(true, eventCount = 0, ticks = 0, cadenceRpm = null, accumPeriod = 0, accumTorque = 0)
+        val curr = TorqueData(true, eventCount = 1, ticks = 1, cadenceRpm = null, accumPeriod = 3, accumTorque = 600)
+        assertNull(CyclingDynamicsParser.torquePower(prev, curr))
     }
 
     @Test fun parseManufacturer_garmin_realCapture() {
