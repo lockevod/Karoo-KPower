@@ -24,14 +24,15 @@ import kotlin.time.Duration.Companion.seconds
 fun dynFieldTypeId(metric: String) = "dyn-$metric-0"   // e.g. dyn-balance-0, dyn-te-0, dyn-pp-left-0
 
 /**
- * Live cycling-dynamics metric of a real ANT+ meter slot; shows `---` when dynamics recording is
- * off, no meter is mapped to the slot, or the meter has no sample yet.
+ * Live cycling-dynamics metric of a real ANT+ meter slot; shows `---` when the gate is off
+ * (no meter is recorded), no meter is mapped to the slot, or the meter has no sample yet.
  *
  * REACTIVE WIRING CHOICE: this is a verbatim clone of [RealPowerDataType]'s pipeline
  * (combine(gate, savedMeters) -> flatMapLatest -> sample(1s) -> distinctUntilChanged). The only
- * differences are (a) the gate is recordDynamicsFlow instead of comparisonModeFlow, and (b) the
- * per-device value flow is provided by [metricFlowFor], which KpowerExtension builds from the live
- * meter's dynamics StateFlow (e.g. `meter(dn).tePs.map { it?.teLeftPct ?: NaN }`).
+ * differences are (a) the gate is "a meter is recorded" (antMeters non-empty) instead of
+ * comparisonModeFlow, and (b) the per-device value flow is provided by [metricFlowFor], which
+ * KpowerExtension builds from the live meter's dynamics StateFlow (e.g.
+ * `meter(dn).tePs.map { it?.teLeftPct ?: NaN }`).
  *
  * Why a per-device Flow<Double> rather than reading the meter object on a 1Hz timer: the dynamics
  * already live in MutableStateFlows on RawAntPowerMeter, so mapping them is fully reactive (emits
@@ -44,7 +45,7 @@ class DynamicsDataType(
     extension: String,
     typeId: String,
     private val slot: Int = 0,
-    private val recordDynamicsFlow: () -> Flow<Boolean>,
+    private val gateFlow: () -> Flow<Boolean>,
     private val savedMetersFlow: () -> Flow<List<com.enderthor.kpower.ant.SavedMeter>>,
     private val metricFlowFor: (deviceNumber: Int) -> Flow<Double>,
 ) : DataTypeImpl(extension, typeId) {
@@ -53,7 +54,7 @@ class DynamicsDataType(
     override fun startStream(emitter: Emitter<StreamState>) {
         val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         scope.launch {
-            combine(recordDynamicsFlow(), savedMetersFlow()) { enabled, meters ->
+            combine(gateFlow(), savedMetersFlow()) { enabled, meters ->
                 enabled to meters.firstOrNull { it.slot == slot }?.deviceNumber
             }
                 .flatMapLatest { (enabled, dn) ->

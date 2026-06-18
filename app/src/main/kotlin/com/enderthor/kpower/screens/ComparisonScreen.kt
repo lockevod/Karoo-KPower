@@ -43,11 +43,9 @@ import com.enderthor.kpower.extension.antMetersFlow
 import com.enderthor.kpower.extension.clearPrimaryRealMeter
 import com.enderthor.kpower.extension.comparisonModeFlow
 import com.enderthor.kpower.extension.diagnosticLogFlow
-import com.enderthor.kpower.extension.recordDynamicsFlow
 import com.enderthor.kpower.extension.saveAntMeters
 import com.enderthor.kpower.extension.saveComparisonMode
 import com.enderthor.kpower.extension.saveDiagnosticLog
-import com.enderthor.kpower.extension.saveRecordDynamics
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -66,7 +64,6 @@ fun ComparisonScreen() {
     // @Composable) can receive plain values — no nested @Composable calls inside the
     // LazyListScope extension.
     val comparisonMode by ctx.comparisonModeFlow().collectAsState(initial = false)
-    val recordDynamics by ctx.recordDynamicsFlow().collectAsState(initial = false)
     val diagnosticLog by ctx.diagnosticLogFlow().collectAsState(initial = false)
     val detected by antManager.detectedDevices.collectAsState()
     val saved by ctx.antMetersFlow().collectAsState(initial = emptyList())
@@ -108,7 +105,8 @@ fun ComparisonScreen() {
                     }
                 }
 
-                // Second item: record-cycling-dynamics toggle card.
+                // Second item: cycling-dynamics info note. Dynamics from a recorded meter are
+                // written to the FIT automatically — no opt-in toggle needed.
                 item {
                     Card(
                         modifier = Modifier
@@ -117,30 +115,10 @@ fun ComparisonScreen() {
                         shape = RoundedCornerShape(corner = CornerSize(10.dp))
                     ) {
                         Column(Modifier.padding(10.dp)) {
-                            val hasMeter = saved.isNotEmpty()
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Switch(
-                                    checked = recordDynamics,
-                                    enabled = hasMeter,
-                                    onCheckedChange = { enabled ->
-                                        scope.launch { saveRecordDynamics(ctx, enabled) }
-                                    }
-                                )
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Text(stringResource(R.string.record_dynamics_label))
-                            }
                             Text(
-                                text = stringResource(R.string.record_dynamics_desc),
+                                text = stringResource(R.string.dynamics_auto_info),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                            if (!hasMeter) {
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text(
-                                    text = stringResource(R.string.record_dynamics_need_meter),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
                                 text = stringResource(R.string.dynamics_only_hint),

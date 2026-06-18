@@ -53,9 +53,7 @@
     <!-- Comparison screen -->
     <string name="comparison_mode_label">Modo comparación</string>
     <string name="comparison_mode_desc">Expone 4 campos de datos de potencia estimada y los escribe en el FIT (est_power, est_power_3s, est_np, est_avg). Para comparar con un potenciómetro real. Off por defecto — aumenta batería/CPU y el tamaño del FIT.</string>
-    <string name="record_dynamics_label">Registrar dinámicas de pedaleo</string>
-    <string name="record_dynamics_desc">Lee métricas avanzadas de pedaleo (fase de potencia, PCO, balance, efectividad del par…) del potenciómetro ANT+ grabado y las escribe en el FIT. El Karoo no las graba. Necesita un potenciómetro grabado. Los campos de dinámicas en directo solo se actualizan durante la grabación.</string>
-    <string name="record_dynamics_need_meter">Añade primero un potenciómetro grabado abajo.</string>
+    <string name="dynamics_auto_info">Las dinámicas de pedaleo de un medidor grabado se escriben en el FIT automáticamente durante la ruta (el Karoo no puede grabarlas).</string>
     <string name="diagnostic_log_path_prefix">Registro: </string>
 
     <!-- ANT+ scan -->

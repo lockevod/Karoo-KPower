@@ -111,15 +111,6 @@ suspend fun saveComparisonMode(context: Context, enabled: Boolean) {
 fun Context.comparisonModeFlow(): Flow<Boolean> =
     dataStore.data.map { it[comparisonModeKey] ?: false }.distinctUntilChanged()
 
-val recordDynamicsKey = booleanPreferencesKey("recordDynamics")
-
-suspend fun saveRecordDynamics(context: Context, enabled: Boolean) {
-    context.dataStore.edit { it[recordDynamicsKey] = enabled }
-}
-
-fun Context.recordDynamicsFlow(): Flow<Boolean> =
-    dataStore.data.map { it[recordDynamicsKey] ?: false }.distinctUntilChanged()
-
 val diagnosticLogKey = booleanPreferencesKey("diagnosticLog")
 
 suspend fun saveDiagnosticLog(context: Context, enabled: Boolean) {
