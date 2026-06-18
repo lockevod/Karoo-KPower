@@ -5,7 +5,7 @@
     <string name="drag_coefficient">Cd</string>
     <string name="profile_power_source_hint">Para mostrar potencia, añade el sensor “KPower” como fuente de potencia en este perfil de ruta del Karoo.</string>
     <string name="weather_provider_label">Proveedor meteorológico</string>
-    <string name="weather_provider_switch">Usar OpenWeather (necesita clave API); apagado = OpenMeteo (gratis)</string>
+    <string name="weather_provider_switch">Usar OpenWeather (necesita clave API); Off = OpenMeteo (gratis)</string>
     <string name="est_instant_name">Pot. est.</string>
     <string name="est_instant_desc">Potencia instantánea estimada por KPower (requiere modo comparación)</string>
     <string name="est_3s_name">Pot. est. 3s</string>
@@ -39,8 +39,8 @@
     <string name="meter_double_pair_warning">Consejo: para enviar este potenciómetro al Karoo, empareja el sensor llamado “KPower: …” (el nombre de tu potenciómetro con el prefijo KPower) en tu perfil de ruta — no emparejes además el potenciómetro de forma nativa, o la potencia se grabará dos veces.</string>
     <string name="primary_source_hint">Esto solo le indica a KPower qué fuente graba el Karoo como potencia (para que no se duplique en el FIT). El sensor real lo eliges en tu perfil de ruta del Karoo. Estimada necesita el modo comparación activado; un potenciómetro real hay que añadirlo antes en la pestaña Comparación; Externo significa otro sensor que emparejas directamente en el Karoo.</string>
     <string name="diagnostic_log_label">Registro de diagnóstico</string>
-    <string name="diagnostic_log_desc">Graba un archivo de registro detallado en cada salida (cada página ANT+ incluidas las desconocidas, valores interpretados y eventos de conexión) para poder analizarlo después. Desactivado por defecto — consume algo más de batería y almacenamiento.</string>
-    <string name="dynamics_only_hint">¿Solo quieres dinámicas, sin estimación de potencia? En tu perfil de ruta del Karoo elige “KPower: …” (tu potenciómetro) como fuente de potencia en lugar de “KPowerv2”, y deja el modo comparación apagado. El estimador queda desactivado — no se ejecuta ninguna estimación ni consulta meteorológica.</string>
+    <string name="diagnostic_log_desc">Graba un archivo de registro detallado en cada salida (cada página ANT+ incluidas las desconocidas, valores interpretados y eventos de conexión) para poder analizarlo después. Off por defecto — consume algo más de batería y almacenamiento.</string>
+    <string name="dynamics_only_hint">¿Solo quieres dinámicas, sin estimación de potencia? En tu perfil de ruta del Karoo elige “KPower: …” (tu potenciómetro) como fuente de potencia en lugar de “KPowerv2”, y deja el modo comparación en Off. El estimador queda desactivado — no se ejecuta ninguna estimación ni consulta meteorológica.</string>
 
     <!-- Tabs -->
     <string name="tab_bikes">Bicis</string>
@@ -52,7 +52,7 @@
 
     <!-- Comparison screen -->
     <string name="comparison_mode_label">Modo comparación</string>
-    <string name="comparison_mode_desc">Expone 4 campos de datos de potencia estimada y los escribe en el FIT (est_power, est_power_3s, est_np, est_avg). Para comparar con un potenciómetro real. Desactivado por defecto — aumenta batería/CPU y el tamaño del FIT.</string>
+    <string name="comparison_mode_desc">Expone 4 campos de datos de potencia estimada y los escribe en el FIT (est_power, est_power_3s, est_np, est_avg). Para comparar con un potenciómetro real. Off por defecto — aumenta batería/CPU y el tamaño del FIT.</string>
     <string name="record_dynamics_label">Registrar dinámicas de pedaleo</string>
     <string name="record_dynamics_desc">Lee métricas avanzadas de pedaleo (fase de potencia, PCO, balance, efectividad del par…) del potenciómetro ANT+ grabado y las escribe en el FIT. El Karoo no las graba. Necesita un potenciómetro grabado. Los campos de dinámicas en directo solo se actualizan durante la grabación.</string>
     <string name="record_dynamics_need_meter">Añade primero un potenciómetro grabado abajo.</string>
