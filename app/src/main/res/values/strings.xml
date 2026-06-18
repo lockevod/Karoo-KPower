@@ -76,7 +76,8 @@
     <string name="cfg_title_edit">Estimator profile</string>
     <string name="section_bike">Bike</string>
     <string name="cfg_name">Title</string>
-    <string name="dropdown_none">None</string>
+    <string name="dropdown_none">Default</string>
+    <string name="profile_link_hint">Link this profile to a Karoo ride profile so KPower auto-selects it when you ride that profile. “Default” = used for any ride profile you haven\'t linked.</string>
     <string name="dropdown_link_profile">Link to Karoo profile</string>
     <string name="no_profiles_hint">A Karoo ride profile only appears here after you open it (or start a ride with it) once — KPower learns profiles as you use them.</string>
     <string name="dropdown_position">Position</string>

@@ -171,6 +171,11 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            Text(
+                text = stringResource(R.string.profile_link_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
 
             // Campos "de entrada" que DERIVAN Crr/Cd/área (preset, altura, neumático):
             // solo en modo Simple. En Avanzado se editan los valores manuales directamente

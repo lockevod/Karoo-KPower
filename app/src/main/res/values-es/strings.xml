@@ -76,7 +76,8 @@
     <string name="cfg_title_edit">Perfil de estimador</string>
     <string name="section_bike">Bici</string>
     <string name="cfg_name">Nombre</string>
-    <string name="dropdown_none">Ninguno</string>
+    <string name="dropdown_none">Por defecto</string>
+    <string name="profile_link_hint">Vincula este perfil a un perfil de ruta del Karoo para que KPower lo elija solo al rodar con ese perfil. “Por defecto” = se usa para cualquier perfil de ruta que no hayas vinculado.</string>
     <string name="dropdown_link_profile">Vincular al perfil del Karoo</string>
     <string name="no_profiles_hint">Un perfil de ruta del Karoo solo aparece aquí después de abrirlo (o iniciar una salida con él) una vez — KPower aprende los perfiles según los usas.</string>
     <string name="dropdown_position">Posición</string>
