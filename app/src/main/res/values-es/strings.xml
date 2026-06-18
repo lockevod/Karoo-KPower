@@ -46,7 +46,7 @@
     <string name="tab_comparison">Medidor real</string>
 
     <!-- Main / bikes list -->
-    <string name="bikes_add">Añadir bici</string>
+    <string name="bikes_add">Añadir</string>
     <string name="bikes_empty">Aún no hay bicis — toca + para añadir una.</string>
 
     <!-- Comparison screen -->

@@ -46,7 +46,7 @@
     <string name="tab_comparison">Real meter</string>
 
     <!-- Main / bikes list -->
-    <string name="bikes_add">Add bike</string>
+    <string name="bikes_add">Add</string>
     <string name="bikes_empty">No bikes yet — tap + to add one.</string>
 
     <!-- Comparison screen -->
