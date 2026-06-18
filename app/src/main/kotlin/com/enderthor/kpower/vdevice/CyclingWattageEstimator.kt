@@ -70,9 +70,15 @@ class CyclingWattageEstimator(
         // and loss >= 1 would yield Infinity/negative power (a user typing "100" meant 100%).
         val lossFactor = 1.0 - powerLoss.coerceIn(0.0, 0.5)
         val estimatedPower = (gravityForce + rollingResistanceForce + aerodynamicDragForce +
-                inertiaForce) * speed / lossFactor
+                calculateDynamicRollingResistanceForce(slopeAngle) + inertiaForce) * speed / lossFactor
 
         return maxOf(0.0, applyPowerCap(estimatedPower))
+    }
+
+    // Pequeño término de rodadura dinámica que el usuario añadió a propósito y quiere mantener
+    // (validado en campo, sin cita formal). NO eliminar.
+    private fun calculateDynamicRollingResistanceForce(slopeAngle: Double): Double {
+        return 0.1 * cos(slopeAngle)
     }
 
     private fun calculateGravityForce(slopeAngle: Double): Double {

@@ -49,24 +49,18 @@ data class RealKarooValues(
     val userWeight: StreamState? = null,
 )
 
-// Surface rolling-resistance MULTIPLIER applied to the tyre's Crr (estimateCrr gives the tyre's
-// Crr on a smooth/rollers reference, which per Wikipedia "Rolling resistance" is 0.0022–0.005 —
-// i.e. ≈ good asphalt). So ASPHALT is the reference = 1.0; rougher surfaces scale UP. The ratios
-// are grounded in measured surface Crr: good asphalt ≈ 0.004–0.005; coarse/compacted gravel
-// ≈ 0.006–0.010 (~1.5–2×); loose gravel/dirt/cobbles ≈ 0.009–0.012 (~2–2.5×); sand/soft is
-// reported 4.5–15× higher than asphalt/gravel (thick-sand Crr correction ≈ +0.03). SAND lumps
-// grass/sand/mud/snow, so 4.0 is a deliberately CONSERVATIVE representative for that mixed class
-// (pure deep sand would be far higher but is barely rideable). Refine empirically with the
-// Comparison-mode real-meter data. Sources: Wikipedia "Rolling resistance"; Wilson "Bicycling
-// Science"; bicyclerollingresistance.com; surface-Crr field studies.
+// Multiplicador de rodadura por superficie aplicado al Crr del neumático. Valores VALIDADOS EN
+// CAMPO por el usuario; se descartó empíricamente la familia de literatura 1.0/1.5/2.5/5.0 (con el
+// baseCrr del neumático inflaba la potencia en gravel/arena). Recalibrar solo con datos reales del
+// modo Comparación. Ver memoria [[power-model-literature]].
 enum class KarooSurface(
     val surface: String,
     val factor: Double,
 ) {
-    ASPHALT("Paved (asphalt / concrete)", 1.00),
-    STANDARD("Compacted (hardpack / fine gravel)", 1.50),
-    GRAVEL("Gravel / dirt / cobbles", 2.20),
-    SAND("Soft (sand / grass / mud)", 4.00),
+    ASPHALT("Asphalt/Concrete", 0.75),
+    STANDARD("Standard/Mix/Gravel", 0.93),
+    GRAVEL("Mountain Mix", 1.05),
+    SAND("Mountain Off Road/Sand", 2.20),
 }
 
 // tubelessFactor: reducción de Crr al montar tubeless vs cámara, según datos de
