@@ -157,27 +157,6 @@ suspend fun savePreferences(context: Context, configDatas: MutableList<ConfigDat
     }
 }
 
-/**
- * Atomic read-modify-write: reverts any bike config whose primary pointed at [deviceNumber]
- * back to ESTIMATE, inside a single dataStore.edit {} transaction so a concurrent edit from
- * the Bikes tab is not lost. Decode matches loadPreferencesFlow (jsonWithUnknownKeys /
- * List<ConfigData>); encode matches savePreferences (Json.encodeToString) → round-trips.
- */
-suspend fun clearPrimaryRealMeter(context: Context, deviceNumber: Int) {
-    context.dataStore.edit { prefs ->
-        val json = prefs[preferencesKey] ?: return@edit
-        val configs = runCatching {
-            jsonWithUnknownKeys.decodeFromString<List<ConfigData>>(json)
-        }.getOrNull() ?: return@edit
-        val fixed = configs.map {
-            if (it.primarySource == "REAL" && it.primaryRealDeviceNumber == deviceNumber)
-                it.copy(primarySource = "ESTIMATE", primaryRealDeviceNumber = null)
-            else it
-        }
-        if (fixed != configs) prefs[preferencesKey] = Json.encodeToString(fixed)
-    }
-}
-
 suspend fun saveStats(context: Context, stats: HeadwindStats) {
     context.dataStore.edit { t ->
         t[statsKey] = Json.encodeToString(stats)

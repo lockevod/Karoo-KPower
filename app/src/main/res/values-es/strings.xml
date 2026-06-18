@@ -39,7 +39,6 @@
     <string name="meter_double_pair_warning">Consejo: para enviar este potenciómetro al Karoo, empareja el sensor llamado “KPower: …” (el nombre de tu potenciómetro con el prefijo KPower) en tu perfil de ruta — no emparejes además el potenciómetro de forma nativa, o la potencia se grabará dos veces.</string>
     <string name="diagnostic_log_label">Registro de diagnóstico</string>
     <string name="diagnostic_log_desc">Graba un archivo de registro detallado en cada salida (cada página ANT+ incluidas las desconocidas, valores interpretados y eventos de conexión) para poder analizarlo después. Off por defecto — consume algo más de batería y almacenamiento.</string>
-    <string name="dynamics_only_hint">¿Solo quieres dinámicas, sin estimación de potencia? En tu perfil de ruta del Karoo elige “KPower: …” (tu potenciómetro) como fuente de potencia en lugar de “KPowerv2”, y deja el modo comparación en Off. El estimador queda desactivado — no se ejecuta ninguna estimación ni consulta meteorológica.</string>
 
     <!-- Tabs -->
     <string name="tab_bikes">Estimador</string>
@@ -52,7 +51,7 @@
     <!-- Comparison screen -->
     <string name="comparison_mode_label">Grabar estimada (FIT)</string>
     <string name="comparison_mode_desc">Graba la potencia estimada de KPower en el FIT como campos extra (est_power, est_np…) para compararla con un medidor real. Off por defecto.</string>
-    <string name="dynamics_auto_info">Las dinámicas de pedaleo de un medidor grabado se escriben en el FIT automáticamente durante la ruta (el Karoo no puede grabarlas).</string>
+    <string name="dynamics_auto_info">Las dinámicas de pedaleo de un medidor activado se graban en el FIT automáticamente (el Karoo no puede grabarlas).</string>
     <string name="diagnostic_log_path_prefix">Registro: </string>
 
     <!-- ANT+ scan -->

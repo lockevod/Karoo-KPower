@@ -131,11 +131,6 @@ data class ConfigData(
     val useRouteSurface: Boolean = true,
     // Karoo ride-profile this bike is linked to (RideProfile.id); null = unmapped (legacy).
     val karooProfileId: String? = null,
-    // Which source is PRIMARY for this profile (bound in the Karoo profile, feeds standard `power`).
-    // "ESTIMATE" | "REAL" | "EXTERNAL". Default ESTIMATE.
-    val primarySource: String = "ESTIMATE",
-    // Device number of the real meter when primarySource == "REAL".
-    val primaryRealDeviceNumber: Int? = null,
 )
 
 

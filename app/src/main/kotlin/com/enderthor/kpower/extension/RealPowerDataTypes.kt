@@ -24,12 +24,14 @@ import kotlin.time.Duration.Companion.seconds
 
 fun realFieldTypeId(slot: Int, metric: String) = "real-$metric-$slot"   // e.g. real-power-0, real-3s-0, real-np-0, real-avg-0
 
-/** Live metric of a real ANT+ meter slot; shows `---` when comparison mode is off or no sample. */
+/** Live metric of a real ANT+ meter slot; shows `---` when the gate is off (no meter enabled),
+ *  no enabled meter is mapped to the slot, or the meter has no sample yet. [gateFlow] is the
+ *  "a meter is enabled" gate (NOT comparison mode — the real meter is independent of it). */
 class RealPowerDataType(
     extension: String,
     typeId: String,
     private val slot: Int,
-    private val comparisonModeFlow: () -> Flow<Boolean>,
+    private val gateFlow: () -> Flow<Boolean>,
     private val savedMetersFlow: () -> Flow<List<com.enderthor.kpower.ant.SavedMeter>>,
     private val metricFlowFor: (deviceNumber: Int) -> StateFlow<Double>,
 ) : DataTypeImpl(extension, typeId) {
@@ -38,8 +40,8 @@ class RealPowerDataType(
     override fun startStream(emitter: Emitter<StreamState>) {
         val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         scope.launch {
-            combine(comparisonModeFlow(), savedMetersFlow()) { enabled, meters ->
-                enabled to meters.firstOrNull { it.slot == slot }?.deviceNumber
+            combine(gateFlow(), savedMetersFlow()) { enabled, meters ->
+                enabled to meters.firstOrNull { it.slot == slot && it.enabled }?.deviceNumber
             }
                 .flatMapLatest { (enabled, dn) ->
                     if (dn == null) flowOf(enabled to Double.NaN)

@@ -70,8 +70,6 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
     var preferHeadwind by remember { mutableStateOf(configdata.preferHeadwind) }
     var useRouteSurface by remember { mutableStateOf(configdata.useRouteSurface) }
     var karooProfileId by remember { mutableStateOf(configdata.karooProfileId) }
-    var primarySource by remember { mutableStateOf(configdata.primarySource) }
-    var primaryRealDeviceNumber by remember { mutableStateOf(configdata.primaryRealDeviceNumber) }
     val headwindInstalled = remember { ctx.isHeadwindInstalled() }
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
@@ -130,8 +128,6 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
         bikePosition, riderHeight, tyreWidth, tyrePressure, treadType, useProfileFtp, simpleMode, useKarooTemp, tubeless,
         preferHeadwind, useRouteSurface,
         karooProfileId = karooProfileId,
-        primarySource = primarySource,
-        primaryRealDeviceNumber = primaryRealDeviceNumber,
         )
     }
 

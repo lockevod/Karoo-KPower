@@ -55,7 +55,7 @@ class DynamicsDataType(
         val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         scope.launch {
             combine(gateFlow(), savedMetersFlow()) { enabled, meters ->
-                enabled to meters.firstOrNull { it.slot == slot }?.deviceNumber
+                enabled to meters.firstOrNull { it.slot == slot && it.enabled }?.deviceNumber
             }
                 .flatMapLatest { (enabled, dn) ->
                     if (dn == null) flowOf(enabled to Double.NaN)

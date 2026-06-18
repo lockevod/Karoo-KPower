@@ -1,12 +1,9 @@
 package com.enderthor.kpower.extension
 
-/** The estimate's developer fields are omitted only when KPower's virtual device is the
- *  Karoo's bound primary power source (auto-detected) AND the active profile declares the
- *  estimate as its primary source — then it's already in the standard `power`. `estimateIsPrimary`
- *  is global (the virtual device is bound device-wide), so a profile that records the estimate as a
- *  SECONDARY must still write the `est_*` fields. */
-fun writeEstimateFields(primarySource: String, estimateIsPrimary: Boolean): Boolean =
-    !(estimateIsPrimary && primarySource == "ESTIMATE")
-
-fun writeMeterFields(deviceNumber: Int, primarySource: String, primaryRealDeviceNumber: Int?): Boolean =
-    !(primarySource == "REAL" && primaryRealDeviceNumber == deviceNumber)
+/** The estimate's developer fields are omitted only when KPower's virtual device is currently the
+ *  Karoo's bound power source (auto-detected) — then the estimate is already in the standard
+ *  `power` stream and writing `est_*` would duplicate it. Dedup is fully automatic: there is no
+ *  user-facing "primary source" choice (that dropdown was removed). A real meter recorded through
+ *  KPower always writes its `pm*_` fields — native double-pairing is handled by the UI warning, not
+ *  by config-driven suppression. */
+fun writeEstimateFields(estimateIsPrimary: Boolean): Boolean = !estimateIsPrimary

@@ -40,7 +40,6 @@ import com.enderthor.kpower.ant.AntPowerManager
 import com.enderthor.kpower.ant.SavedMeter
 import com.enderthor.kpower.extension.FileLogTree
 import com.enderthor.kpower.extension.antMetersFlow
-import com.enderthor.kpower.extension.clearPrimaryRealMeter
 import com.enderthor.kpower.extension.comparisonModeFlow
 import com.enderthor.kpower.extension.diagnosticLogFlow
 import com.enderthor.kpower.extension.saveAntMeters
@@ -100,43 +99,32 @@ fun ComparisonScreen() {
                     onDelete = { m ->
                         val dn = m.deviceNumber
                         val next = saved.filterNot { it.deviceNumber == dn }
-                        scope.launch {
-                            saveAntMeters(ctx, next)
-                            // Revert any bike config whose primary pointed at the deleted
-                            // meter back to ESTIMATE, else writeMeterFields would suppress a
-                            // meter that no longer exists and that bike records no power.
-                            // Atomic read-modify-write so a concurrent Bikes-tab edit isn't lost.
-                            clearPrimaryRealMeter(ctx, dn)
-                        }
+                        scope.launch { saveAntMeters(ctx, next) }
                     },
                     onToggleEnabled = { m, en ->
-                        val next = saved.map { if (it.deviceNumber == m.deviceNumber) it.copy(enabled = en) else it }
+                        // Only ONE real meter may be active at a time (two enabled meters would
+                        // record conflicting power/dynamics into the same FIT slot). Enabling one
+                        // therefore disables every other; disabling just clears that one.
+                        val next = saved.map {
+                            when {
+                                it.deviceNumber == m.deviceNumber -> it.copy(enabled = en)
+                                en -> it.copy(enabled = false)
+                                else -> it
+                            }
+                        }
                         scope.launch { saveAntMeters(ctx, next) }
                     },
                 )
 
-                // Cycling-dynamics info note. Dynamics from a recorded meter are written to the FIT
-                // automatically — no opt-in toggle needed.
+                // Short cycling-dynamics note, right after the ANT meters block. Dynamics from an
+                // enabled meter are written to the FIT automatically — no opt-in toggle needed.
                 item {
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(5.dp),
-                        shape = RoundedCornerShape(corner = CornerSize(10.dp))
-                    ) {
-                        Column(Modifier.padding(10.dp)) {
-                            Text(
-                                text = stringResource(R.string.dynamics_auto_info),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(
-                                text = stringResource(R.string.dynamics_only_hint),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
+                    Text(
+                        text = stringResource(R.string.dynamics_auto_info),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                    )
                 }
 
                 // Comparison toggle (near the bottom): just enables writing the ESTIMATE to the FIT.

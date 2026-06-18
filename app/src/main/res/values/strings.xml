@@ -39,7 +39,6 @@
     <string name="meter_double_pair_warning">Tip: to feed this meter to the Karoo, pair the sensor named “KPower: …” (your meter\'s name with a KPower prefix) in your ride profile — don\'t also pair the meter natively, or power will be recorded twice.</string>
     <string name="diagnostic_log_label">Diagnostic logging</string>
     <string name="diagnostic_log_desc">Records a detailed log file for each ride (every ANT+ page including unknown ones, parsed values, and connection events) so it can be analysed later. Off by default — it uses some extra battery and storage.</string>
-    <string name="dynamics_only_hint">Only want dynamics, no power estimation? In your Karoo ride profile pick “KPower: …” (your meter) as the power source instead of “KPowerv2”, and leave Comparison mode off. The estimator then stays off — no estimation or weather lookups run.</string>
 
     <!-- Tabs -->
     <string name="tab_bikes">Estimator</string>
@@ -52,7 +51,7 @@
     <!-- Comparison screen -->
     <string name="comparison_mode_label">Log estimated power (FIT)</string>
     <string name="comparison_mode_desc">Writes KPower\'s estimated power to the FIT as extra fields (est_power, est_np…) to compare against a real meter. Off by default.</string>
-    <string name="dynamics_auto_info">Cycling dynamics from a recorded meter are written to the FIT automatically during rides (the Karoo can\'t record them itself).</string>
+    <string name="dynamics_auto_info">Cycling dynamics from an enabled meter are written to the FIT automatically (the Karoo can\'t record them itself).</string>
     <string name="diagnostic_log_path_prefix">Log: </string>
 
     <!-- ANT+ scan -->

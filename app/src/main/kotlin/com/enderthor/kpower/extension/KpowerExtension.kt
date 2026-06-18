@@ -51,7 +51,6 @@ import timber.log.Timber
 private data class FitTick(
     val elapsed: StreamState,
     val meters: List<com.enderthor.kpower.ant.SavedMeter>,
-    val configs: List<com.enderthor.kpower.data.ConfigData>,
     val comparisonMode: Boolean,
 )
 
@@ -395,17 +394,14 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                 ) { mode, meters -> mode || meters.any { it.enabled } }
                     .flatMapLatest { on -> if (on) karooSystem.streamDataFlow(DataType.Type.ELAPSED_TIME) else emptyFlow() },
                 applicationContext.antMetersFlow(),
-                loadPreferencesFlow(),
                 applicationContext.comparisonModeFlow(),
-            ) { elapsed, meters, configs, comparisonMode -> FitTick(elapsed, meters, configs, comparisonMode) }
-                .collect { (elapsed, metersSnapshot, configs, comparisonMode) ->
+            ) { elapsed, meters, comparisonMode -> FitTick(elapsed, meters, comparisonMode) }
+                .collect { (elapsed, metersSnapshot, comparisonMode) ->
                     if (elapsed !is StreamState.Streaming) return@collect
 
-                    // El source PRIMARY de la bici activa ya lo escribe el Karoo en el `power`
-                    // estándar -> omitimos su developer field para no duplicarlo.
-                    val activeCfg = com.enderthor.kpower.data.resolveActiveConfig(configs, activeProfileIdFlow.value)
-                    val primarySrc = activeCfg?.primarySource ?: "ESTIMATE"
-                    val primaryDev = activeCfg?.primaryRealDeviceNumber
+                    // Dedup is automatic: if the KPower virtual device is the Karoo's bound power
+                    // source, the estimate is already in the standard `power` stream, so we omit the
+                    // est_* developer fields to avoid duplicating it.
                     val estPrimary = engine.estimateIsPrimary.value
 
                     val instant = engine.instantW.value
@@ -415,23 +411,24 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                         // is ON. The estimator may be running anyway (a placed data field acquires
                         // it), but recording it to the FIT is a separate, explicit choice for
                         // comparison rides. writeEstimateFields dedups against the bound primary.
-                        if (comparisonMode && writeEstimateFields(primarySrc, estPrimary)) {
+                        if (comparisonMode && writeEstimateFields(estPrimary)) {
                             if (!instant.isNaN()) add(FieldValue(fieldEstPower, instant))
                             if (!p3s.isNaN()) add(FieldValue(fieldEstPower3s, p3s))
                         }
                     }
+                    // A real meter recorded through KPower always writes its pm*_ fields (the Karoo
+                    // doesn't record the extension's meter natively). Only one meter can be enabled
+                    // at a time, but we filter defensively.
                     metersSnapshot.filter { it.enabled }.forEach { m ->
-                        if (writeMeterFields(m.deviceNumber, primarySrc, primaryDev)) {
-                            val reader = antManager.meter(m.deviceNumber)
-                            val pw = reader?.power?.value ?: Double.NaN
-                            val cad = reader?.cadence?.value ?: Double.NaN
-                            val bal = reader?.balanceRightPct?.value ?: Double.NaN
-                            val tq = reader?.torque?.value ?: Double.NaN
-                            if (!pw.isNaN()) recordValues.add(FieldValue(meterField(m.slot, 0, "pm${m.slot + 1}_power", "W"), pw))
-                            if (!cad.isNaN()) recordValues.add(FieldValue(meterField(m.slot, 1, "pm${m.slot + 1}_cad", "rpm"), cad))
-                            if (!bal.isNaN()) recordValues.add(FieldValue(meterField(m.slot, 2, "pm${m.slot + 1}_balance", "%"), bal))
-                            if (!tq.isNaN()) recordValues.add(FieldValue(meterField(m.slot, 3, "pm${m.slot + 1}_torque", "Nm"), tq))
-                        }
+                        val reader = antManager.meter(m.deviceNumber)
+                        val pw = reader?.power?.value ?: Double.NaN
+                        val cad = reader?.cadence?.value ?: Double.NaN
+                        val bal = reader?.balanceRightPct?.value ?: Double.NaN
+                        val tq = reader?.torque?.value ?: Double.NaN
+                        if (!pw.isNaN()) recordValues.add(FieldValue(meterField(m.slot, 0, "pm${m.slot + 1}_power", "W"), pw))
+                        if (!cad.isNaN()) recordValues.add(FieldValue(meterField(m.slot, 1, "pm${m.slot + 1}_cad", "rpm"), cad))
+                        if (!bal.isNaN()) recordValues.add(FieldValue(meterField(m.slot, 2, "pm${m.slot + 1}_balance", "%"), bal))
+                        if (!tq.isNaN()) recordValues.add(FieldValue(meterField(m.slot, 3, "pm${m.slot + 1}_torque", "Nm"), tq))
                     }
                     // Cycling-dynamics developer fields. Written for every recorded meter
                     // automatically — independent of the comparison-mode primary-source filter
@@ -472,7 +469,7 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                     }
                     if (recordValues.isNotEmpty()) emitter.onNext(WriteToRecordMesg(recordValues))
 
-                    if (comparisonMode && writeEstimateFields(primarySrc, estPrimary)) {
+                    if (comparisonMode && writeEstimateFields(estPrimary)) {
                         val np = engine.npW.value
                         val avg = engine.avgW.value
                         if (np != lastSesNp || avg != lastSesAvg) {
