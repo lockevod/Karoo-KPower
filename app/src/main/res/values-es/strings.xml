@@ -7,13 +7,13 @@
     <string name="weather_provider_label">Proveedor meteorológico</string>
     <string name="weather_provider_switch">Usar OpenWeather (necesita clave API); Off = OpenMeteo (gratis)</string>
     <string name="est_instant_name">Pot. est.</string>
-    <string name="est_instant_desc">Potencia instantánea estimada por KPower (requiere modo comparación)</string>
+    <string name="est_instant_desc">Potencia instantánea estimada por KPower. Añádela a una página para verla en directo; grabarla en el FIT es aparte (“Grabar estimada”).</string>
     <string name="est_3s_name">Pot. est. 3s</string>
-    <string name="est_3s_desc">Potencia 3s estimada por KPower (requiere modo comparación)</string>
+    <string name="est_3s_desc">Potencia 3s estimada por KPower. Añádela a una página para verla en directo; grabarla en el FIT es aparte (“Grabar estimada”).</string>
     <string name="est_np_name">NP est.</string>
-    <string name="est_np_desc">Potencia normalizada estimada por KPower (requiere modo comparación)</string>
+    <string name="est_np_desc">Potencia normalizada estimada por KPower. Añádela a una página para verla en directo; grabarla en el FIT es aparte (“Grabar estimada”).</string>
     <string name="est_avg_name">Pot. med. est.</string>
-    <string name="est_avg_desc">Potencia media estimada por KPower (requiere modo comparación)</string>
+    <string name="est_avg_desc">Potencia media estimada por KPower. Añádela a una página para verla en directo; grabarla en el FIT es aparte (“Grabar estimada”).</string>
     <string name="real1_name">Pot. real</string>
     <string name="real1_desc">Potencia real grabada del potenciómetro ANT+ (requiere un medidor grabado)</string>
     <string name="real1_3s_name">Pot. real 3s</string>

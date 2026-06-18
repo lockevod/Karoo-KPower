@@ -47,11 +47,12 @@ import com.enderthor.kpower.vdevice.PowerEstimationEngine
 import timber.log.Timber
 
 
-/** Holder for the 3-way combine driving the startFit per-record writes (mirrors [RideGate]). */
+/** Holder for the combine driving the startFit per-record writes (mirrors [RideGate]). */
 private data class FitTick(
     val elapsed: StreamState,
     val meters: List<com.enderthor.kpower.ant.SavedMeter>,
     val configs: List<com.enderthor.kpower.data.ConfigData>,
+    val comparisonMode: Boolean,
 )
 
 /** Holder for the 3-way combine driving the ride-state connect gate. */
@@ -88,10 +89,10 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
 
     override val types: List<DataTypeImpl> by lazy {
         listOf(
-            EstimatedPowerDataType(extension, TYPE_EST_INSTANT, engine, { applicationContext.comparisonModeFlow() }) { it.instantW },
-            EstimatedPowerDataType(extension, TYPE_EST_3S, engine, { applicationContext.comparisonModeFlow() }) { it.power3sW },
-            EstimatedPowerDataType(extension, TYPE_EST_NP, engine, { applicationContext.comparisonModeFlow() }) { it.npW },
-            EstimatedPowerDataType(extension, TYPE_EST_AVG, engine, { applicationContext.comparisonModeFlow() }) { it.avgW },
+            EstimatedPowerDataType(extension, TYPE_EST_INSTANT, engine) { it.instantW },
+            EstimatedPowerDataType(extension, TYPE_EST_3S, engine) { it.power3sW },
+            EstimatedPowerDataType(extension, TYPE_EST_NP, engine) { it.npW },
+            EstimatedPowerDataType(extension, TYPE_EST_AVG, engine) { it.avgW },
             RealPowerDataType(extension, realFieldTypeId(0, "power"), 0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.powerFlow(dn) },
             RealPowerDataType(extension, realFieldTypeId(0, "3s"),    0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.power3sFlow(dn) },
             RealPowerDataType(extension, realFieldTypeId(0, "np"),    0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.npFlow(dn) },
@@ -395,8 +396,9 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                     .flatMapLatest { on -> if (on) karooSystem.streamDataFlow(DataType.Type.ELAPSED_TIME) else emptyFlow() },
                 applicationContext.antMetersFlow(),
                 loadPreferencesFlow(),
-            ) { elapsed, meters, configs -> FitTick(elapsed, meters, configs) }
-                .collect { (elapsed, metersSnapshot, configs) ->
+                applicationContext.comparisonModeFlow(),
+            ) { elapsed, meters, configs, comparisonMode -> FitTick(elapsed, meters, configs, comparisonMode) }
+                .collect { (elapsed, metersSnapshot, configs, comparisonMode) ->
                     if (elapsed !is StreamState.Streaming) return@collect
 
                     // El source PRIMARY de la bici activa ya lo escribe el Karoo en el `power`
@@ -409,7 +411,11 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                     val instant = engine.instantW.value
                     val p3s = engine.power3sW.value
                     val recordValues = mutableListOf<FieldValue>().apply {
-                        if (writeEstimateFields(primarySrc, estPrimary)) {
+                        // Estimate FIT fields are opt-in: only logged when "Log estimated power (FIT)"
+                        // is ON. The estimator may be running anyway (a placed data field acquires
+                        // it), but recording it to the FIT is a separate, explicit choice for
+                        // comparison rides. writeEstimateFields dedups against the bound primary.
+                        if (comparisonMode && writeEstimateFields(primarySrc, estPrimary)) {
                             if (!instant.isNaN()) add(FieldValue(fieldEstPower, instant))
                             if (!p3s.isNaN()) add(FieldValue(fieldEstPower3s, p3s))
                         }
@@ -466,7 +472,7 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                     }
                     if (recordValues.isNotEmpty()) emitter.onNext(WriteToRecordMesg(recordValues))
 
-                    if (writeEstimateFields(primarySrc, estPrimary)) {
+                    if (comparisonMode && writeEstimateFields(primarySrc, estPrimary)) {
                         val np = engine.npW.value
                         val avg = engine.avgW.value
                         if (np != lastSesNp || avg != lastSesAvg) {
