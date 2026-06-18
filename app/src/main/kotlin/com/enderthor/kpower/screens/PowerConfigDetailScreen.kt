@@ -228,7 +228,7 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
 
             OutlinedTextField(value = bikeMass, modifier = Modifier.fillMaxWidth(),
                 onValueChange = { bikeMass = it },
-                label = { Text(stringResource(R.string.cfg_bike_mass)) },
+                label = { Text(stringResource(R.string.cfg_bike_mass)) }, suffix = { Text("kg") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 singleLine = true
             )
