@@ -21,6 +21,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import timber.log.Timber
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Opens a raw ANT+ SLAVE channel bound to ONE bike-power device number (type 11, RF 57,
@@ -43,6 +44,14 @@ class RawAntChannel(
     /** Radio-level channel-death count; we stop reopening after MAX_DEATHS to avoid tight loops. */
     @Volatile private var deaths = 0
 
+    // ── Diagnostic ANT page logging (purely additive; only touched when FileLogTree.enabled) ─────
+    /** Lifetime count of every page seen, keyed by page number, for the periodic SUMMARY line. */
+    private val pageCounts = ConcurrentHashMap<Int, Long>()
+    /** Per-page last-logged wall-clock time, to throttle the per-page diagnostic lines. */
+    private val lastPageLogMs = ConcurrentHashMap<Int, Long>()
+    /** Guards the SUMMARY loop so it is launched at most once. */
+    @Volatile private var summaryStarted = false
+
     private val conn = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             antService = AntService(binder)
@@ -52,7 +61,53 @@ class RawAntChannel(
         override fun onServiceDisconnected(name: ComponentName?) { antService = null }
     }
 
-    fun start() { runCatching { AntService.bindService(context, conn) } }
+    fun start() {
+        startSummaryLoop()
+        runCatching { AntService.bindService(context, conn) }
+    }
+
+    /**
+     * Launch the periodic page-count SUMMARY loop on [scope] (so stop()'s scope.cancel() kills it).
+     * The loop itself is always running but is a no-op unless FileLogTree.enabled, and emits nothing
+     * until at least one page has been counted.
+     */
+    private fun startSummaryLoop() {
+        if (summaryStarted) return
+        summaryStarted = true
+        scope.launch {
+            while (true) {
+                delay(15_000)
+                if (com.enderthor.kpower.extension.FileLogTree.enabled && pageCounts.isNotEmpty()) {
+                    Timber.tag("ANTLOG").d(
+                        "dev=%d SUMMARY %s",
+                        deviceNumber,
+                        pageCounts.entries.sortedBy { it.key }
+                            .joinToString(" ") { "0x%02X=%d".format(it.key, it.value) }
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Log a single raw ANT broadcast page to the diagnostic file logger. Caller MUST already have
+     * checked FileLogTree.enabled, so the hex string (built here) is never produced on the hot path
+     * while logging is off. Counts every page (for SUMMARY) and throttles per page: 0x10 at most
+     * once / 5 s, every other page (incl. unknown) at most once / 1 s.
+     */
+    private fun logPage(p: ByteArray) {
+        if (p.isEmpty()) return
+        val page = p[0].toInt() and 0xFF
+        pageCounts.merge(page, 1L, Long::plus)
+        val now = System.currentTimeMillis()
+        val minIntervalMs = if (page == 0x10) 5000L else 1000L
+        val last = lastPageLogMs[page]
+        if (last != null && now - last < minIntervalMs) return
+        lastPageLogMs[page] = now
+        val prefix = if (page in KNOWN_PAGES) "" else "UNKNOWN "
+        val hex = p.joinToString(" ") { "%02X".format(it) }
+        Timber.tag("ANTLOG").d("%sdev=%d PAGE 0x%02X payload=%s", prefix, deviceNumber, page, hex)
+    }
 
     /**
      * Acquires a FRESH channel each call (so it is safe to call again on a reopen after death),
@@ -74,7 +129,12 @@ class RawAntChannel(
             ch.setChannelEventHandler(object : IAntChannelEventHandler {
                 override fun onReceiveMessage(type: MessageFromAntType?, msg: AntMessageParcel?) {
                     if (type == MessageFromAntType.BROADCAST_DATA && msg != null) {
-                        runCatching { onPayload(BroadcastDataMessage(msg).payload) }
+                        runCatching {
+                            val payload = BroadcastDataMessage(msg).payload
+                            // Diagnostic ANT page logging — gated so it costs ~nothing when off.
+                            if (com.enderthor.kpower.extension.FileLogTree.enabled) logPage(payload)
+                            onPayload(payload)
+                        }
                     }
                 }
                 override fun onChannelDeath() { reopenAfterDeath() }
@@ -92,6 +152,8 @@ class RawAntChannel(
             }
             ch.open()
             Timber.d("RawAntChannel #%d open", deviceNumber)
+            if (com.enderthor.kpower.extension.FileLogTree.enabled)
+                Timber.tag("ANTLOG").d("dev=%d channel open (type=11 rf=57 period=8182)", deviceNumber)
         }.onFailure { Timber.e(it, "RawAntChannel #%d open failed", deviceNumber) }
     }
 
@@ -137,5 +199,8 @@ class RawAntChannel(
     private companion object {
         const val MAX_DEATHS = 5
         const val REOPEN_BACKOFF_MS = 1000L
+
+        /** Pages we know how to decode (parser pages + ANT+ common pages); others are UNKNOWN. */
+        val KNOWN_PAGES = setOf(0x10, 0x13, 0x14, 0xE0, 0xE1, 0xE2, 0x50, 0x51)
     }
 }
