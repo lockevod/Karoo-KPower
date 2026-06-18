@@ -25,7 +25,7 @@ class EstimatedPowerSource(
         activeScope = scope
         val token = this
         engine.acquire(token)
-        engine.setVirtualDeviceConnected(true)
+        engine.setVirtualDeviceConnected(token, true)
 
         scope.launch {
             try {
@@ -61,7 +61,7 @@ class EstimatedPowerSource(
         emitter.setCancellable {
             if (BuildConfig.DEBUG) Timber.w("Stopping connect coroutine")
             engine.release(token)
-            engine.setVirtualDeviceConnected(false)
+            engine.setVirtualDeviceConnected(token, false)
             scope.cancel()
             if (activeScope === scope) activeScope = null
         }

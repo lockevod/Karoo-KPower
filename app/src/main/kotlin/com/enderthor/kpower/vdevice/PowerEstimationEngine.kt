@@ -72,13 +72,14 @@ class PowerEstimationEngine(
 
     private val _estimateIsPrimary = MutableStateFlow(false)
     /** True while KPower's virtual device has >=1 live connection (the Karoo binds it as the
-     *  active power source). Counter so overlapping connect/disconnect (rebind) settle correctly. */
+     *  active power source). Keyed by connection TOKEN (not a raw counter): add/remove are
+     *  idempotent and balanced by identity, so an overlapping connect/disconnect (rebind) or a
+     *  repeated connect can't desync a count the way a +1/-1 counter could. */
     val estimateIsPrimary: StateFlow<Boolean> = _estimateIsPrimary.asStateFlow()
-    private val virtualConnections = java.util.concurrent.atomic.AtomicInteger(0)
-    fun setVirtualDeviceConnected(connected: Boolean) {
-        val n = if (connected) virtualConnections.incrementAndGet() else virtualConnections.decrementAndGet().coerceAtLeast(0)
-        if (!connected && virtualConnections.get() < 0) virtualConnections.set(0)
-        _estimateIsPrimary.value = n > 0
+    private val virtualDeviceTokens = HashSet<Any>()
+    @Synchronized fun setVirtualDeviceConnected(token: Any, connected: Boolean) {
+        if (connected) virtualDeviceTokens.add(token) else virtualDeviceTokens.remove(token)
+        _estimateIsPrimary.value = virtualDeviceTokens.isNotEmpty()
     }
 
     private val accelerationTracker = AccelerationTracker()

@@ -4,7 +4,6 @@ import kotlin.math.abs
 import kotlin.math.atan
 import kotlin.math.sin
 import kotlin.math.cos
-import kotlin.math.pow
 import kotlin.math.tanh
 
 // Techo absoluto de potencia (W): backstop de cordura para un estimador sin medidor.
@@ -67,14 +66,13 @@ class CyclingWattageEstimator(
         val rollingResistanceForce = calculateRollingResistanceForce(slopeAngle)
         val aerodynamicDragForce = calculateAerodynamicDragForce()
         val inertiaForce = totalMass * acceleration
-        val estimatedPower = ((gravityForce + rollingResistanceForce + aerodynamicDragForce +
-                calculateDynamicRollingResistanceForce(slopeAngle) + inertiaForce) * speed * (1 - powerLoss).pow(-1))
+        // Drivetrain loss: P_wheel / (1 - loss). Clamp loss to [0, 0.5): the field is free text,
+        // and loss >= 1 would yield Infinity/negative power (a user typing "100" meant 100%).
+        val lossFactor = 1.0 - powerLoss.coerceIn(0.0, 0.5)
+        val estimatedPower = (gravityForce + rollingResistanceForce + aerodynamicDragForce +
+                inertiaForce) * speed / lossFactor
 
         return maxOf(0.0, applyPowerCap(estimatedPower))
-    }
-
-    private fun calculateDynamicRollingResistanceForce(slopeAngle: Double): Double {
-        return 0.1 * cos(slopeAngle)
     }
 
     private fun calculateGravityForce(slopeAngle: Double): Double {
