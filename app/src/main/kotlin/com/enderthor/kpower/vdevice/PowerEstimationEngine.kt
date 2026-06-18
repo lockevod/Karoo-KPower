@@ -115,6 +115,14 @@ class PowerEstimationEngine(
         if (consumers.remove(token) && consumers.isEmpty()) stopPipeline()
     }
 
+    /**
+     * True while the estimator is actually in use (≥1 consumer: the paired virtual device and/or
+     * comparison mode). When false the engine is dormant, so estimator-only background work (e.g. the
+     * weather refresh) can be skipped — this is what makes a "dynamics only, no estimator" setup cost
+     * nothing for estimation.
+     */
+    @Synchronized fun isActive(): Boolean = consumers.isNotEmpty()
+
     @Synchronized fun onRideState(state: RideState) {
         when (state) {
             is RideState.Recording -> {

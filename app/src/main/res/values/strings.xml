@@ -37,4 +37,5 @@
     <string name="primary_source_hint">This only tells KPower which source the Karoo records as power (so it isn\'t duplicated in the FIT). You still pick the actual sensor in your Karoo ride profile. Estimated needs Comparison mode on; a real meter must be added on the Comparison tab first; External means another sensor you pair directly in the Karoo.</string>
     <string name="diagnostic_log_label">Diagnostic logging</string>
     <string name="diagnostic_log_desc">Records a detailed log file for each ride (every ANT+ page including unknown ones, parsed values, and connection events) so it can be analysed later. Off by default — it uses some extra battery and storage.</string>
+    <string name="dynamics_only_hint">Only want dynamics, no power estimation? In your Karoo ride profile pick “KPower: …” (your meter) as the power source instead of “KPowerv2”, and leave Comparison mode off. The estimator then stays off — no estimation or weather lookups run.</string>
 </resources>

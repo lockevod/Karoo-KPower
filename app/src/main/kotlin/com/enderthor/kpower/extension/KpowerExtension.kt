@@ -238,9 +238,11 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
     private suspend fun weatherRefreshLoop() {
         while (coroutineContext.isActive) {
             try {
-                // Weather only feeds the estimator, which only runs while recording. Skip the
-                // expensive DataStore/GPS/HTTP work otherwise; just idle a tick.
-                if (!isRecording) {
+                // Weather only feeds the estimator. Skip the expensive DataStore/GPS/HTTP work
+                // unless we're recording AND the estimator is actually in use (paired virtual
+                // device and/or comparison mode). In a "dynamics only, no estimator" setup the
+                // engine is dormant, so this stays idle — zero estimator/weather cost.
+                if (!isRecording || !engine.isActive()) {
                     delay(WEATHER_CHECK_INTERVAL_MS)
                     continue
                 }
