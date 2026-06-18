@@ -44,7 +44,7 @@
 
     <!-- Tabs -->
     <string name="tab_bikes">Bikes</string>
-    <string name="tab_comparison">Comparison</string>
+    <string name="tab_comparison">Real meter</string>
 
     <!-- Main / bikes list -->
     <string name="bikes_add">Add bike</string>

@@ -44,7 +44,7 @@
 
     <!-- Tabs -->
     <string name="tab_bikes">Bicis</string>
-    <string name="tab_comparison">Comparación</string>
+    <string name="tab_comparison">Medidor real</string>
 
     <!-- Main / bikes list -->
     <string name="bikes_add">Añadir bici</string>

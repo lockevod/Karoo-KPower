@@ -129,40 +129,7 @@ fun ComparisonScreen() {
                     }
                 }
 
-                // Third item: diagnostic-logging toggle card.
-                item {
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(5.dp),
-                        shape = RoundedCornerShape(corner = CornerSize(10.dp))
-                    ) {
-                        Column(Modifier.padding(10.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Switch(
-                                    checked = diagnosticLog,
-                                    onCheckedChange = { enabled ->
-                                        scope.launch { saveDiagnosticLog(ctx, enabled) }
-                                    }
-                                )
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Text(stringResource(R.string.diagnostic_log_label))
-                            }
-                            Text(
-                                text = stringResource(R.string.diagnostic_log_desc),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                text = stringResource(R.string.diagnostic_log_path_prefix) + FileLogTree.pathHint(),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-
-                // Remaining items: ANT+ scan UI — same LazyColumn, no nested scroll.
+                // ANT+ scan UI — same LazyColumn, no nested scroll.
                 antScanItems(
                     manager = antManager,
                     saved = saved,
@@ -194,6 +161,39 @@ fun ComparisonScreen() {
                         }
                     },
                 )
+
+                // Last item: diagnostic-logging toggle (kept at the very bottom).
+                item {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(5.dp),
+                        shape = RoundedCornerShape(corner = CornerSize(10.dp))
+                    ) {
+                        Column(Modifier.padding(10.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Switch(
+                                    checked = diagnosticLog,
+                                    onCheckedChange = { enabled ->
+                                        scope.launch { saveDiagnosticLog(ctx, enabled) }
+                                    }
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(stringResource(R.string.diagnostic_log_label))
+                            }
+                            Text(
+                                text = stringResource(R.string.diagnostic_log_desc),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = stringResource(R.string.diagnostic_log_path_prefix) + FileLogTree.pathHint(),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
             }
         }
     )
