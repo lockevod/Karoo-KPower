@@ -61,6 +61,14 @@ class RawAntChannel(
     /** Guards the SUMMARY loop so it is launched at most once. */
     @Volatile private var summaryStarted = false
 
+    // Max instantaneous power / cadence seen across EVERY 0x10 frame (not just the throttled log
+    // lines), plus whether the accumulated-power total ever changed. Answers definitively "did the
+    // meter ever send non-zero power/cadence?" without un-throttling the per-page lines.
+    @Volatile private var maxInstPower = -1
+    @Volatile private var maxCadence = -1
+    @Volatile private var firstAccumPower = -1
+    @Volatile private var lastAccumPower = -1
+
     private val conn = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             antService = AntService(binder)
@@ -87,11 +95,13 @@ class RawAntChannel(
             while (true) {
                 delay(15_000)
                 if (com.enderthor.kpower.extension.FileLogTree.enabled && pageCounts.isNotEmpty()) {
+                    val accumMoved = firstAccumPower >= 0 && lastAccumPower != firstAccumPower
                     Timber.tag("ANTLOG").d(
-                        "dev=%d SUMMARY %s",
+                        "dev=%d SUMMARY %s | 0x10 maxW=%d maxRpm=%d accumMoved=%b",
                         deviceNumber,
                         pageCounts.entries.sortedBy { it.key }
-                            .joinToString(" ") { "0x%02X=%d".format(it.key, it.value) }
+                            .joinToString(" ") { "0x%02X=%d".format(it.key, it.value) },
+                        maxInstPower, maxCadence, accumMoved,
                     )
                 }
             }
@@ -108,6 +118,17 @@ class RawAntChannel(
         if (p.isEmpty()) return
         val page = p[0].toInt() and 0xFF
         pageCounts.merge(page, 1L, Long::plus)
+        // Track power/cadence extremes over EVERY power-only frame (the per-line log below is
+        // throttled, so without this we'd only sample ~1 frame / 5 s).
+        if (page == 0x10 && p.size >= 8) {
+            val cad = p[3].toInt() and 0xFF
+            val instPower = (p[6].toInt() and 0xFF) or ((p[7].toInt() and 0xFF) shl 8)
+            val accum = (p[4].toInt() and 0xFF) or ((p[5].toInt() and 0xFF) shl 8)
+            if (instPower > maxInstPower) maxInstPower = instPower
+            if (cad != 0xFF && cad > maxCadence) maxCadence = cad
+            if (firstAccumPower < 0) firstAccumPower = accum
+            lastAccumPower = accum
+        }
         val now = System.currentTimeMillis()
         val minIntervalMs = if (page == 0x10) 5000L else 1000L
         val last = lastPageLogMs[page]
