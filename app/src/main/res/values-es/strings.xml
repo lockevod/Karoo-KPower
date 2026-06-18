@@ -15,27 +15,27 @@
     <string name="est_avg_name">Pot. med. est.</string>
     <string name="est_avg_desc">Potencia media estimada por KPower (requiere modo comparación)</string>
     <string name="real1_name">Pot. real</string>
-    <string name="real1_desc">Potencia real grabada del potenciómetro ANT+ (requiere modo comparación)</string>
+    <string name="real1_desc">Potencia real grabada del potenciómetro ANT+ (requiere un medidor grabado)</string>
     <string name="real1_3s_name">Pot. real 3s</string>
-    <string name="real1_3s_desc">Potencia 3s real grabada del potenciómetro (requiere modo comparación)</string>
+    <string name="real1_3s_desc">Potencia 3s real grabada del potenciómetro (requiere un medidor grabado)</string>
     <string name="real1_np_name">NP real</string>
-    <string name="real1_np_desc">Potencia normalizada real grabada del potenciómetro (requiere modo comparación)</string>
+    <string name="real1_np_desc">Potencia normalizada real grabada del potenciómetro (requiere un medidor grabado)</string>
     <string name="real1_avg_name">Pot. med. real</string>
-    <string name="real1_avg_desc">Potencia media real grabada del potenciómetro (requiere modo comparación)</string>
+    <string name="real1_avg_desc">Potencia media real grabada del potenciómetro (requiere un medidor grabado)</string>
     <string name="dyn_balance_name">Balance real I/D</string>
-    <string name="dyn_balance_desc">Porcentaje de balance del pedal derecho del potenciómetro real (requiere dinámicas de pedaleo)</string>
+    <string name="dyn_balance_desc">Porcentaje de balance del pedal derecho del potenciómetro real (requiere un medidor grabado)</string>
     <string name="dyn_te_name">Efic. par real</string>
-    <string name="dyn_te_desc">Efectividad del par del potenciómetro real, en porcentaje (requiere dinámicas de pedaleo)</string>
+    <string name="dyn_te_desc">Efectividad del par del potenciómetro real, en porcentaje (requiere un medidor grabado)</string>
     <string name="dyn_ps_name">Suav. pedaleo real</string>
-    <string name="dyn_ps_desc">Suavidad de pedaleo del potenciómetro real, en porcentaje (requiere dinámicas de pedaleo)</string>
+    <string name="dyn_ps_desc">Suavidad de pedaleo del potenciómetro real, en porcentaje (requiere un medidor grabado)</string>
     <string name="dyn_pp_left_name">Inicio FP real I</string>
-    <string name="dyn_pp_left_desc">Ángulo de inicio de la fase de potencia izquierda del potenciómetro real, en grados (requiere dinámicas de pedaleo)</string>
+    <string name="dyn_pp_left_desc">Ángulo de inicio de la fase de potencia izquierda del potenciómetro real, en grados (requiere un medidor grabado)</string>
     <string name="dyn_pp_right_name">Inicio FP real D</string>
-    <string name="dyn_pp_right_desc">Ángulo de inicio de la fase de potencia derecha del potenciómetro real, en grados (requiere dinámicas de pedaleo)</string>
+    <string name="dyn_pp_right_desc">Ángulo de inicio de la fase de potencia derecha del potenciómetro real, en grados (requiere un medidor grabado)</string>
     <string name="dyn_peakpp_left_name">Inicio FP pico real I</string>
-    <string name="dyn_peakpp_left_desc">Ángulo de inicio de la fase de potencia pico izquierda del potenciómetro real, en grados (requiere dinámicas de pedaleo)</string>
+    <string name="dyn_peakpp_left_desc">Ángulo de inicio de la fase de potencia pico izquierda del potenciómetro real, en grados (requiere un medidor grabado)</string>
     <string name="dyn_peakpp_right_name">Inicio FP pico real D</string>
-    <string name="dyn_peakpp_right_desc">Ángulo de inicio de la fase de potencia pico derecha del potenciómetro real, en grados (requiere dinámicas de pedaleo)</string>
+    <string name="dyn_peakpp_right_desc">Ángulo de inicio de la fase de potencia pico derecha del potenciómetro real, en grados (requiere un medidor grabado)</string>
     <string name="meter_double_pair_warning">Consejo: para enviar este potenciómetro al Karoo, empareja el sensor llamado “KPower: …” (el nombre de tu potenciómetro con el prefijo KPower) en tu perfil de ruta — no emparejes además el potenciómetro de forma nativa, o la potencia se grabará dos veces.</string>
     <string name="diagnostic_log_label">Registro de diagnóstico</string>
     <string name="diagnostic_log_desc">Graba un archivo de registro detallado en cada salida (cada página ANT+ incluidas las desconocidas, valores interpretados y eventos de conexión) para poder analizarlo después. Off por defecto — consume algo más de batería y almacenamiento.</string>
@@ -69,6 +69,7 @@
     <string name="ant_tap_scan">Toca Scan para encontrar potenciómetros.</string>
     <string name="ant_remove">Quitar</string>
     <string name="ant_add">Añadir</string>
+    <string name="meter_enable_label">Grabar</string>
 
     <!-- Detail screen -->
     <string name="cfg_title_create">Nuevo perfil de estimador</string>

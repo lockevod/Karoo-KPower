@@ -10,6 +10,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.Alignment
@@ -35,6 +36,7 @@ const val MAX_METERS = 1
  * [onToggleScan] Called when the Scan/Stop button is tapped.
  * [onAdd]       Called when the user taps Add on a detected device.
  * [onDelete]    Called when the user taps Delete on a saved meter.
+ * [onToggleEnabled] Called when the per-meter Record switch is toggled.
  */
 fun LazyListScope.antScanItems(
     manager: AntPowerManager,
@@ -44,6 +46,7 @@ fun LazyListScope.antScanItems(
     onToggleScan: () -> Unit,
     onAdd: (AntDeviceInfo) -> Unit,
     onDelete: (SavedMeter) -> Unit,
+    onToggleEnabled: (SavedMeter, Boolean) -> Unit,
 ) {
     val atCap = saved.size >= MAX_METERS
     val available = detected.filterNot { dev -> saved.any { it.deviceNumber == dev.deviceNumber } }
@@ -99,6 +102,17 @@ fun LazyListScope.antScanItems(
                     "${m.label}  (#${m.deviceNumber})",
                     modifier = Modifier.weight(1f),
                 )
+                Text(
+                    stringResource(R.string.meter_enable_label),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.width(4.dp))
+                Switch(
+                    checked = m.enabled,
+                    onCheckedChange = { newValue -> onToggleEnabled(m, newValue) },
+                )
+                Spacer(Modifier.width(4.dp))
                 IconButton(onClick = { onDelete(m) }) {
                     Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.ant_remove))
                 }

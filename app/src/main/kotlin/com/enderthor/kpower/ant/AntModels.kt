@@ -7,4 +7,4 @@ data class AntDeviceInfo(val name: String, val deviceNumber: Int)
 
 /** A meter the user chose to record; persisted in DataStore. slot is 0-based and drives FIT field numbers. */
 @Serializable
-data class SavedMeter(val deviceNumber: Int, val label: String, val slot: Int)
+data class SavedMeter(val deviceNumber: Int, val label: String, val slot: Int, val enabled: Boolean = true)

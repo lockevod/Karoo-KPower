@@ -15,27 +15,27 @@
     <string name="est_avg_name">Est. Avg Power</string>
     <string name="est_avg_desc">KPower estimated average power (requires Comparison mode)</string>
     <string name="real1_name">Real Power</string>
-    <string name="real1_desc">Recorded real ANT+ power meter (requires Comparison mode)</string>
+    <string name="real1_desc">Recorded real ANT+ power meter (requires a recorded meter)</string>
     <string name="real1_3s_name">Real Power 3s</string>
-    <string name="real1_3s_desc">Recorded real meter 3s power (requires Comparison mode)</string>
+    <string name="real1_3s_desc">Recorded real meter 3s power (requires a recorded meter)</string>
     <string name="real1_np_name">Real NP</string>
-    <string name="real1_np_desc">Recorded real meter normalized power (requires Comparison mode)</string>
+    <string name="real1_np_desc">Recorded real meter normalized power (requires a recorded meter)</string>
     <string name="real1_avg_name">Real Avg Power</string>
-    <string name="real1_avg_desc">Recorded real meter average power (requires Comparison mode)</string>
+    <string name="real1_avg_desc">Recorded real meter average power (requires a recorded meter)</string>
     <string name="dyn_balance_name">Real Balance L/R</string>
-    <string name="dyn_balance_desc">Real meter right-pedal balance percentage (requires Cycling dynamics)</string>
+    <string name="dyn_balance_desc">Real meter right-pedal balance percentage (requires a recorded meter)</string>
     <string name="dyn_te_name">Real Torque Eff.</string>
-    <string name="dyn_te_desc">Real meter torque effectiveness, percent (requires Cycling dynamics)</string>
+    <string name="dyn_te_desc">Real meter torque effectiveness, percent (requires a recorded meter)</string>
     <string name="dyn_ps_name">Real Pedal Smooth.</string>
-    <string name="dyn_ps_desc">Real meter pedal smoothness, percent (requires Cycling dynamics)</string>
+    <string name="dyn_ps_desc">Real meter pedal smoothness, percent (requires a recorded meter)</string>
     <string name="dyn_pp_left_name">Real PP Start L</string>
-    <string name="dyn_pp_left_desc">Real meter left power-phase start angle, degrees (requires Cycling dynamics)</string>
+    <string name="dyn_pp_left_desc">Real meter left power-phase start angle, degrees (requires a recorded meter)</string>
     <string name="dyn_pp_right_name">Real PP Start R</string>
-    <string name="dyn_pp_right_desc">Real meter right power-phase start angle, degrees (requires Cycling dynamics)</string>
+    <string name="dyn_pp_right_desc">Real meter right power-phase start angle, degrees (requires a recorded meter)</string>
     <string name="dyn_peakpp_left_name">Real Peak PP Start L</string>
-    <string name="dyn_peakpp_left_desc">Real meter left peak power-phase start angle, degrees (requires Cycling dynamics)</string>
+    <string name="dyn_peakpp_left_desc">Real meter left peak power-phase start angle, degrees (requires a recorded meter)</string>
     <string name="dyn_peakpp_right_name">Real Peak PP Start R</string>
-    <string name="dyn_peakpp_right_desc">Real meter right peak power-phase start angle, degrees (requires Cycling dynamics)</string>
+    <string name="dyn_peakpp_right_desc">Real meter right peak power-phase start angle, degrees (requires a recorded meter)</string>
     <string name="meter_double_pair_warning">Tip: to feed this meter to the Karoo, pair the sensor named “KPower: …” (your meter\'s name with a KPower prefix) in your ride profile — don\'t also pair the meter natively, or power will be recorded twice.</string>
     <string name="diagnostic_log_label">Diagnostic logging</string>
     <string name="diagnostic_log_desc">Records a detailed log file for each ride (every ANT+ page including unknown ones, parsed values, and connection events) so it can be analysed later. Off by default — it uses some extra battery and storage.</string>
@@ -69,6 +69,7 @@
     <string name="ant_tap_scan">Tap Scan to find meters.</string>
     <string name="ant_remove">Remove</string>
     <string name="ant_add">Add</string>
+    <string name="meter_enable_label">Record</string>
 
     <!-- Detail screen -->
     <string name="cfg_title_create">New estimator profile</string>

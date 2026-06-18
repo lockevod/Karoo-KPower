@@ -160,6 +160,10 @@ fun ComparisonScreen() {
                             clearPrimaryRealMeter(ctx, dn)
                         }
                     },
+                    onToggleEnabled = { m, en ->
+                        val next = saved.map { if (it.deviceNumber == m.deviceNumber) it.copy(enabled = en) else it }
+                        scope.launch { saveAntMeters(ctx, next) }
+                    },
                 )
 
                 // Last item: diagnostic-logging toggle (kept at the very bottom).

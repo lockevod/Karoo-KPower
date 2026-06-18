@@ -92,22 +92,22 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
             EstimatedPowerDataType(extension, TYPE_EST_3S, engine, { applicationContext.comparisonModeFlow() }) { it.power3sW },
             EstimatedPowerDataType(extension, TYPE_EST_NP, engine, { applicationContext.comparisonModeFlow() }) { it.npW },
             EstimatedPowerDataType(extension, TYPE_EST_AVG, engine, { applicationContext.comparisonModeFlow() }) { it.avgW },
-            RealPowerDataType(extension, realFieldTypeId(0, "power"), 0, { applicationContext.comparisonModeFlow() }, { applicationContext.antMetersFlow() }) { dn -> antManager.powerFlow(dn) },
-            RealPowerDataType(extension, realFieldTypeId(0, "3s"),    0, { applicationContext.comparisonModeFlow() }, { applicationContext.antMetersFlow() }) { dn -> antManager.power3sFlow(dn) },
-            RealPowerDataType(extension, realFieldTypeId(0, "np"),    0, { applicationContext.comparisonModeFlow() }, { applicationContext.antMetersFlow() }) { dn -> antManager.npFlow(dn) },
-            RealPowerDataType(extension, realFieldTypeId(0, "avg"),   0, { applicationContext.comparisonModeFlow() }, { applicationContext.antMetersFlow() }) { dn -> antManager.avgFlow(dn) },
+            RealPowerDataType(extension, realFieldTypeId(0, "power"), 0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.powerFlow(dn) },
+            RealPowerDataType(extension, realFieldTypeId(0, "3s"),    0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.power3sFlow(dn) },
+            RealPowerDataType(extension, realFieldTypeId(0, "np"),    0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.npFlow(dn) },
+            RealPowerDataType(extension, realFieldTypeId(0, "avg"),   0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.avgFlow(dn) },
             // Live cycling-dynamics fields (slot 0), gated on "a meter is recorded" (saved meters
             // list non-empty). Each metricFlowFor maps a STABLE manager-level dynamics sink to a
             // Double (null -> NaN -> `---`). These sinks survive meter reconnect: the bridges[dn]
             // coroutine re-mirrors each new RawAntPowerMeter into the same MutableStateFlow, so the
             // field never freezes.
-            DynamicsDataType(extension, dynFieldTypeId("balance"), 0, { applicationContext.antMetersFlow().map { it.isNotEmpty() } }, { applicationContext.antMetersFlow() }) { dn -> antManager.balanceFlow(dn) },
-            DynamicsDataType(extension, dynFieldTypeId("te"), 0, { applicationContext.antMetersFlow().map { it.isNotEmpty() } }, { applicationContext.antMetersFlow() }) { dn -> antManager.tePsFlow(dn).map { it?.teLeftPct ?: Double.NaN } },
-            DynamicsDataType(extension, dynFieldTypeId("ps"), 0, { applicationContext.antMetersFlow().map { it.isNotEmpty() } }, { applicationContext.antMetersFlow() }) { dn -> antManager.tePsFlow(dn).map { it?.psLeftPct ?: Double.NaN } },
-            DynamicsDataType(extension, dynFieldTypeId("pp-left"), 0, { applicationContext.antMetersFlow().map { it.isNotEmpty() } }, { applicationContext.antMetersFlow() }) { dn -> antManager.forceLeftFlow(dn).map { it?.startAngleDeg ?: Double.NaN } },
-            DynamicsDataType(extension, dynFieldTypeId("pp-right"), 0, { applicationContext.antMetersFlow().map { it.isNotEmpty() } }, { applicationContext.antMetersFlow() }) { dn -> antManager.forceRightFlow(dn).map { it?.startAngleDeg ?: Double.NaN } },
-            DynamicsDataType(extension, dynFieldTypeId("peakpp-left"), 0, { applicationContext.antMetersFlow().map { it.isNotEmpty() } }, { applicationContext.antMetersFlow() }) { dn -> antManager.forceLeftFlow(dn).map { it?.startPeakDeg ?: Double.NaN } },
-            DynamicsDataType(extension, dynFieldTypeId("peakpp-right"), 0, { applicationContext.antMetersFlow().map { it.isNotEmpty() } }, { applicationContext.antMetersFlow() }) { dn -> antManager.forceRightFlow(dn).map { it?.startPeakDeg ?: Double.NaN } },
+            DynamicsDataType(extension, dynFieldTypeId("balance"), 0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.balanceFlow(dn) },
+            DynamicsDataType(extension, dynFieldTypeId("te"), 0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.tePsFlow(dn).map { it?.teLeftPct ?: Double.NaN } },
+            DynamicsDataType(extension, dynFieldTypeId("ps"), 0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.tePsFlow(dn).map { it?.psLeftPct ?: Double.NaN } },
+            DynamicsDataType(extension, dynFieldTypeId("pp-left"), 0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.forceLeftFlow(dn).map { it?.startAngleDeg ?: Double.NaN } },
+            DynamicsDataType(extension, dynFieldTypeId("pp-right"), 0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.forceRightFlow(dn).map { it?.startAngleDeg ?: Double.NaN } },
+            DynamicsDataType(extension, dynFieldTypeId("peakpp-left"), 0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.forceLeftFlow(dn).map { it?.startPeakDeg ?: Double.NaN } },
+            DynamicsDataType(extension, dynFieldTypeId("peakpp-right"), 0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.forceRightFlow(dn).map { it?.startPeakDeg ?: Double.NaN } },
         )
     }
 
@@ -211,16 +211,17 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                     // Estimate engine acquire/release stays tied to COMPARISON mode only;
                     // dynamics recording does not need the estimate engine running.
                     val shouldRunComparison = mode && state is RideState.Recording
-                    // Raw ANT meters connect when comparison is ON OR there is a saved meter (so a
-                    // saved meter records its dynamics every ride, even with comparison off) AND we
-                    // are recording.
-                    val shouldConnect = (mode || meters.isNotEmpty()) && state is RideState.Recording
+                    // Raw ANT meters connect when at least one saved meter is ENABLED (its real
+                    // power + dynamics are recorded/shown every ride) AND we are recording.
+                    // Comparison mode no longer drives the meter connection — it only drives the
+                    // estimate engine, acquired separately via shouldRunComparison above.
+                    val shouldConnect = meters.any { it.enabled } && state is RideState.Recording
                     if (shouldRunComparison && !acquiredForComparison) {
                         engine.acquire(comparisonToken); acquiredForComparison = true
                     } else if (!shouldRunComparison && acquiredForComparison) {
                         engine.release(comparisonToken); acquiredForComparison = false
                     }
-                    if (shouldConnect) antManager.connectMeters(meters.map { it.deviceNumber })
+                    if (shouldConnect) antManager.connectMeters(meters.filter { it.enabled }.map { it.deviceNumber })
                     else antManager.disconnectAll()
                 }
         }
@@ -390,7 +391,7 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                 combine(
                     applicationContext.comparisonModeFlow(),
                     applicationContext.antMetersFlow(),
-                ) { mode, meters -> mode || meters.isNotEmpty() }
+                ) { mode, meters -> mode || meters.any { it.enabled } }
                     .flatMapLatest { on -> if (on) karooSystem.streamDataFlow(DataType.Type.ELAPSED_TIME) else emptyFlow() },
                 applicationContext.antMetersFlow(),
                 loadPreferencesFlow(),
@@ -413,7 +414,7 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                             if (!p3s.isNaN()) add(FieldValue(fieldEstPower3s, p3s))
                         }
                     }
-                    metersSnapshot.forEach { m ->
+                    metersSnapshot.filter { it.enabled }.forEach { m ->
                         if (writeMeterFields(m.deviceNumber, primarySrc, primaryDev)) {
                             val reader = antManager.meter(m.deviceNumber)
                             val pw = reader?.power?.value ?: Double.NaN
@@ -432,7 +433,7 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                     // its dynamics (the Karoo can't record them natively). Each metric field is
                     // nullable; skip the write when null/NaN so the FIT stays clean while coasting.
                     // They join the SAME record message emitted below.
-                    metersSnapshot.forEach { m ->
+                    metersSnapshot.filter { it.enabled }.forEach { m ->
                         val reader = antManager.meter(m.deviceNumber) ?: return@forEach
                         reader.tePs.value?.let { d ->
                             d.teLeftPct?.let { recordValues.add(FieldValue(dynField(com.enderthor.kpower.ant.DynField.TE_LEFT, "dyn_te_l", "%"), it)) }
