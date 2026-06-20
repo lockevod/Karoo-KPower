@@ -52,14 +52,14 @@ class DualValueDataType(
         // Let the host draw the field-name header; we only render the value area.
         emitter.onNext(UpdateGraphicConfig(showHeader = true))
 
-        val night = (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
-            Configuration.UI_MODE_NIGHT_YES
-        val textColor = if (night) Color.WHITE else Color.BLACK
-
         fun render(text: String) {
+            // Read day/night PER render (cheap, ~1 Hz): a mid-ride theme flip (e.g. auto-dark at
+            // sunset on a long ride) must update the text colour, not stay stale until a page swap.
+            val night = (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+                Configuration.UI_MODE_NIGHT_YES
             val rv = RemoteViews(context.packageName, R.layout.field_dual).apply {
                 setTextViewText(R.id.dual_value, text)
-                setTextColor(R.id.dual_value, textColor)
+                setTextColor(R.id.dual_value, if (night) Color.WHITE else Color.BLACK)
                 setTextViewTextSize(R.id.dual_value, TypedValue.COMPLEX_UNIT_SP, config.textSize.toFloat())
             }
             emitter.updateView(rv)

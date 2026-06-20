@@ -8,6 +8,7 @@ import com.dsi.ant.plugins.antplus.pccbase.MultiDeviceSearch.MultiDeviceSearchRe
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import timber.log.Timber
@@ -239,8 +240,14 @@ class AntPowerManager(private val context: Context) {
         job.cancel()
     }
 
-    /** Register [token] as a holder of [dn]'s channel and ensure the channel is open. */
+    /** Set by close(); after this acquire() is a no-op so no channel is opened on a cancelled scope. */
+    @Volatile private var closed = false
+
+    /** Register [token] as a holder of [dn]'s channel and ensure the channel is open. No-op once
+     *  closed (the scope is cancelled, so ensureMeter's bridge would never run and the opened channel
+     *  would leak with no path to disconnect). */
     fun acquire(dn: Int, token: Any) = synchronized(meters) {
+        if (closed) return@synchronized
         holders.getOrPut(dn) { mutableSetOf() }.add(token)
         ensureMeter(dn)
     }
@@ -277,5 +284,18 @@ class AntPowerManager(private val context: Context) {
         stopScan()
         toggleHeld.toList().forEach { release(it, toggleToken) }
         toggleHeld.clear()
+    }
+
+    /**
+     * Full teardown for an owner whose lifetime ends (e.g. the settings/scan screen being left):
+     * release this manager's toggle holdings AND cancel its coroutine scope so the scope + Job graph
+     * don't linger until GC across repeated screen visits. The service's long-lived manager (reused
+     * for the whole service lifetime) must NOT call this.
+     */
+    @Synchronized
+    fun close() {
+        closed = true
+        disconnectAll()
+        scope.cancel()
     }
 }

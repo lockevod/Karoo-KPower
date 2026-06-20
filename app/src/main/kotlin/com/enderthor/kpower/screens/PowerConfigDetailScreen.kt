@@ -1,19 +1,23 @@
 package com.enderthor.kpower.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Done
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
@@ -21,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import com.enderthor.kpower.R
 import com.enderthor.kpower.data.BikePosition
 import com.enderthor.kpower.data.ConfigData
+import com.enderthor.kpower.data.bikeDotColors
 import com.enderthor.kpower.data.KarooSurface
 import com.enderthor.kpower.data.TreadType
 import com.enderthor.kpower.extension.antMetersFlow
@@ -33,11 +38,13 @@ import com.enderthor.kpower.vdevice.estimateFrontalArea
 import com.enderthor.kpower.vdevice.tyreWidthToMm
 import io.hammerhead.karooext.KarooSystemService
 import io.hammerhead.karooext.models.UserProfile
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updatedConfigData: ConfigData?) -> Unit, onCancel: () -> Unit) {
+fun DetailScreen(configdata: ConfigData, onUpdate: (ConfigData) -> Unit, onDelete: () -> Unit, onBack: () -> Unit) {
     val ctx = LocalContext.current
     val karooSystem = remember { KarooSystemService(ctx) }
     LaunchedEffect(Unit) {
@@ -70,6 +77,7 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
     var preferHeadwind by remember { mutableStateOf(configdata.preferHeadwind) }
     var useRouteSurface by remember { mutableStateOf(configdata.useRouteSurface) }
     var karooProfileId by remember { mutableStateOf(configdata.karooProfileId) }
+    var dotColor by remember { mutableStateOf(configdata.dotColorArgb) }
     val headwindInstalled = remember { ctx.isHeadwindInstalled() }
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
@@ -128,13 +136,43 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
         bikePosition, riderHeight, tyreWidth, tyrePressure, treadType, useProfileFtp, simpleMode, useKarooTemp, tubeless,
         preferHeadwind, useRouteSurface,
         karooProfileId = karooProfileId,
+        dotColorArgb = dotColor,
         )
+    }
+
+    // Auto-save: persist every edit after a short debounce (no Save/Cancel buttons). snapshotFlow
+    // re-runs getUpdatedConfigData() whenever any edited field changes; collectLatest cancels the
+    // pending delay on each new change, so only the settled value is written (not one save per
+    // keystroke). The first (initial, unchanged) emission is skipped so opening the editor doesn't
+    // trigger a needless write.
+    LaunchedEffect(Unit) {
+        var first = true
+        snapshotFlow { getUpdatedConfigData() }
+            .collectLatest { cfg ->
+                if (first) { first = false; return@collectLatest }
+                delay(400)
+                onUpdate(cfg)
+            }
     }
 
     Column(modifier = Modifier
         .fillMaxSize()
         .background(MaterialTheme.colorScheme.background)) {
-        TopAppBar(title = { Text(if (isCreating) stringResource(R.string.cfg_title_create) else stringResource(R.string.cfg_title_edit)) })
+        TopAppBar(
+            title = { Text(stringResource(R.string.cfg_title_edit)) },
+            navigationIcon = {
+                IconButton(onClick = {
+                    // Flush the latest edit synchronously BEFORE navigating: the auto-save debounce
+                    // (400 ms) would otherwise be cancelled by leaving composition, losing an edit made
+                    // just before tapping Back. This runs only on the back path — delete uses onDelete,
+                    // so a just-deleted bike can't be resurrected here.
+                    onUpdate(getUpdatedConfigData())
+                    onBack()
+                }) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.btn_back))
+                }
+            },
+        )
         Column(modifier = Modifier
             .padding(5.dp)
             .verticalScroll(rememberScrollState())
@@ -142,6 +180,31 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
             Text(stringResource(R.string.section_bike), style = MaterialTheme.typography.titleSmall)
 
             OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text(stringResource(R.string.cfg_name)) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+
+            // Per-bike dot colour: a row of selectable swatches from the curated palette. The
+            // chosen colour is what the bikes list shows as the bike's dot. Horizontally scrollable
+            // so the full palette is reachable on the narrow Karoo screen.
+            Text(stringResource(R.string.cfg_color), style = MaterialTheme.typography.titleSmall)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                bikeDotColors.forEach { argb ->
+                    val selected = dotColor == argb
+                    Surface(
+                        shape = CircleShape,
+                        color = Color(argb),
+                        border = if (selected) BorderStroke(3.dp, MaterialTheme.colorScheme.primary) else null,
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clickable { dotColor = argb },
+                        content = {}
+                    )
+                }
+            }
 
             apply {
                 val profileOptions = listOf(DropdownOption("", stringResource(R.string.dropdown_none))) +
@@ -382,41 +445,19 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                 }
             }
 
+            // No Save/Cancel: edits auto-save (see the LaunchedEffect above), the back arrow returns.
+            // Delete is always available — it's also how a just-created bike is discarded.
             FilledTonalButton(modifier = Modifier
                 .fillMaxWidth()
-                .height(50.dp), onClick = {
-                onSubmit(getUpdatedConfigData())
-            }) {
-                Icon(Icons.Default.Done, contentDescription = stringResource(R.string.btn_save))
+                .height(50.dp),
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                ),
+                onClick = { showDeleteConfirm = true }) {
+                Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.btn_delete_bike))
                 Spacer(modifier = Modifier.width(5.dp))
-                Text(stringResource(R.string.btn_save))
-            }
-
-            FilledTonalButton(modifier = Modifier
-                .fillMaxWidth()
-                .height(50.dp), onClick = {
-                onCancel()
-            }) {
-                Icon(Icons.Default.Close, contentDescription = stringResource(R.string.btn_cancel))
-                Spacer(modifier = Modifier.width(5.dp))
-                Text(stringResource(R.string.btn_cancel))
-            }
-
-            // Borrar bici: solo al editar una existente. onSubmit(null) lo interpreta la ruta
-            // configData/{id} como "elimina esta config" (no aparece al crear una nueva).
-            if (!isCreating) {
-                FilledTonalButton(modifier = Modifier
-                    .fillMaxWidth()
-                    .height(50.dp),
-                    colors = ButtonDefaults.filledTonalButtonColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer,
-                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                    ),
-                    onClick = { showDeleteConfirm = true }) {
-                    Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.btn_delete_bike))
-                    Spacer(modifier = Modifier.width(5.dp))
-                    Text(stringResource(R.string.btn_delete_bike))
-                }
+                Text(stringResource(R.string.btn_delete_bike))
             }
         }
     }
@@ -429,7 +470,7 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
             confirmButton = {
                 TextButton(onClick = {
                     showDeleteConfirm = false
-                    onSubmit(null)
+                    onDelete()
                 }) {
                     Text(stringResource(R.string.btn_delete), color = MaterialTheme.colorScheme.error)
                 }

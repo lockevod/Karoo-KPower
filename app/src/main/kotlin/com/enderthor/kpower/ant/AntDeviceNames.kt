@@ -51,7 +51,11 @@ object GarminProducts {
     fun name(modelNumber: Int): String? = names[modelNumber]
 }
 
-/** Best human name from a 0x50 page: the Garmin model name if we know it, else the brand. */
-fun antDeviceDisplayName(manufacturerId: Int, modelNumber: Int): String =
-    (if (manufacturerId == 1) GarminProducts.name(modelNumber) else null)
-        ?: AntManufacturers.name(manufacturerId)
+/** Best human name from a 0x50 page: "Brand Model" when the model is known (e.g. "Garmin Rally
+ *  200"), otherwise just the brand ("Wahoo"). Showing the brand too — not only the bare model —
+ *  is what riders expect under a Brand/Device label. */
+fun antDeviceDisplayName(manufacturerId: Int, modelNumber: Int): String {
+    val brand = AntManufacturers.name(manufacturerId)
+    val model = if (manufacturerId == 1) GarminProducts.name(modelNumber) else null
+    return if (model != null) "$brand $model" else brand
+}

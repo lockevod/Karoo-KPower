@@ -37,7 +37,8 @@ object CyclingDynamicsParser {
             // b2 "Pedal Power": 0xFF invalid. Bit7 = right-pedal indicator; only when SET do
             // bits0-6 carry the right-pedal % (matching the original antpluginlib behaviour). If
             // bit7 is clear the balance is undetermined -> null, not a wrong-side value.
-            balanceRightPct = if (balRaw == 0xFF || (balRaw and 0x80) == 0) null else (balRaw and 0x7F).toDouble(),
+            balanceRightPct = if (balRaw == 0xFF || (balRaw and 0x80) == 0) null
+                else (balRaw and 0x7F).let { if (it > 100) null else it.toDouble() },   // spec range 0-100%
         )
     }
 
@@ -161,6 +162,9 @@ object CyclingDynamicsParser {
         )
     }
 
-    private const val MAX_PLAUSIBLE_W = 1300.0     // well above any human sprint; rejects wrap artifacts
+    // 2000 W clears even elite/track sprints (trained riders peak 1200-1800 W; 1300 was too low and
+    // rejected real sprints, which the caller then HELD as a frozen value). Wrap artifacts land far
+    // outside this band (huge/negative), so they're still caught.
+    private const val MAX_PLAUSIBLE_W = 2000.0
     private const val MAX_PLAUSIBLE_RPM = 200.0     // track sprint tops ~200; above = artifact
 }

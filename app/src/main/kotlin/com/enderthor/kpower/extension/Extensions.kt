@@ -121,6 +121,17 @@ suspend fun saveDiagnosticLog(context: Context, enabled: Boolean) {
 fun Context.diagnosticLogFlow(): Flow<Boolean> =
     dataStore.data.map { it[diagnosticLogKey] ?: false }.distinctUntilChanged()
 
+val batteryAlertKey = booleanPreferencesKey("batteryAlert")
+
+suspend fun saveBatteryAlert(context: Context, enabled: Boolean) {
+    context.dataStore.edit { it[batteryAlertKey] = enabled }
+}
+
+/** Toggle global (off por defecto): dispara un InRideAlert cuando la batería del meter grabado baja
+ *  (LOW) y otro si pasa a crítica (CRITICAL), como mucho uno por nivel y ride. */
+fun Context.batteryAlertFlow(): Flow<Boolean> =
+    dataStore.data.map { it[batteryAlertKey] ?: false }.distinctUntilChanged()
+
 suspend fun saveAntMeters(context: Context, meters: List<com.enderthor.kpower.ant.SavedMeter>) {
     context.dataStore.edit { it[antMetersKey] = Json.encodeToString(meters) }
 }
@@ -139,7 +150,11 @@ suspend fun updateAntMeters(
         val current = runCatching {
             jsonWithUnknownKeys.decodeFromString<List<com.enderthor.kpower.ant.SavedMeter>>(prefs[antMetersKey] ?: "[]")
         }.getOrDefault(emptyList())
-        prefs[antMetersKey] = Json.encodeToString(transform(current))
+        val updated = transform(current)
+        // Skip the write (and its flow re-emission) when nothing changed — the brand/model auto-detect
+        // re-applies the same name on every reconnect/screen revisit, which would otherwise churn the
+        // DataStore and recompose every collector for no reason. (SavedMeter is a data class → eq.)
+        if (updated != current) prefs[antMetersKey] = Json.encodeToString(updated)
     }
 }
 
@@ -233,6 +248,32 @@ fun Context.loadPreferencesFlow(): Flow<List<ConfigData>> {
             jsonWithUnknownKeys.decodeFromString<List<ConfigData>>(defaultConfigData)
         }
     }.distinctUntilChanged()
+}
+
+// ── Bikes config export/import ────────────────────────────────────────────────────────────────────
+// A single fixed JSON file in the app's external files dir (same place as the diagnostic logs), so it
+// can be pulled/pushed with Hammerhead Companion or adb to move bikes between devices. Matches the
+// established Karoo file pattern — no document picker (which the Karoo may lack) is needed.
+fun Context.bikesConfigFile(): java.io.File =
+    java.io.File(getExternalFilesDir(null) ?: filesDir, "kpower_bikes.json")
+
+/** Write the bikes list to the export file; returns it (for showing its path). IO — call off-main. */
+fun Context.exportBikesConfig(configs: List<ConfigData>): java.io.File {
+    val f = bikesConfigFile()
+    f.writeText(Json.encodeToString(configs))
+    return f
+}
+
+/** Read + parse the export file. null if it's missing, empty, or malformed. IO — call off-main. */
+fun Context.importBikesConfig(): List<ConfigData>? {
+    val f = bikesConfigFile()
+    if (!f.exists()) return null
+    return try {
+        jsonWithUnknownKeys.decodeFromString<List<ConfigData>>(f.readText()).takeIf { it.isNotEmpty() }
+    } catch (e: Throwable) {
+        Timber.tag("kpower").e(e, "Failed to import bikes config")
+        null
+    }
 }
 
 

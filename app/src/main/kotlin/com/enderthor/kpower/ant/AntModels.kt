@@ -15,3 +15,14 @@ data class SavedMeter(
     val enabled: Boolean = true,
     val userNamed: Boolean = false,
 )
+
+/** True when [label] is an auto/placeholder name (empty, the bare device number, "Device: N",
+ *  "Power #N") rather than a name the rider or brand auto-detect set — so it is safe to overwrite
+ *  with a detected model name. Shared by the service brand auto-detect and the settings screen. */
+fun isAutoMeterLabel(label: String, deviceNumber: Int): Boolean {
+    val l = label.trim()
+    return l.isEmpty() || l == deviceNumber.toString() ||
+        l.equals("Device: $deviceNumber", ignoreCase = true) ||
+        l.startsWith("Device:", ignoreCase = true) ||
+        l == "Power #$deviceNumber"
+}

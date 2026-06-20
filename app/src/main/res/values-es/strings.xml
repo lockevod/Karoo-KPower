@@ -55,6 +55,12 @@
     <!-- Main / bikes list -->
     <string name="bikes_add">Añadir</string>
     <string name="bikes_empty">Aún no hay bicis — toca + para añadir una.</string>
+    <string name="menu_more">Más</string>
+    <string name="menu_export">Exportar configuración</string>
+    <string name="menu_import">Importar configuración</string>
+    <string name="export_done">Exportado a %1$s</string>
+    <string name="import_done">Importadas %1$d bicis</string>
+    <string name="import_failed">No se encontró un archivo de configuración válido</string>
 
     <!-- Comparison screen -->
     <string name="comparison_mode_label">Grabar estimada (FIT)</string>
@@ -80,11 +86,30 @@
     <string name="meter_status_recording">grabando</string>
     <string name="meter_status_off">sin grabar</string>
 
+    <!-- Panel de detalle del meter + batería -->
+    <string name="meter_details">Detalles</string>
+    <string name="meter_brand">Dispositivo</string>
+    <string name="meter_connecting">conectando…</string>
+    <string name="meter_calibration_soon">Calibración: próximamente</string>
+    <string name="battery_ok">Batería OK</string>
+    <string name="battery_low">Batería baja</string>
+    <string name="battery_critical">Batería crítica</string>
+    <string name="battery_unknown">Batería desconocida</string>
+
+    <!-- Toggle de aviso de batería + alerta en ruta -->
+    <string name="battery_alert_label">Avisar de batería baja/crítica</string>
+    <string name="battery_alert_desc">Muestra un aviso en ruta (una sola vez) cuando la batería del potenciómetro grabado baja, y otro si pasa a crítica (como mucho dos por ruta). El estado de batería solo se actualiza con el meter despierto.</string>
+    <string name="battery_alert_low_title">Batería del potenciómetro baja</string>
+    <string name="battery_alert_critical_title">Batería del potenciómetro crítica</string>
+    <string name="battery_alert_low_detail">La batería de %1$s está baja — cárgala o cámbiala pronto.</string>
+    <string name="battery_alert_critical_detail">La batería de %1$s está crítica — cámbiala ya.</string>
+
     <!-- Detail screen -->
-    <string name="cfg_title_create">Nuevo perfil de estimador</string>
     <string name="cfg_title_edit">Perfil de estimador</string>
     <string name="section_bike">Bici</string>
     <string name="cfg_name">Nombre</string>
+    <string name="cfg_color">Color</string>
+    <string name="btn_back">Atrás</string>
     <string name="dropdown_none">Por defecto</string>
     <string name="profile_link_hint">Vincula este perfil a un perfil de ruta del Karoo para que KPower lo elija solo al rodar con ese perfil. “Por defecto” = se usa para cualquier perfil de ruta que no hayas vinculado.</string>
     <string name="dropdown_link_profile">Vincular al perfil del Karoo</string>

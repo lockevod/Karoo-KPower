@@ -156,7 +156,7 @@ class RawAntPowerMeter(
                 // Device identity (brand). Not a "live" value, so it does NOT update lastEventMs and
                 // is not cleared by reset()/expireIfStale.
                 CyclingDynamicsParser.parseManufacturer(p)?.let {
-                    // Garmin model name (e.g. "Rally 200") when known, else the brand ("Wahoo"…).
+                    // "Brand Model" when the model is known (e.g. "Garmin Rally 200"), else the brand.
                     _manufacturerName.value = antDeviceDisplayName(it.manufacturerId, it.modelNumber)
                 }
             }
@@ -177,25 +177,38 @@ class RawAntPowerMeter(
         val now = System.currentTimeMillis()
         val prev = prevTorque
         if (prev != null) {
+            // A NEW rotation event distinguishes "coasting" (no event) from "event present but the
+            // computed value was rejected" (clamp / wrap artifact). Only the former may coast to 0.
+            val newEvent = ((d.eventCount - prev.eventCount) and 0xFF) != 0
             val tp = CyclingDynamicsParser.torquePower(prev, d)
-            if (tp != null) {
-                _power.value = tp.powerW
-                _cadence.value = tp.cadenceRpm
-                _torque.value = tp.torqueNm
-                lastTorqueEventChangeMs = now
-            } else if (now - lastTorqueEventChangeMs > COAST_MS) {
-                // No new crank event for a while → coasting/stopped. Zero power/cadence/torque AND
-                // clear the cycling-dynamics models so the FIT records a gap, not the last frozen
-                // TE/PS/angles/position (those pages stop while coasting but their StateFlows would
-                // otherwise hold the last value until the 5s stale reset).
-                _power.value = 0.0; _cadence.value = 0.0; _torque.value = 0.0
-                _tePs.value = null; _forceAngleLeft.value = null; _forceAngleRight.value = null
-                _pedalPosition.value = null; _barycenter.value = null
+            when {
+                tp != null -> {
+                    _power.value = tp.powerW
+                    _cadence.value = tp.cadenceRpm
+                    _torque.value = tp.torqueNm
+                    lastTorqueEventChangeMs = now
+                }
+                newEvent && now - lastTorqueEventChangeMs <= HOLD_MAX_MS -> {
+                    // The rider IS pedalling (a new event arrived) but the value was rejected as
+                    // implausible (a one-frame wrap artifact). HOLD the last good value briefly so it
+                    // doesn't blink to 0 mid-effort. BOUNDED: if NO valid compute arrives for
+                    // HOLD_MAX_MS while events keep coming (a genuinely stuck/broken meter, e.g. a
+                    // period accumulator that never advances), fall through to the coast branch — never
+                    // freeze a stale wattage into the FIT for the whole ride. Real sprints no longer
+                    // reach here (the clamp was raised to 2000 W), so this only catches broken streams.
+                }
+                now - lastTorqueEventChangeMs > COAST_MS -> {
+                    // No new crank event for a while → genuinely coasting/stopped. Zero
+                    // power/cadence/torque AND clear the dynamics models so the FIT records a gap,
+                    // not the last frozen TE/PS/angles/position (those pages stop while coasting).
+                    _power.value = 0.0; _cadence.value = 0.0; _torque.value = 0.0
+                    _tePs.value = null; _forceAngleLeft.value = null; _forceAngleRight.value = null
+                    _pedalPosition.value = null; _barycenter.value = null
+                }
+                // else: repeated frame within the coast window → hold the last values.
             }
-            // else: repeated frame within the coast window → hold the last values.
         } else {
-            // First torque frame: seed cadence and START the coast timer, so an all-implausible
-            // stream (every torquePower rejected by the clamp) still coasts to 0 instead of holding.
+            // First torque frame: seed cadence and start the coast timer.
             if (_cadence.value.isNaN()) d.cadenceRpm?.let { _cadence.value = it }
             lastTorqueEventChangeMs = now
         }
@@ -233,5 +246,9 @@ class RawAntPowerMeter(
     private companion object {
         /** Hold the last torque-derived power for this long without a new crank event, then coast to 0. */
         const val COAST_MS = 3_000L
+        /** Upper bound on holding a last-good value when new events arrive but every compute is rejected
+         *  (broken/stuck meter). Far longer than any real effort, so it never zeros a legitimate sprint;
+         *  short enough that a stuck stream doesn't freeze phantom watts for the whole ride. */
+        const val HOLD_MAX_MS = 30_000L
     }
 }

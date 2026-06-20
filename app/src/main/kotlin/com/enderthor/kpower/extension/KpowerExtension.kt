@@ -11,6 +11,7 @@ import io.hammerhead.karooext.models.Device
 import io.hammerhead.karooext.models.DeviceEvent
 import io.hammerhead.karooext.models.FieldValue
 import io.hammerhead.karooext.models.FitEffect
+import io.hammerhead.karooext.models.InRideAlert
 import io.hammerhead.karooext.models.RideState
 import io.hammerhead.karooext.models.StreamState
 import io.hammerhead.karooext.models.UserProfile
@@ -38,6 +39,10 @@ import kotlinx.coroutines.launch
 import kotlin.coroutines.coroutineContext
 
 import com.enderthor.kpower.BuildConfig
+import com.enderthor.kpower.R
+import com.enderthor.kpower.ant.BatteryLevel
+import com.enderthor.kpower.ant.batteryLevelOf
+import com.enderthor.kpower.ant.isAutoMeterLabel
 import com.enderthor.kpower.data.HeadwindStats
 import com.enderthor.kpower.data.WEATHER_CHECK_INTERVAL_MS
 import com.enderthor.kpower.data.WEATHER_MAX_AGE_MS
@@ -93,11 +98,14 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
     // resolve a meter's friendly label for the reconnect Device name.
     @Volatile private var savedMetersSnapshot: List<com.enderthor.kpower.ant.SavedMeter> = emptyList()
 
-    // ONE shared saved-meters flow for ALL data fields. Each placed field used to spin up its own
-    // antMetersFlow() collector (a JSON decode per DataStore emission) twice over — ~34 decodes per
-    // pref write with all fields placed. shareIn collapses that to a single upstream decode fanned
-    // out to every field; the cheap enabled-gate is derived once. WhileSubscribed stops it shortly
-    // after the last field is removed, so it costs nothing when no field is on a page.
+    // ONE shared saved-meters flow for ALL consumers — every placed data field AND the two always-on
+    // service collectors (savedMetersSnapshot + brand auto-detect, in onCreate). Each consumer used
+    // to spin up its own antMetersFlow() collector (a JSON decode per DataStore emission); with all
+    // fields placed that was ~34 decodes per pref write, plus the two always-on collectors decoding
+    // independently regardless. shareIn collapses every consumer to a single upstream decode fanned
+    // out to all; the cheap enabled-gate is derived once. The always-on collectors keep it hot for
+    // the service lifetime, so there is exactly ONE decode per emission. WhileSubscribed still tears
+    // it down shortly after the last subscriber goes (service teardown).
     private val sharedMeters by lazy {
         applicationContext.antMetersFlow().shareIn(serviceScope, SharingStarted.WhileSubscribed(5_000), replay = 1)
     }
@@ -192,7 +200,7 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
         // Keep a snapshot of saved meters so connectDevice() (non-suspend, binder thread) can resolve
         // a meter's friendly label for the reconnect Device name.
         serviceScope.launch {
-            applicationContext.antMetersFlow().collect { savedMetersSnapshot = it }
+            sharedMeters.collect { savedMetersSnapshot = it }
         }
 
         // Brand auto-detect: once a connected meter reports its manufacturer (0x50 page), fill in the
@@ -200,7 +208,7 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
         // Only meaningful while the meter is connected (recording). The write is an ATOMIC transform
         // so it can't clobber a concurrent rename/toggle.
         serviceScope.launch {
-            applicationContext.antMetersFlow()
+            sharedMeters
                 .map { it.firstOrNull { m -> m.enabled }?.deviceNumber }
                 .distinctUntilChanged()
                 .flatMapLatest { dn -> if (dn == null) emptyFlow() else antManager.manufacturerFlow(dn).map { dn to it } }
@@ -211,6 +219,56 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                             if (it.deviceNumber == dn && !it.userNamed && isAutoMeterLabel(it.label, dn))
                                 it.copy(label = brand) else it
                         }
+                    }
+                }
+        }
+
+        // Battery alert (opt-in): while the toggle is ON and recording, watch the enabled meter's
+        // battery level and fire a one-time InRideAlert on entering LOW, and again on CRITICAL — at
+        // most two per ride. Edge-triggered; the fired flags reset on the Idle/Paused -> Recording
+        // transition (armed). The alert names the meter. flatMapLatest re-subscribes the battery flow
+        // when the toggle, ride state, or enabled meter changes; an immediate emission means a meter
+        // that's already LOW/CRITICAL at ride start warns once right away (battery code persists).
+        serviceScope.launch {
+            var firedLow = false
+            var firedCritical = false
+            // Reset the per-ride fired flags ONLY on Idle -> Recording (a genuine new ride), never on
+            // Paused -> Recording — otherwise autopause at every traffic light would re-arm and the
+            // alert would spam on each resume. sawIdle starts true so the first Recording arms once.
+            var sawIdle = true
+            // The active meter can be switched mid-ride (several may be saved, one active). A different
+            // meter has its own battery, so re-arm when the enabled device changes.
+            var lastAlertDn: Int? = null
+            combine(
+                applicationContext.batteryAlertFlow(),
+                karooSystem.consumerFlow<RideState>().distinctUntilChanged(),
+                sharedMeters.map { it.firstOrNull { m -> m.enabled } }.distinctUntilChanged(),
+            ) { enabled, ride, meter -> Triple(enabled, ride, meter) }
+                .flatMapLatest { (enabled, ride, meter) ->
+                    when (ride) {
+                        is RideState.Idle -> sawIdle = true
+                        is RideState.Recording -> if (sawIdle) { firedLow = false; firedCritical = false; sawIdle = false }
+                        else -> {} // Paused: keep flags, don't re-arm
+                    }
+                    if (!enabled || ride !is RideState.Recording || meter == null) emptyFlow()
+                    else {
+                        // Re-arm when the ACTIVE meter changes — but ONLY here, inside the recording +
+                        // enabled path. Doing it earlier would let a meter swap during an autopause
+                        // (Paused) re-arm and then re-fire on resume, exceeding the per-ride cap.
+                        if (meter.deviceNumber != lastAlertDn) {
+                            firedLow = false; firedCritical = false; lastAlertDn = meter.deviceNumber
+                        }
+                        antManager.batteryFlow(meter.deviceNumber).map { code -> meter to code }
+                    }
+                }
+                .collect { (meter, code) ->
+                    when (batteryLevelOf(code)) {
+                        BatteryLevel.CRITICAL -> if (!firedCritical) { firedCritical = true; dispatchBatteryAlert(meter, critical = true) }
+                        // Critical implies low is already covered: don't fire a (lesser) LOW after a
+                        // CRITICAL has fired — the ANT+ code can oscillate 5->4->5 near the threshold,
+                        // which would otherwise read as a confusing "recovered to low" message.
+                        BatteryLevel.LOW -> if (!firedLow && !firedCritical) { firedLow = true; dispatchBatteryAlert(meter, critical = false) }
+                        else -> {}
                     }
                 }
         }
@@ -242,7 +300,7 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
             kotlinx.coroutines.flow.combine(
                 karooSystem.consumerFlow<RideState>(),
                 applicationContext.comparisonModeFlow(),
-                applicationContext.antMetersFlow(),
+                sharedMeters,
             ) { state, mode, meters -> RideGate(state, mode, meters) }
                 // Dedup is safe: RideState.Recording/Idle are payload-free objects, so
                 // collapsing identical emissions never drops a real transition. And
@@ -435,22 +493,35 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
         }
     }
 
-    /** Friendly Karoo display name for a real meter: "KPW <name>", or "KPW #<deviceNumber>" when the
-     *  scan gave no usable (non-numeric) name. Keeps the name human-readable instead of a bare number. */
+    /** Friendly Karoo display name for a real meter: "KPW <name>". When the rider hasn't named it, use
+     *  the detected model ("KPW Garmin Rally 200") if the 0x50 page has been seen this service lifetime,
+     *  else the bare number ("KPW #<deviceNumber>") — never just a number when we know the model. */
     private fun meterDisplayName(deviceNumber: Int, label: String?): String {
         val clean = label?.trim().orEmpty()
-        // A label that is empty or just the device number isn't helpful — fall back to a tagged form.
-        return if (isAutoMeterLabel(clean, deviceNumber)) "KPW #$deviceNumber" else "KPW $clean"
+        if (!isAutoMeterLabel(clean, deviceNumber)) return "KPW $clean"
+        val model = antManager.manufacturerFlow(deviceNumber).value
+        return if (!model.isNullOrBlank()) "KPW $model" else "KPW #$deviceNumber"
     }
 
-    /** True when the label is still the scan default (blank / bare number / "Device: N" / "Power #N"),
-     *  i.e. the rider hasn't named it — so brand auto-detect may safely fill it in. */
-    private fun isAutoMeterLabel(label: String, deviceNumber: Int): Boolean {
-        val l = label.trim()
-        return l.isEmpty() || l == deviceNumber.toString() ||
-            l.equals("Device: $deviceNumber", ignoreCase = true) ||
-            l.startsWith("Device:", ignoreCase = true) ||
-            l == "Power #$deviceNumber"
+    /** Fire the battery in-ride alert, naming the meter. Colours/icon are @ColorRes/@DrawableRes (the
+     *  host resolves them via Context.getColor — a packed ARGB would crash the ride app). */
+    private fun dispatchBatteryAlert(meter: com.enderthor.kpower.ant.SavedMeter, critical: Boolean) {
+        karooSystem.dispatch(
+            InRideAlert(
+                id = "kpower-battery-${if (critical) "critical" else "low"}-${meter.deviceNumber}",
+                icon = R.drawable.ic_battery_alert,
+                title = applicationContext.getString(
+                    if (critical) R.string.battery_alert_critical_title else R.string.battery_alert_low_title
+                ),
+                detail = applicationContext.getString(
+                    if (critical) R.string.battery_alert_critical_detail else R.string.battery_alert_low_detail,
+                    meter.label,
+                ),
+                autoDismissMs = 15_000L,
+                backgroundColor = if (critical) R.color.alert_bg_critical else R.color.alert_bg_low,
+                textColor = R.color.alert_text,
+            )
+        )
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -471,10 +542,10 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                 // flatMapLatest re-subscribes on hot-toggle / meter add/remove.
                 combine(
                     applicationContext.comparisonModeFlow(),
-                    applicationContext.antMetersFlow(),
+                    sharedMeters,
                 ) { mode, meters -> mode || meters.any { it.enabled } }
                     .flatMapLatest { on -> if (on) karooSystem.streamDataFlow(DataType.Type.ELAPSED_TIME) else emptyFlow() },
-                applicationContext.antMetersFlow(),
+                sharedMeters,
                 applicationContext.comparisonModeFlow(),
             ) { elapsed, meters, comparisonMode -> FitTick(elapsed, meters, comparisonMode) }
                 .collect { (elapsed, metersSnapshot, comparisonMode) ->

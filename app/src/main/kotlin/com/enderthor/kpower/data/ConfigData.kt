@@ -131,6 +131,25 @@ data class ConfigData(
     val useRouteSurface: Boolean = true,
     // Karoo ride-profile this bike is linked to (RideProfile.id); null = unmapped (legacy).
     val karooProfileId: String? = null,
+    // Colour of this bike's dot in the bikes list (packed 0xAARRGGBB). Default = neutral grey
+    // so a legacy config (JSON without this field) deserializes to the same look as before.
+    // The rider picks from bikeDotColors in the editor.
+    val dotColorArgb: Long = 0xFF888888L,
+)
+
+// Curated, sunlight-readable dot colours for the bikes list: vivid, high-contrast hues spaced
+// around the wheel so bikes are told apart at a glance. Grey (first) is the neutral default.
+val bikeDotColors: List<Long> = listOf(
+    0xFF888888L, // grey (default / neutral)
+    0xFFE53935L, // red
+    0xFFFB8C00L, // orange
+    0xFFFDD835L, // yellow
+    0xFF43A047L, // green
+    0xFF00897BL, // teal
+    0xFF1E88E5L, // blue
+    0xFF3949ABL, // indigo
+    0xFF8E24AAL, // purple
+    0xFFD81B60L, // pink
 )
 
 

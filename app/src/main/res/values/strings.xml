@@ -55,6 +55,12 @@
     <!-- Main / bikes list -->
     <string name="bikes_add">Add</string>
     <string name="bikes_empty">No bikes yet — tap + to add one.</string>
+    <string name="menu_more">More</string>
+    <string name="menu_export">Export config</string>
+    <string name="menu_import">Import config</string>
+    <string name="export_done">Exported to %1$s</string>
+    <string name="import_done">Imported %1$d bikes</string>
+    <string name="import_failed">No valid config file found to import</string>
 
     <!-- Comparison screen -->
     <string name="comparison_mode_label">Log estimated power (FIT)</string>
@@ -80,11 +86,30 @@
     <string name="meter_status_recording">recording</string>
     <string name="meter_status_off">not recording</string>
 
+    <!-- Meter detail panel + battery -->
+    <string name="meter_details">Details</string>
+    <string name="meter_brand">Device</string>
+    <string name="meter_connecting">connecting…</string>
+    <string name="meter_calibration_soon">Calibration: coming soon</string>
+    <string name="battery_ok">Battery OK</string>
+    <string name="battery_low">Battery low</string>
+    <string name="battery_critical">Battery critical</string>
+    <string name="battery_unknown">Battery unknown</string>
+
+    <!-- Battery alert toggle + in-ride alert -->
+    <string name="battery_alert_label">Notify on low/critical battery</string>
+    <string name="battery_alert_desc">Shows a one-time in-ride alert when the recorded power meter\'s battery goes low, and again if it turns critical (at most two per ride). Battery status only updates while the meter is awake.</string>
+    <string name="battery_alert_low_title">Power meter battery low</string>
+    <string name="battery_alert_critical_title">Power meter battery critical</string>
+    <string name="battery_alert_low_detail">%1$s battery is low — charge or replace soon.</string>
+    <string name="battery_alert_critical_detail">%1$s battery is critical — replace now.</string>
+
     <!-- Detail screen -->
-    <string name="cfg_title_create">New estimator profile</string>
     <string name="cfg_title_edit">Estimator profile</string>
     <string name="section_bike">Bike</string>
     <string name="cfg_name">Title</string>
+    <string name="cfg_color">Colour</string>
+    <string name="btn_back">Back</string>
     <string name="dropdown_none">Default</string>
     <string name="profile_link_hint">Link this profile to a Karoo ride profile so KPower auto-selects it when you ride that profile. “Default” = used for any ride profile you haven\'t linked.</string>
     <string name="dropdown_link_profile">Link to Karoo profile</string>
