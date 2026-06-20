@@ -101,6 +101,10 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
             RealPowerDataType(extension, realFieldTypeId(0, "3s"),    0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.power3sFlow(dn) },
             RealPowerDataType(extension, realFieldTypeId(0, "np"),    0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.npFlow(dn) },
             RealPowerDataType(extension, realFieldTypeId(0, "avg"),   0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.avgFlow(dn) },
+            RealPowerDataType(extension, realFieldTypeId(0, "max"),     0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.maxFlow(dn) },
+            RealPowerDataType(extension, realFieldTypeId(0, "10s"),     0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.power10sFlow(dn) },
+            RealPowerDataType(extension, realFieldTypeId(0, "cadence"), 0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.cadenceFlow(dn) },
+            RealPowerDataType(extension, realFieldTypeId(0, "torque"),  0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.torqueFlow(dn) },
             // Live cycling-dynamics fields (slot 0), gated on "a meter is recorded" (saved meters
             // list non-empty). Each metricFlowFor maps a STABLE manager-level dynamics sink to a
             // Double (null -> NaN -> `---`). These sinks survive meter reconnect: the bridges[dn]

@@ -26,8 +26,11 @@ class AntPowerManager(private val context: Context) {
     private val powerFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
     private val cadenceFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
     private val power3sFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
+    private val power10sFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
     private val npFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
     private val avgFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
+    private val maxFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
+    private val torqueFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
     // Stable dynamics sinks (survive reconnect; re-bound by bridges[dn] to each new meter).
     private val balanceFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
     private val tePsFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<TePsData?>>()
@@ -72,10 +75,13 @@ class AntPowerManager(private val context: Context) {
     fun cadenceFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<Double> =
         cadenceFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
 
-    /** Stable 3s/NP/avg flows for a device number (survive reconnect, like powerFlow). */
+    /** Stable 3s/10s/NP/avg/max/torque flows for a device number (survive reconnect, like powerFlow). */
     fun power3sFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<Double> = power3sFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
+    fun power10sFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<Double> = power10sFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
     fun npFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<Double> = npFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
     fun avgFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<Double> = avgFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
+    fun maxFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<Double> = maxFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
+    fun torqueFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<Double> = torqueFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
 
     /** Stable dynamics flows for a device number (survive reconnect, like powerFlow). */
     fun balanceFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<Double> = balanceFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
@@ -147,8 +153,11 @@ class AntPowerManager(private val context: Context) {
         val sink = powerFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
         val cadenceSink = cadenceFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
         val p3sSink = power3sFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
+        val p10sSink = power10sFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
         val npSink = npFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
         val avgSink = avgFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
+        val maxSink = maxFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
+        val torqueSink = torqueFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
         val balanceSink = balanceFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
         val tePsSink = tePsFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(null) }
         val forceLeftSink = forceLeftFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(null) }
@@ -157,8 +166,9 @@ class AntPowerManager(private val context: Context) {
         bridges[dn] = scope.launch {
             // mirror power into the stable sink
             launch { m.power.collect { sink.value = it } }
-            // mirror cadence into the stable sink (re-binds the NEW meter on reconnect)
+            // mirror cadence + torque into the stable sinks (re-binds the NEW meter on reconnect)
             launch { m.cadence.collect { cadenceSink.value = it } }
+            launch { m.torque.collect { torqueSink.value = it } }
             // mirror dynamics into the stable sinks (re-binds the NEW meter on reconnect)
             launch { m.balanceRightPct.collect { balanceSink.value = it } }
             launch { m.tePs.collect { tePsSink.value = it } }
@@ -180,8 +190,10 @@ class AntPowerManager(private val context: Context) {
                 // field goes `---` on a dropout instead of freezing. NP/avg are session
                 // aggregates and hold their last accumulated value.
                 p3sSink.value = if (m.power.value.isNaN()) Double.NaN else m.metrics.power3sW.value
+                p10sSink.value = if (m.power.value.isNaN()) Double.NaN else m.metrics.power10sW.value
                 npSink.value = m.metrics.npW.value
                 avgSink.value = m.metrics.avgW.value
+                maxSink.value = m.metrics.maxW.value
             }
         }
     }
@@ -191,8 +203,11 @@ class AntPowerManager(private val context: Context) {
         powerFlows[dn]?.value = Double.NaN
         cadenceFlows[dn]?.value = Double.NaN
         power3sFlows[dn]?.value = Double.NaN
+        power10sFlows[dn]?.value = Double.NaN
         npFlows[dn]?.value = Double.NaN
         avgFlows[dn]?.value = Double.NaN
+        maxFlows[dn]?.value = Double.NaN
+        torqueFlows[dn]?.value = Double.NaN
         balanceFlows[dn]?.value = Double.NaN
         tePsFlows[dn]?.value = null
         forceLeftFlows[dn]?.value = null

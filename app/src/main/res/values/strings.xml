@@ -22,6 +22,14 @@
     <string name="real1_np_desc">Recorded real meter normalized power (requires a recorded meter)</string>
     <string name="real1_avg_name">Real Avg Power</string>
     <string name="real1_avg_desc">Recorded real meter average power (requires a recorded meter)</string>
+    <string name="real1_max_name">Real Max Power</string>
+    <string name="real1_max_desc">Recorded real meter session max power (requires a recorded meter)</string>
+    <string name="real1_10s_name">Real Power 10s</string>
+    <string name="real1_10s_desc">Recorded real meter 10s power (requires a recorded meter)</string>
+    <string name="real1_cad_name">Real Cadence</string>
+    <string name="real1_cad_desc">Recorded real meter cadence, rpm (requires a recorded meter)</string>
+    <string name="real1_torque_name">Real Torque</string>
+    <string name="real1_torque_desc">Recorded real meter torque, Nm (requires a recorded meter)</string>
     <string name="dyn_balance_name">L/R Balance</string>
     <string name="dyn_balance_desc">Left/right power balance, right-pedal % (real ANT+ meter)</string>
     <string name="dyn_te_name">Torque Effectiveness</string>

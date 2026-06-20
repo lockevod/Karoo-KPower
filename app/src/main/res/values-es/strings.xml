@@ -22,6 +22,14 @@
     <string name="real1_np_desc">Potencia normalizada real grabada del potenciómetro (requiere un medidor grabado)</string>
     <string name="real1_avg_name">Pot. med. real</string>
     <string name="real1_avg_desc">Potencia media real grabada del potenciómetro (requiere un medidor grabado)</string>
+    <string name="real1_max_name">Pot. máx. real</string>
+    <string name="real1_max_desc">Potencia máxima de la sesión del medidor real (requiere un medidor grabado)</string>
+    <string name="real1_10s_name">Pot. real 10s</string>
+    <string name="real1_10s_desc">Potencia 10s real grabada del potenciómetro (requiere un medidor grabado)</string>
+    <string name="real1_cad_name">Cadencia real</string>
+    <string name="real1_cad_desc">Cadencia real grabada del potenciómetro, rpm (requiere un medidor grabado)</string>
+    <string name="real1_torque_name">Par real</string>
+    <string name="real1_torque_desc">Par real grabado del potenciómetro, Nm (requiere un medidor grabado)</string>
     <string name="dyn_balance_name">Equilibrio I/D</string>
     <string name="dyn_balance_desc">Equilibrio de potencia izq/dcha, % del pedal derecho (medidor ANT+ real)</string>
     <string name="dyn_te_name">Eficacia del par</string>

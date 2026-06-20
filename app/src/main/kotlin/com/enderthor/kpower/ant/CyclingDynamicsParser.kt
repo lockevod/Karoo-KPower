@@ -14,7 +14,10 @@ object CyclingDynamicsParser {
     const val PAGE_RIGHT_FORCE_ANGLE = 0xE0
     const val PAGE_LEFT_FORCE_ANGLE = 0xE1
     const val PAGE_PEDAL_POSITION = 0xE2
-    const val PAGE_MANUFACTURER = 0x50   // common page 0x50: Manufacturer's Identification
+    // ANT+ common pages are numbered in DECIMAL: page 80 == 0x50 (Manufacturer's Identification:
+    // HW rev + manufacturer ID + model number), page 81 == 0x51 (Product Info: SW rev + serial).
+    // "page 80" and "0x50" are the SAME page — don't confuse the decimal page number with hex.
+    const val PAGE_MANUFACTURER = 0x50
 
     private fun ByteArray.u(i: Int) = this[i].toInt() and 0xFF
 
@@ -147,6 +150,6 @@ object CyclingDynamicsParser {
         )
     }
 
-    private const val MAX_PLAUSIBLE_W = 3000.0     // well above any human sprint; rejects wrap artifacts
-    private const val MAX_PLAUSIBLE_RPM = 250.0     // track sprint tops ~250; above = artifact
+    private const val MAX_PLAUSIBLE_W = 1300.0     // well above any human sprint; rejects wrap artifacts
+    private const val MAX_PLAUSIBLE_RPM = 200.0     // track sprint tops ~200; above = artifact
 }
