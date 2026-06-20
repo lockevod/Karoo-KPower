@@ -59,6 +59,9 @@ class RawAntChannel(
     private val pageCounts = ConcurrentHashMap<Int, Long>()
     /** Per-page last-logged wall-clock time, to throttle the per-page diagnostic lines. */
     private val lastPageLogMs = ConcurrentHashMap<Int, Long>()
+    /** Distinct payloads seen per UNKNOWN page number — so we capture every data variant a device
+     *  emits on pages we don't parse yet (discovery), deduped + capped instead of time-throttled. */
+    private val unknownPayloads = ConcurrentHashMap<Int, MutableSet<String>>()
     /** Guards the SUMMARY loop so it is launched at most once. */
     @Volatile private var summaryStarted = false
 
@@ -101,7 +104,7 @@ class RawAntChannel(
                         "dev=%d SUMMARY %s | 0x10 maxW=%d maxRpm=%d accumMoved=%b",
                         deviceNumber,
                         pageCounts.entries.sortedBy { it.key }
-                            .joinToString(" ") { "0x%02X=%d".format(it.key, it.value) },
+                            .joinToString(" ") { "0x%02X=%d%s".format(it.key, it.value, if (it.key in KNOWN_PAGES) "" else "?") },
                         maxInstPower, maxCadence, accumMoved,
                     )
                 }
@@ -129,6 +132,20 @@ class RawAntChannel(
             if (cad != 0xFF && cad > maxCadence) maxCadence = cad
             if (firstAccumPower < 0) firstAccumPower = accum
             lastAccumPower = accum
+        }
+        // Discovery: for a page we don't parse yet, log EVERY DISTINCT payload (deduped, unthrottled,
+        // capped) so a newly-added device reveals all the data it emits on other pages — not just one
+        // sample per second. A page that just repeats the same bytes logs once; genuinely new bytes
+        // (a different data variant) always get through, up to the cap.
+        if (page !in KNOWN_PAGES) {
+            val hex = p.joinToString(" ") { "%02X".format(it) }
+            val seen = unknownPayloads.computeIfAbsent(page) { java.util.concurrent.ConcurrentHashMap.newKeySet() }
+            if (seen.size < MAX_UNKNOWN_VARIANTS && seen.add(hex)) {
+                Timber.tag("ANTLOG").d(
+                    "UNKNOWN dev=%d PAGE 0x%02X payload=%s (variant %d)", deviceNumber, page, hex, seen.size,
+                )
+                return
+            }
         }
         val now = System.currentTimeMillis()
         val minIntervalMs = if (page == 0x10) 5000L else 1000L
@@ -271,6 +288,7 @@ class RawAntChannel(
         const val MAX_BACKOFF_MS = 5000L
 
         /** Pages we know how to decode (parser pages + ANT+ common pages); others are UNKNOWN. */
+        const val MAX_UNKNOWN_VARIANTS = 40   // cap distinct payloads logged per unknown page
         val KNOWN_PAGES = setOf(0x10, 0x11, 0x12, 0x13, 0x14, 0xE0, 0xE1, 0xE2, 0x50, 0x51, 0x52)
     }
 }
