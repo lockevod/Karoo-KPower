@@ -14,6 +14,8 @@ object CyclingDynamicsParser {
     const val PAGE_RIGHT_FORCE_ANGLE = 0xE0
     const val PAGE_LEFT_FORCE_ANGLE = 0xE1
     const val PAGE_PEDAL_POSITION = 0xE2
+    const val PAGE_BATTERY = 0x52   // ANT+ common page 82 (0x52): Battery Status
+
     // ANT+ common pages are numbered in DECIMAL: page 80 == 0x50 (Manufacturer's Identification:
     // HW rev + manufacturer ID + model number), page 81 == 0x51 (Product Info: SW rev + serial).
     // "page 80" and "0x50" are the SAME page — don't confuse the decimal page number with hex.
@@ -94,6 +96,14 @@ object CyclingDynamicsParser {
         if (p.size < 2 || p.u(0) != PAGE_TORQUE_BARYCENTER) return null
         val raw = p.u(1)
         return TorqueBarycenterData(angleDeg = if (raw == 0xFF) null else raw * 0.5 + 30.0)
+    }
+
+    /** Common page 82 (0x52): battery status code in byte 6 bits 4-6 (1=New, 2=Good, 3=Ok, 4=Low,
+     *  5=Critical). Returns the code 1..5, or null when absent/invalid. */
+    fun parseBatteryStatus(p: ByteArray): Int? {
+        if (p.size < 8 || p.u(0) != PAGE_BATTERY) return null
+        val status = (p.u(6) shr 4) and 0x07
+        return if (status in 1..5) status else null
     }
 
     /** Common page 0x50: Manufacturer ID (b4-5 LE) + model number (b6-7 LE). Identity, not live data. */

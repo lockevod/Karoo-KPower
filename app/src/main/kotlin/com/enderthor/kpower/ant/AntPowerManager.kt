@@ -38,6 +38,8 @@ class AntPowerManager(private val context: Context) {
     private val forceRightFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<ForceAngleData?>>()
     // Brand name from the 0x50 page (device identity); persists across reconnect, never reset to null.
     private val manufacturerFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<String?>>()
+    // Battery status code (1=New..5=Critical) from the 0x52 page; persists like manufacturer.
+    private val batteryFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Int?>>()
     private val bridges = HashMap<Int, kotlinx.coroutines.Job>()
 
     // Ref-counted lifecycle: a meter's raw ANT channel stays open while ANY holder (the toggle
@@ -91,6 +93,9 @@ class AntPowerManager(private val context: Context) {
 
     /** Detected brand name for a device (from the 0x50 page); null until seen. */
     fun manufacturerFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<String?> = manufacturerFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(null) }
+
+    /** Battery status code for a device (from the 0x52 page, 1=New..5=Critical); null until seen. */
+    fun batteryFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<Int?> = batteryFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(null) }
 
     /** Live reader for a device number, or null if not connected. */
     fun meter(deviceNumber: Int): RawAntPowerMeter? = synchronized(meters) { meters[deviceNumber] }
@@ -163,6 +168,7 @@ class AntPowerManager(private val context: Context) {
         val forceLeftSink = forceLeftFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(null) }
         val forceRightSink = forceRightFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(null) }
         val mfgSink = manufacturerFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(null) }
+        val batterySink = batteryFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(null) }
         bridges[dn] = scope.launch {
             // mirror power into the stable sink
             launch { m.power.collect { sink.value = it } }
@@ -174,8 +180,9 @@ class AntPowerManager(private val context: Context) {
             launch { m.tePs.collect { tePsSink.value = it } }
             launch { m.forceAngleLeft.collect { forceLeftSink.value = it } }
             launch { m.forceAngleRight.collect { forceRightSink.value = it } }
-            // Brand (identity): mirror once known; never push null back (survives reconnect).
+            // Brand + battery (identity-ish): mirror once known; never push null back.
             launch { m.manufacturerName.collect { if (it != null) mfgSink.value = it } }
+            launch { m.batteryStatus.collect { if (it != null) batterySink.value = it } }
             // watchdog: expire stale values (no event for >5s) so the FIT records a
             // gap, not frozen watts. Both child launches live under this one
             // bridges[dn] job, so cancelling it stops the mirror and the watchdog.

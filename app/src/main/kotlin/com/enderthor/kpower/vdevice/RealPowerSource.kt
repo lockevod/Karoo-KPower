@@ -11,6 +11,16 @@ import com.enderthor.kpower.BuildConfig
 private sealed interface Sample {
     @JvmInline value class Power(val value: Double) : Sample
     @JvmInline value class Cadence(val value: Double) : Sample
+    @JvmInline value class Battery(val code: Int?) : Sample
+}
+
+/** ANT+ battery status code (1=New..5=Critical) -> karoo-ext BatteryStatus. Unknown -> GOOD (don't alarm). */
+private fun batteryStatusOf(code: Int?): BatteryStatus = when (code) {
+    1 -> BatteryStatus.NEW
+    2, 3 -> BatteryStatus.GOOD
+    4 -> BatteryStatus.LOW
+    5 -> BatteryStatus.CRITICAL
+    else -> BatteryStatus.GOOD
 }
 
 class RealPowerSource(
@@ -48,7 +58,9 @@ class RealPowerSource(
                 delay(2000)
                 emitter.onNext(OnConnectionStatus(ConnectionStatus.CONNECTED))
                 delay(1000)
-                emitter.onNext(OnBatteryStatus(BatteryStatus.GOOD))
+                // Initial battery from the last-known 0x52 code (real value once the meter has sent
+                // one; GOOD until then). Live updates come through the merged collector below.
+                emitter.onNext(OnBatteryStatus(batteryStatusOf(antManager.batteryFlow(deviceNumber).value)))
                 delay(1000)
                 emitter.onNext(OnManufacturerInfo(ManufacturerInfo("Enderthor", "1234", "POWER-REAL-$deviceNumber")))
 
@@ -61,9 +73,11 @@ class RealPowerSource(
                 // transitions are driven ONLY by power within this single collector (cadence
                 // never writes `connected`) so there is no shared-state race.
                 var connected = true
+                var lastBattery: Int? = antManager.batteryFlow(deviceNumber).value
                 merge(
                     antManager.powerFlow(deviceNumber).map { Sample.Power(it) },
                     antManager.cadenceFlow(deviceNumber).map { Sample.Cadence(it) },
+                    antManager.batteryFlow(deviceNumber).map { Sample.Battery(it) },
                 ).collect { sample ->
                     when (sample) {
                         is Sample.Power -> {
@@ -101,6 +115,13 @@ class RealPowerSource(
                                         )
                                     )
                                 )
+                            }
+                        }
+                        is Sample.Battery -> {
+                            // Real battery from page 0x52; emit only on change (it's slow).
+                            if (sample.code != null && sample.code != lastBattery) {
+                                lastBattery = sample.code
+                                emitter.onNext(OnBatteryStatus(batteryStatusOf(sample.code)))
                             }
                         }
                     }

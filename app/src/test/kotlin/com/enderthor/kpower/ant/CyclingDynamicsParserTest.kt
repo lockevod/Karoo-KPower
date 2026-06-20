@@ -166,6 +166,14 @@ class CyclingDynamicsParserTest {
         assertEquals("Garmin", AntManufacturers.name(d.manufacturerId))
     }
 
+    @Test fun parseBatteryStatus_readsByte6Bits() {
+        // byte6 bits4-6 = status. 0x20 -> (0x20>>4)&7 = 2 = Good. 0x40 -> 4 = Low. 0x50 -> 5 = Critical.
+        assertEquals(2, CyclingDynamicsParser.parseBatteryStatus(bytes(0x52, 0xFF, 0, 0, 0, 0, 0x20, 0xFF)))
+        assertEquals(4, CyclingDynamicsParser.parseBatteryStatus(bytes(0x52, 0xFF, 0, 0, 0, 0, 0x40, 0xFF)))
+        assertNull(CyclingDynamicsParser.parseBatteryStatus(bytes(0x52, 0xFF, 0, 0, 0, 0, 0x00, 0xFF))) // 0 invalid
+        assertNull(CyclingDynamicsParser.parseBatteryStatus(bytes(0x10, 0, 0, 0, 0, 0, 0, 0)))           // wrong page
+    }
+
     @Test fun parseManufacturer_unknownId_fallsBack() {
         // dev 47436: manufacturer 0x0043 = 67 (not in the table) -> "ANT #67".
         val d = CyclingDynamicsParser.parseManufacturer(bytes(0x50, 0xFF, 0xFF, 0xFF, 0x43, 0x00, 0x25, 0x00))!!

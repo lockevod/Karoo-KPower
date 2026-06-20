@@ -38,6 +38,9 @@ class RawAntPowerMeter(
     /** Brand name from the 0x50 manufacturer page; null until seen. Device identity — survives reset. */
     private val _manufacturerName = MutableStateFlow<String?>(null)
     val manufacturerName: StateFlow<String?> = _manufacturerName.asStateFlow()
+    /** Battery status code from common page 0x52 (1=New..5=Critical); null until seen. Survives reset. */
+    private val _batteryStatus = MutableStateFlow<Int?>(null)
+    val batteryStatus: StateFlow<Int?> = _batteryStatus.asStateFlow()
 
     /** Latest parsed Cycling Dynamics models; null until first seen / after a dropout reset. */
     val forceAngleLeft: StateFlow<ForceAngleData?> = _forceAngleLeft.asStateFlow()
@@ -155,6 +158,10 @@ class RawAntPowerMeter(
                 CyclingDynamicsParser.parseManufacturer(p)?.let {
                     _manufacturerName.value = AntManufacturers.name(it.manufacturerId)
                 }
+            }
+            CyclingDynamicsParser.PAGE_BATTERY -> {
+                // Slow identity-ish status; don't touch lastEventMs and survive reset().
+                CyclingDynamicsParser.parseBatteryStatus(p)?.let { _batteryStatus.value = it }
             }
         }
     }
