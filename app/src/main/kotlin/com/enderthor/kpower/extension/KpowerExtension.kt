@@ -110,9 +110,11 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
             // Double (null -> NaN -> `---`). These sinks survive meter reconnect: the bridges[dn]
             // coroutine re-mirrors each new RawAntPowerMeter into the same MutableStateFlow, so the
             // field never freezes.
-            DynamicsDataType(extension, dynFieldTypeId("balance"), 0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.balanceFlow(dn) },
-            DynamicsDataType(extension, dynFieldTypeId("te"), 0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.tePsFlow(dn).map { it?.teLeftPct ?: Double.NaN } },
-            DynamicsDataType(extension, dynFieldTypeId("ps"), 0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.tePsFlow(dn).map { it?.psLeftPct ?: Double.NaN } },
+            // Two-sided dynamics shown as graphical "L/R" (e.g. "47/53"): balance, torque
+            // effectiveness, pedal smoothness. Left value first (left pedal), right second.
+            DualValueDataType(extension, dynFieldTypeId("balance"), 0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.balanceFlow(dn).map { r -> if (r.isNaN()) null to null else (100.0 - r) to r } },
+            DualValueDataType(extension, dynFieldTypeId("te"), 0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.tePsFlow(dn).map { it?.teLeftPct to it?.teRightPct } },
+            DualValueDataType(extension, dynFieldTypeId("ps"), 0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.tePsFlow(dn).map { it?.psLeftPct to it?.psRightPct } },
             DynamicsDataType(extension, dynFieldTypeId("pp-left"), 0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.forceLeftFlow(dn).map { it?.startAngleDeg ?: Double.NaN } },
             DynamicsDataType(extension, dynFieldTypeId("pp-right"), 0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.forceRightFlow(dn).map { it?.startAngleDeg ?: Double.NaN } },
             DynamicsDataType(extension, dynFieldTypeId("peakpp-left"), 0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.forceLeftFlow(dn).map { it?.startPeakDeg ?: Double.NaN } },
