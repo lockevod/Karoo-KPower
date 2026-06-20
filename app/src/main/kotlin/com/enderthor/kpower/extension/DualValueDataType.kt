@@ -83,7 +83,16 @@ class DualValueDataType(
                 .distinctUntilChanged()
                 .collect { (enabled, pair) ->
                     val (l, r) = pair
-                    render(if (!enabled || (l == null && r == null)) "--" else "${fmt(l)}/${fmt(r)}")
+                    // Show "L/R" only when BOTH sides exist. A single side shows just that number —
+                    // covers combined pedal smoothness (0x13 b5=0xFE → left carries the COMBINED
+                    // value, right is null) and single-sided meters, instead of a confusing "24/–".
+                    val text = when {
+                        !enabled || (l == null && r == null) -> "--"
+                        l == null -> fmt(r)
+                        r == null -> fmt(l)
+                        else -> "${fmt(l)}/${fmt(r)}"
+                    }
+                    render(text)
                 }
         }
         emitter.setCancellable { scope.cancel() }
