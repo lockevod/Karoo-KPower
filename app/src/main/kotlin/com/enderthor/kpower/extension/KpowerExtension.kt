@@ -31,6 +31,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.shareIn
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.coroutines.coroutineContext
@@ -91,20 +93,32 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
     // resolve a meter's friendly label for the reconnect Device name.
     @Volatile private var savedMetersSnapshot: List<com.enderthor.kpower.ant.SavedMeter> = emptyList()
 
+    // ONE shared saved-meters flow for ALL data fields. Each placed field used to spin up its own
+    // antMetersFlow() collector (a JSON decode per DataStore emission) twice over — ~34 decodes per
+    // pref write with all fields placed. shareIn collapses that to a single upstream decode fanned
+    // out to every field; the cheap enabled-gate is derived once. WhileSubscribed stops it shortly
+    // after the last field is removed, so it costs nothing when no field is on a page.
+    private val sharedMeters by lazy {
+        applicationContext.antMetersFlow().shareIn(serviceScope, SharingStarted.WhileSubscribed(5_000), replay = 1)
+    }
+    private val sharedEnabledGate by lazy {
+        sharedMeters.map { ms -> ms.any { it.enabled } }.distinctUntilChanged()
+    }
+
     override val types: List<DataTypeImpl> by lazy {
         listOf(
             EstimatedPowerDataType(extension, TYPE_EST_INSTANT, engine) { it.instantW },
             EstimatedPowerDataType(extension, TYPE_EST_3S, engine) { it.power3sW },
             EstimatedPowerDataType(extension, TYPE_EST_NP, engine) { it.npW },
             EstimatedPowerDataType(extension, TYPE_EST_AVG, engine) { it.avgW },
-            RealPowerDataType(extension, realFieldTypeId(0, "power"), 0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.powerFlow(dn) },
-            RealPowerDataType(extension, realFieldTypeId(0, "3s"),    0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.power3sFlow(dn) },
-            RealPowerDataType(extension, realFieldTypeId(0, "np"),    0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.npFlow(dn) },
-            RealPowerDataType(extension, realFieldTypeId(0, "avg"),   0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.avgFlow(dn) },
-            RealPowerDataType(extension, realFieldTypeId(0, "max"),     0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.maxFlow(dn) },
-            RealPowerDataType(extension, realFieldTypeId(0, "10s"),     0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.power10sFlow(dn) },
-            RealPowerDataType(extension, realFieldTypeId(0, "cadence"), 0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.cadenceFlow(dn) },
-            RealPowerDataType(extension, realFieldTypeId(0, "torque"),  0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.torqueFlow(dn) },
+            RealPowerDataType(extension, realFieldTypeId(0, "power"), 0, { sharedEnabledGate }, { sharedMeters }) { dn -> antManager.powerFlow(dn) },
+            RealPowerDataType(extension, realFieldTypeId(0, "3s"),    0, { sharedEnabledGate }, { sharedMeters }) { dn -> antManager.power3sFlow(dn) },
+            RealPowerDataType(extension, realFieldTypeId(0, "np"),    0, { sharedEnabledGate }, { sharedMeters }) { dn -> antManager.npFlow(dn) },
+            RealPowerDataType(extension, realFieldTypeId(0, "avg"),   0, { sharedEnabledGate }, { sharedMeters }) { dn -> antManager.avgFlow(dn) },
+            RealPowerDataType(extension, realFieldTypeId(0, "max"),     0, { sharedEnabledGate }, { sharedMeters }) { dn -> antManager.maxFlow(dn) },
+            RealPowerDataType(extension, realFieldTypeId(0, "10s"),     0, { sharedEnabledGate }, { sharedMeters }) { dn -> antManager.power10sFlow(dn) },
+            RealPowerDataType(extension, realFieldTypeId(0, "cadence"), 0, { sharedEnabledGate }, { sharedMeters }) { dn -> antManager.cadenceFlow(dn) },
+            RealPowerDataType(extension, realFieldTypeId(0, "torque"),  0, { sharedEnabledGate }, { sharedMeters }) { dn -> antManager.torqueFlow(dn) },
             // Live cycling-dynamics fields (slot 0), gated on "a meter is recorded" (saved meters
             // list non-empty). Each metricFlowFor maps a STABLE manager-level dynamics sink to a
             // Double (null -> NaN -> `---`). These sinks survive meter reconnect: the bridges[dn]
@@ -112,13 +126,13 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
             // field never freezes.
             // Two-sided dynamics shown as graphical "L/R" (e.g. "47/53"): balance, torque
             // effectiveness, pedal smoothness. Left value first (left pedal), right second.
-            DualValueDataType(extension, dynFieldTypeId("balance"), 0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.balanceFlow(dn).map { r -> if (r.isNaN()) null to null else (100.0 - r) to r } },
-            DualValueDataType(extension, dynFieldTypeId("te"), 0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.tePsFlow(dn).map { it?.teLeftPct to it?.teRightPct } },
-            DualValueDataType(extension, dynFieldTypeId("ps"), 0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.tePsFlow(dn).map { it?.psLeftPct to it?.psRightPct } },
-            DynamicsDataType(extension, dynFieldTypeId("pp-left"), 0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.forceLeftFlow(dn).map { it?.startAngleDeg ?: Double.NaN } },
-            DynamicsDataType(extension, dynFieldTypeId("pp-right"), 0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.forceRightFlow(dn).map { it?.startAngleDeg ?: Double.NaN } },
-            DynamicsDataType(extension, dynFieldTypeId("peakpp-left"), 0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.forceLeftFlow(dn).map { it?.startPeakDeg ?: Double.NaN } },
-            DynamicsDataType(extension, dynFieldTypeId("peakpp-right"), 0, { applicationContext.antMetersFlow().map { ms -> ms.any { it.enabled } } }, { applicationContext.antMetersFlow() }) { dn -> antManager.forceRightFlow(dn).map { it?.startPeakDeg ?: Double.NaN } },
+            DualValueDataType(extension, dynFieldTypeId("balance"), 0, { sharedEnabledGate }, { sharedMeters }) { dn -> antManager.balanceFlow(dn).map { r -> if (r.isNaN()) null to null else (100.0 - r) to r } },
+            DualValueDataType(extension, dynFieldTypeId("te"), 0, { sharedEnabledGate }, { sharedMeters }) { dn -> antManager.tePsFlow(dn).map { it?.teLeftPct to it?.teRightPct } },
+            DualValueDataType(extension, dynFieldTypeId("ps"), 0, { sharedEnabledGate }, { sharedMeters }) { dn -> antManager.tePsFlow(dn).map { it?.psLeftPct to it?.psRightPct } },
+            DynamicsDataType(extension, dynFieldTypeId("pp-left"), 0, { sharedEnabledGate }, { sharedMeters }) { dn -> antManager.forceLeftFlow(dn).map { it?.startAngleDeg ?: Double.NaN } },
+            DynamicsDataType(extension, dynFieldTypeId("pp-right"), 0, { sharedEnabledGate }, { sharedMeters }) { dn -> antManager.forceRightFlow(dn).map { it?.startAngleDeg ?: Double.NaN } },
+            DynamicsDataType(extension, dynFieldTypeId("peakpp-left"), 0, { sharedEnabledGate }, { sharedMeters }) { dn -> antManager.forceLeftFlow(dn).map { it?.startPeakDeg ?: Double.NaN } },
+            DynamicsDataType(extension, dynFieldTypeId("peakpp-right"), 0, { sharedEnabledGate }, { sharedMeters }) { dn -> antManager.forceRightFlow(dn).map { it?.startPeakDeg ?: Double.NaN } },
         )
     }
 

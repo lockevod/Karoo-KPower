@@ -169,12 +169,15 @@ class CyclingDynamicsParserTest {
         assertEquals("Rally 200", antDeviceDisplayName(d.manufacturerId, d.modelNumber))
     }
 
-    @Test fun parseBatteryStatus_readsByte6Bits() {
-        // byte6 bits4-6 = status. 0x20 -> (0x20>>4)&7 = 2 = Good. 0x40 -> 4 = Low. 0x50 -> 5 = Critical.
-        assertEquals(2, CyclingDynamicsParser.parseBatteryStatus(bytes(0x52, 0xFF, 0, 0, 0, 0, 0x20, 0xFF)))
-        assertEquals(4, CyclingDynamicsParser.parseBatteryStatus(bytes(0x52, 0xFF, 0, 0, 0, 0, 0x40, 0xFF)))
-        assertNull(CyclingDynamicsParser.parseBatteryStatus(bytes(0x52, 0xFF, 0, 0, 0, 0, 0x00, 0xFF))) // 0 invalid
-        assertNull(CyclingDynamicsParser.parseBatteryStatus(bytes(0x10, 0, 0, 0, 0, 0, 0, 0)))           // wrong page
+    @Test fun parseBatteryStatus_readsByte7DescriptiveBits() {
+        // Status = byte7 bits4-6 (Descriptive Bit Field). byte6 is fractional voltage and must be
+        // IGNORED. 0x20 -> 2 = Good, 0x40 -> 4 = Low, 0x50 -> 5 = Critical.
+        assertEquals(2, CyclingDynamicsParser.parseBatteryStatus(bytes(0x52, 0xFF, 0, 0, 0, 0, 0xFF, 0x20)))
+        assertEquals(4, CyclingDynamicsParser.parseBatteryStatus(bytes(0x52, 0xFF, 0, 0, 0, 0, 0xFF, 0x40)))
+        assertEquals(5, CyclingDynamicsParser.parseBatteryStatus(bytes(0x52, 0xFF, 0, 0, 0, 0, 0xFF, 0x50)))
+        // byte6 garbage must not be read as status; byte7 status 0 -> invalid.
+        assertNull(CyclingDynamicsParser.parseBatteryStatus(bytes(0x52, 0xFF, 0, 0, 0, 0, 0x20, 0x00)))
+        assertNull(CyclingDynamicsParser.parseBatteryStatus(bytes(0x10, 0, 0, 0, 0, 0, 0, 0)))   // wrong page
     }
 
     @Test fun parseManufacturer_knownBrand_and_unknownFallback() {

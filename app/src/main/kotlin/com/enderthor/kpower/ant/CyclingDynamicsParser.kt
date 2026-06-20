@@ -98,11 +98,12 @@ object CyclingDynamicsParser {
         return TorqueBarycenterData(angleDeg = if (raw == 0xFF) null else raw * 0.5 + 30.0)
     }
 
-    /** Common page 82 (0x52): battery status code in byte 6 bits 4-6 (1=New, 2=Good, 3=Ok, 4=Low,
-     *  5=Critical). Returns the code 1..5, or null when absent/invalid. */
+    /** Common page 82 (0x52): battery status is in the byte-7 Descriptive Bit Field, bits 4-6
+     *  (1=New, 2=Good, 3=Ok, 4=Low, 5=Critical). Byte 6 is the fractional voltage — NOT the status.
+     *  Returns the code 1..5, or null when absent/invalid. */
     fun parseBatteryStatus(p: ByteArray): Int? {
         if (p.size < 8 || p.u(0) != PAGE_BATTERY) return null
-        val status = (p.u(6) shr 4) and 0x07
+        val status = (p.u(7) shr 4) and 0x07
         return if (status in 1..5) status else null
     }
 
