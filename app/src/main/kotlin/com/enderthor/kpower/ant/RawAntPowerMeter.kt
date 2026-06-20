@@ -156,7 +156,8 @@ class RawAntPowerMeter(
                 // Device identity (brand). Not a "live" value, so it does NOT update lastEventMs and
                 // is not cleared by reset()/expireIfStale.
                 CyclingDynamicsParser.parseManufacturer(p)?.let {
-                    _manufacturerName.value = AntManufacturers.name(it.manufacturerId)
+                    // Garmin model name (e.g. "Rally 200") when known, else the brand ("Wahoo"…).
+                    _manufacturerName.value = antDeviceDisplayName(it.manufacturerId, it.modelNumber)
                 }
             }
             CyclingDynamicsParser.PAGE_BATTERY -> {

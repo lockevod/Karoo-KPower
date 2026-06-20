@@ -159,11 +159,14 @@ class CyclingDynamicsParserTest {
         assertNull(CyclingDynamicsParser.torquePower(prev, curr))
     }
 
-    @Test fun parseManufacturer_garmin_realCapture() {
-        // dev 6593: 50 FF FF 44 01 00 FA 0D -> manufacturer LE bytes4-5 = 0x0001 = Garmin.
+    @Test fun parseManufacturer_garmin_rally_realCapture() {
+        // dev 6593: 50 FF FF 44 01 00 FA 0D -> manufacturer 0x0001 = Garmin, model 0x0DFA = 3578.
         val d = CyclingDynamicsParser.parseManufacturer(bytes(0x50, 0xFF, 0xFF, 0x44, 0x01, 0x00, 0xFA, 0x0D))!!
         assertEquals(1, d.manufacturerId)
+        assertEquals(3578, d.modelNumber)
         assertEquals("Garmin", AntManufacturers.name(d.manufacturerId))
+        // Garmin model code 3578 resolves to the product name.
+        assertEquals("Rally 200", antDeviceDisplayName(d.manufacturerId, d.modelNumber))
     }
 
     @Test fun parseBatteryStatus_readsByte6Bits() {
@@ -174,10 +177,11 @@ class CyclingDynamicsParserTest {
         assertNull(CyclingDynamicsParser.parseBatteryStatus(bytes(0x10, 0, 0, 0, 0, 0, 0, 0)))           // wrong page
     }
 
-    @Test fun parseManufacturer_unknownId_fallsBack() {
-        // dev 47436: manufacturer 0x0043 = 67 (not in the table) -> "ANT #67".
+    @Test fun parseManufacturer_knownBrand_and_unknownFallback() {
+        // dev 47436: manufacturer 0x0043 = 67 = Bkool (a trainer); non-Garmin -> brand name.
         val d = CyclingDynamicsParser.parseManufacturer(bytes(0x50, 0xFF, 0xFF, 0xFF, 0x43, 0x00, 0x25, 0x00))!!
         assertEquals(67, d.manufacturerId)
-        assertEquals("ANT #67", AntManufacturers.name(d.manufacturerId))
+        assertEquals("Bkool", antDeviceDisplayName(d.manufacturerId, d.modelNumber))
+        assertEquals("ANT #999", AntManufacturers.name(999))   // truly unknown id still falls back
     }
 }
