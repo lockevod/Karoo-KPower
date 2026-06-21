@@ -7,6 +7,6 @@
   "latestVersionCode": 202606131,
   "developer": "Enderthor",
   "description": "Adds a virtual power meter to your Karoo, estimating power from a physics model when you don't have a real power meter.",
-  "releaseNotes": "Big update — your estimated power changes a bit (more accurate physics + rolling resistance that adapts to the surface). What's new: several bikes auto-linked to your Karoo ride profiles; record a real ANT+ power meter with full Cycling Dynamics the Karoo can't log itself (L/R balance, torque effectiveness, pedal smoothness, power phase); and optional field calibration that measures your bike's Crr/CdA from a meter ride. Your existing setup keeps working — just review your bike's values. Coming from a version older than 1.9.5? Uninstall the old one first.",
+  "releaseNotes": "More accurate power. New: multi-bike per ride profile, real ANT+ meter with Cycling Dynamics, and field calibration of Crr/CdA. Coming from <1.9.5? Uninstall first.",
   "tags": ["entertainment","health","performance"]
 }
