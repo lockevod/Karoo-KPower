@@ -23,7 +23,11 @@ class EstimatedPowerSource(
         activeScope?.cancel()
         val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         activeScope = scope
-        val token = this
+        // Fresh token PER connect (not `this`): if the host rebinds (a new connect before the old
+        // emitter's cancellable runs), the engine's acquire/release set then holds two distinct tokens,
+        // so the old cancellable releases only ITS token and can't stop the engine / mark the device
+        // disconnected while the new connection is still live.
+        val token = Any()
         engine.acquire(token)
         engine.setVirtualDeviceConnected(token, true)
 
