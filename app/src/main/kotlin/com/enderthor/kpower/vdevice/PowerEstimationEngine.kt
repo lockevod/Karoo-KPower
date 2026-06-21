@@ -20,7 +20,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.sample
@@ -39,8 +39,18 @@ import com.enderthor.kpower.surface.SurfaceConditionReader
 import com.enderthor.kpower.surface.effectiveSurface
 import com.enderthor.kpower.extension.*
 import timber.log.Timber
-import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
+
+/** The Karoo's internal temperature sensor reads several °C above ambient (it sits inside the warm
+ *  device); subtract this when using it as the air-density fallback so density isn't underestimated.
+ *  Mid-range of the observed +3..+8 °C bias. Only applied when real weather temperature is absent. */
+private const val KAROO_TEMP_SENSOR_BIAS_C = 5.0
+
+/** Fallback rider mass (kg) when the Karoo UserProfile can't be read at pipeline start. */
+private const val DEFAULT_USER_MASS_KG = 75.0
+
+/** Max time to hold the last grade across a stream dropout before falling back to flat (0%). */
+private const val GRADE_MAX_HOLD_MS = 60_000L
 
 private data class EngineEnvAndConfig(
     val values: RealKarooValues,
@@ -84,6 +94,21 @@ class PowerEstimationEngine(
 
     private val accelerationTracker = AccelerationTracker()
     private val gradeSmoother = GradeSmoother()
+    // Last good grade %/elevation m, held across stream dropouts (a missing stream != 0% / sea level).
+    @Volatile private var lastGoodSlope = 0.0
+    @Volatile private var lastGoodElevation = 0.0
+    @Volatile private var lastSlopeMs = 0L   // for the staleness bound below
+
+    // Field calibration: derives Crr & CdA from the REAL meter vs the model, accumulated over a
+    // comparison session. realPowerProvider is set by the extension (active meter's live power, NaN if none).
+    private val fieldCalibrator = FieldCalibrator()
+    @Volatile var realPowerProvider: (() -> Double)? = null
+
+    /** Best fit (CdA + per-surface Crr with std errors) from the current session, or null if too few. */
+    fun calibrationFit(): FieldCalibrator.Fit? = fieldCalibrator.result()
+
+    /** Discard accumulated calibration samples (e.g. the active bike changed mid-ride). */
+    fun resetCalibration() = fieldCalibrator.reset()
     private val powerSmoother = PowerSmoother()
     private val cadenceGate = CadenceGate()
     private val surfaceReader by lazy { SurfaceConditionReader(context) }
@@ -143,6 +168,7 @@ class PowerEstimationEngine(
         _power3sW.value = Double.NaN
         _npW.value = Double.NaN
         _avgW.value = Double.NaN
+        fieldCalibrator.reset()   // a new ride → a fresh calibration session
     }
 
     @OptIn(FlowPreview::class)
@@ -154,9 +180,12 @@ class PowerEstimationEngine(
         val engineScope = CoroutineScope(Dispatchers.IO + job)
 
         pipelineJob = engineScope.launch {
-            val userProfile = karooSystem.consumerFlow<UserProfile>().first()
-            val userMass = userProfile.weight.toDouble()
-            val userFtp = userProfile.ftp
+            // Bounded: if the UserProfile consumer never emits (service not bound / transient AIDL
+            // failure) we must NOT hang the whole estimation pipeline forever — degrade to a default
+            // mass (FTP 0 → config's own ftp is used) so the estimate still runs.
+            val userProfile = withTimeoutOrNull(5_000) { karooSystem.consumerFlow<UserProfile>().first() }
+            val userMass = userProfile?.weight?.toDouble() ?: DEFAULT_USER_MASS_KG
+            val userFtp = userProfile?.ftp ?: 0
 
             val powerConfigFlow = context.loadPreferencesFlow()
                 .catch { e ->
@@ -236,28 +265,57 @@ class PowerEstimationEngine(
                 )
                 EngineEnvAndConfig(karooValues, configs, env.first, env.second, karooTemp)
             }
-                .sample(900.milliseconds)
+                .sample(1.seconds)   // match the 1 Hz metric tick that reads latestInstantW (no rate skew)
                 .collect { bundle ->
                     val configs = bundle.configs
                     val config = com.enderthor.kpower.data.resolveActiveConfig(configs, activeProfileIdFlow.value) ?: return@collect
                     val nowMs = System.currentTimeMillis()
                     val speedMs = bundle.values.speed.getValueOrDefault()
                     val acceleration = accelerationTracker.update(speedMs, nowMs)
-                    val slopePercent = gradeSmoother.update(bundle.values.slope.getValueOrDefault(), nowMs)
+                    // HOLD the last good grade/elevation across stream dropouts instead of treating a
+                    // missing stream as 0 — a momentary grade dropout would otherwise read as 0% (flat)
+                    // and collapse the gravity term mid-climb (and elevation→0 = sea-level air density).
+                    val slopeStream = bundle.values.slope
+                    if (slopeStream is StreamState.Streaming) {
+                        lastGoodSlope = slopeStream.getValueOrDefault(); lastSlopeMs = nowMs
+                    } else if (lastSlopeMs != 0L && nowMs - lastSlopeMs > GRADE_MAX_HOLD_MS) {
+                        // Don't hold a stale grade forever (e.g. a steep ramp pinned through a long
+                        // tunnel/GPS outage would over-estimate); after the bound, fall back to flat.
+                        lastGoodSlope = 0.0
+                    }
+                    val slopePercent = gradeSmoother.update(lastGoodSlope, nowMs)
+                    val elevStream = bundle.values.elevation
+                    if (elevStream is StreamState.Streaming) lastGoodElevation = elevStream.getValueOrDefault()
+                    val heldElevation = lastGoodElevation
                     val tempC: Double? = bundle.weatherTempC ?: run {
                         if (config.useKarooTemp && bundle.karooTemp is StreamState.Streaming)
-                            bundle.karooTemp.getValueOrDefault() - 5.0 else null
+                            bundle.karooTemp.getValueOrDefault() - KAROO_TEMP_SENSOR_BIAS_C else null
                     }
                     val pressurePa: Double? = bundle.weatherPressureHpa?.times(100.0)
 
-                    val rawPower = calculatePowerBike(
-                        userMass, config, bundle.values, slopePercent, tempC, pressurePa, acceleration, userFtp
-                    ).calculateCyclingWattage()
-                    val ema = powerSmoother.update(rawPower, nowMs)
+                    val est = calculatePowerBike(
+                        userMass, config, bundle.values, slopePercent, heldElevation, acceleration, tempC, pressurePa, userFtp
+                    )
+                    // calculateCyclingWattage returns the cap applied to the SIGNED total (so a big
+                    // acceleration spike can't show an absurd instant value); we floor it to ≥0 here.
+                    // Floor PER SAMPLE — a real power meter never reports negative, so for the comparison
+                    // (and NP, which 4th-powers values) to be apples-to-apples the estimate must floor too.
+                    // GPS-acceleration noise is handled by AccelerationTracker's EMA, not by allowing
+                    // negative power (NP can't average signed samples — (−x)⁴ = (+x)⁴).
+                    val rawSigned = est.calculateCyclingWattage()
+                    val instantW = maxOf(0.0, rawSigned)
+                    // Field calibration: while recording with a real meter present, accumulate the
+                    // CdA + per-surface-Crr least-squares regression of REAL power vs the model regressors.
+                    if (recording) realPowerProvider?.invoke()?.let { rp ->
+                        est.calibrationRegressors(rp)?.let { (y, x1, x2) ->
+                            fieldCalibrator.add(y, x1, x2, resolveSurfaceForCalc(config))
+                        }
+                    }
+                    val ema = powerSmoother.update(instantW, nowMs)
 
-                    latestInstantW = rawPower
-                    _instantW.value = rawPower
-                    _powerEmaW.value = ema
+                    latestInstantW = instantW                  // floored → metrics (incl. NP) match a real meter
+                    _instantW.value = instantW                 // instant field: non-negative display
+                    _powerEmaW.value = ema                     // already >= 0 (floored input)
                     if (!_hasSample.value) _hasSample.value = true
                 }
         }
@@ -273,10 +331,10 @@ class PowerEstimationEngine(
                     ma3s.reset(); npCalc.reset(); runningAvg.reset()
                     pendingReset = false
                 }
-                val w = latestInstantW
+                val w = latestInstantW   // already floored to ≥0 (matches a real meter for NP/avg/3s)
                 if (w.isNaN()) continue
-                // The 3s moving average accumulates every tick by design (NOT gated by
-                // `recording`, unlike NP/avg below).
+                // The 3s moving average accumulates every tick by design (NOT gated by `recording`,
+                // unlike NP/avg below).
                 _power3sW.value = ma3s.add(w)
                 if (recording) {
                     npCalc.add(w)
@@ -295,6 +353,9 @@ class PowerEstimationEngine(
         latestInstantW = Double.NaN
         _powerEmaW.value = Double.NaN
         _instantW.value = Double.NaN
+        // Drop held grade/elevation so an acquire→release→acquire within one process doesn't resume
+        // with a stale grade if the first sample after re-acquire is a dropout.
+        lastGoodSlope = 0.0; lastGoodElevation = 0.0; lastSlopeMs = 0L
     }
 
     private fun calculatePowerBike(
@@ -302,13 +363,13 @@ class PowerEstimationEngine(
         config: ConfigData,
         values: RealKarooValues,
         slopePercent: Double,
+        elevation: Double,
+        acceleration: Double,
         temperatureC: Double?,
         pressurePa: Double?,
-        acceleration: Double,
         userFtp: Int,
     ): CyclingWattageEstimator {
         val speed = values.speed.getValueOrDefault()
-        val elevation = values.elevation.getValueOrDefault()
         val finalHeadwind = values.headwind.getValueOrDefault()
 
         var isPedaling = true

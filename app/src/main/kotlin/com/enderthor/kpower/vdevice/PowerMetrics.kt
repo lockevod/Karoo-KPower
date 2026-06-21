@@ -10,6 +10,7 @@ import kotlin.math.pow
  * dentro de una sola actividad.
  */
 class MovingAverage(private val windowSamples: Int) {
+    init { require(windowSamples >= 1) { "windowSamples must be >= 1" } }
     private val buffer = DoubleArray(windowSamples)
     private var count = 0
     private var head = 0

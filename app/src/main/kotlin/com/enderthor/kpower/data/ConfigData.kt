@@ -30,6 +30,12 @@ const val SURFACE_MIN_INTERVAL_MS = 7_000L
 // al preset en vez de arrastrar una superficie obsoleta el resto de la ruta.
 const val SURFACE_MAX_AGE_MS = 120_000L
 const val WEATHER_MAX_AGE_MS = 30L * 60L * 1000L     // 30 minutes
+// Staleness bound for the SAVED weather stream consumed by the estimator. Generous on purpose: the
+// refresh loop already controls fetch freshness, and Open-Meteo's current.time is the (lagged, model-
+// stepped) OBSERVATION time, so a 1h window dropped just-fetched weather and silently reverted air
+// density to ISA. We only reject genuinely-ancient cache, plus a small future tolerance for clock skew.
+const val WEATHER_STREAM_MAX_AGE_MS = 3L * 60L * 60L * 1000L  // 3 hours
+const val WEATHER_STREAM_FUTURE_SKEW_MS = 60L * 60L * 1000L   // 1 hour (device-clock skew tolerance)
 const val WEATHER_CHECK_INTERVAL_MS = 60L * 1000L    // tick every minute
 const val WEATHER_RETRY_DELAY_MS = 5L * 60L * 1000L  // 5 min after a failure
 
@@ -45,8 +51,6 @@ data class RealKarooValues(
     val elevation: StreamState? = null,
     val cadence: StreamState? = null,
     val headwind: StreamState? = null,
-    val pressure: StreamState? = null,
-    val userWeight: StreamState? = null,
 )
 
 // Multiplicador de rodadura por superficie aplicado al Crr del neumático. Valores VALIDADOS EN
@@ -70,6 +74,26 @@ enum class TreadType(val baseCrr: Double, val label: String, val tubelessFactor:
     SLICK(0.005, "Road (slick)", 0.90),
     SEMI_SLICK(0.008, "Gravel (semi-slick)", 0.87),
     KNOBBY(0.012, "MTB (knobby)", 0.80),
+}
+
+// Unit Headwind broadcasts wind in. Its temperature/pressure are raw, but wind comes in the unit the
+// rider picked in Headwind. AUTO assumes Headwind's default (km/h metric / mph imperial, matching the
+// Karoo unit); pick a specific unit if you changed it in Headwind, so KPower converts to m/s correctly.
+enum class HeadwindWindUnit(val label: String) {
+    AUTO("Auto (Karoo units)"),
+    MS("m/s"),
+    KMH("km/h"),
+    MPH("mph"),
+    KNOTS("knots");
+
+    /** Convert a Headwind wind reading in this unit to m/s (AUTO → km/h metric / mph imperial). */
+    fun toMetersPerSecond(raw: Double, isImperial: Boolean): Double = when (this) {
+        AUTO -> if (isImperial) raw / 2.2369362920544 else raw / 3.6
+        MS -> raw
+        KMH -> raw / 3.6
+        MPH -> raw / 2.2369362920544
+        KNOTS -> raw / 1.9438444924406
+    }
 }
 
 enum class BikePosition(
@@ -100,8 +124,6 @@ data class ConfigData(
     val frontalArea: String,
     val powerLoss: String ,
     val headwindconf: String,
-    val isOpenWeather: Boolean,
-    val apikey: String,
     val ftp: String ,
     val surface: KarooSurface = KarooSurface.STANDARD,
     val isforcepower: Boolean = false,
@@ -135,6 +157,9 @@ data class ConfigData(
     // so a legacy config (JSON without this field) deserializes to the same look as before.
     // The rider picks from bikeDotColors in the editor.
     val dotColorArgb: Long = 0xFF888888L,
+    // Unit Headwind emits wind in (default AUTO = Karoo units). Lets KPower convert to m/s correctly
+    // if the rider changed Headwind's wind unit. Retrocompat: legacy JSON → AUTO.
+    val headwindWindUnit: HeadwindWindUnit = HeadwindWindUnit.AUTO,
 )
 
 // Curated, sunlight-readable dot colours for the bikes list: vivid, high-contrast hues spaced
@@ -153,10 +178,9 @@ val bikeDotColors: List<Long> = listOf(
 )
 
 
-//val previewConfigData = listOf(ConfigData(0,"default", true, "14.0","0.0095","0.8","0.9","2.2","0.0", false, "","200", KarooSurface.STANDARD,false))
 // Plantilla para configs NUEVAS: estrena modo simple y FTP del perfil (las configs
 // antiguas migradas usan los defaults retrocompatibles del data class).
-val previewConfigData = listOf(ConfigData(0,"Spark", true, "14.0","0.008","0.85","0.42","2.5","0.0", false, "","257", KarooSurface.GRAVEL, false, simpleMode = true, useProfileFtp = true))
+val previewConfigData = listOf(ConfigData(0,"Spark", true, "14.0","0.008","0.85","0.42","2.5","0.0","257", KarooSurface.GRAVEL, false, simpleMode = true, useProfileFtp = true))
 val defaultConfigData = Json.encodeToString(previewConfigData)
 
 /** The bike to use for the active Karoo profile: mapped profile → isActive → first. */

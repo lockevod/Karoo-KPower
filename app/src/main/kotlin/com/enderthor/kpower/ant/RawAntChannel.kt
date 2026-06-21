@@ -1,17 +1,26 @@
 package com.enderthor.kpower.ant
 
+import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.ServiceConnection
 import android.os.IBinder
+import androidx.core.content.ContextCompat
 import com.dsi.ant.AntService
 import com.dsi.ant.channel.AntChannel
 import com.dsi.ant.channel.AntChannelProvider
+import com.dsi.ant.channel.ChannelNotAvailableException
 import com.dsi.ant.channel.IAntChannelEventHandler
 import com.dsi.ant.channel.PredefinedNetwork
 import com.dsi.ant.message.ChannelId
 import com.dsi.ant.message.ChannelType
+import com.dsi.ant.message.EventCode
+import com.dsi.ant.message.HighPrioritySearchTimeout
+import com.dsi.ant.message.LowPrioritySearchTimeout
 import com.dsi.ant.message.fromant.BroadcastDataMessage
+import com.dsi.ant.message.fromant.ChannelEventMessage
 import com.dsi.ant.message.fromant.MessageFromAntType
 import com.dsi.ant.message.ipc.AntMessageParcel
 import kotlinx.coroutines.CoroutineScope
@@ -50,6 +59,12 @@ class RawAntChannel(
      */
     @Volatile private var failures = 0
 
+    /** Wall-clock of the last broadcast page. 0 = none yet. Drives the heartbeat watchdog: a meter that
+     *  goes silent while its channel stays nominally "tracking" (firmware quirk — no RX_SEARCH_TIMEOUT,
+     *  no death) would otherwise freeze the field at `---` for the rest of the ride (Ki2 uses the same
+     *  message-gap watchdog). 0 until the first page so the search-timeout path owns the never-tracked case. */
+    @Volatile private var lastPageMs = 0L
+
     /** Guards against two open() attempts running at once (death-retry racing a late rebind). CAS so
      *  the check-and-set is atomic — a plain volatile read-then-write let two callers both pass. */
     private val opening = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -79,12 +94,62 @@ class RawAntChannel(
             // Guard the bind/open race: a stop() that beat onServiceConnected must not open.
             if (!stopped) scope.launch { open() }
         }
-        override fun onServiceDisconnected(name: ComponentName?) { antService = null }
+        override fun onServiceDisconnected(name: ComponentName?) {
+            // The ANT Radio Service process died: the binder AND any acquired channel are dead. Null
+            // both so a stale channel can't be reused. Android keeps the binding and re-delivers
+            // onServiceConnected when the service restarts (which reopens); if the bind itself was lost,
+            // scheduleRebind re-attempts — without this, an OS-driven service restart killed real power
+            // for the rest of the ride (Ki2 recovers the same way via attemptBindToAntService).
+            antService = null
+            channel = null
+            if (!stopped) scheduleRebind("ant service disconnected")
+        }
     }
+
+    /** Channel-availability broadcasts: when the provider reports free channels and we currently have
+     *  none (a prior acquire hit ChannelNotAvailable), retry open() instead of giving up. */
+    private val providerReceiver = object : BroadcastReceiver() {
+        override fun onReceive(c: Context?, intent: Intent?) {
+            if (intent?.action != AntChannelProvider.ACTION_CHANNEL_PROVIDER_STATE_CHANGED) return
+            val n = intent.getIntExtra(AntChannelProvider.NUM_CHANNELS_AVAILABLE, 0)
+            if (n > 0 && !stopped && channel == null && !opening.get()) scope.launch { open() }
+        }
+    }
+    @Volatile private var providerRegistered = false
 
     fun start() {
         startSummaryLoop()
-        runCatching { AntService.bindService(context, conn) }
+        runCatching {
+            // EXPORTED: the broadcast comes from the ANT Radio Service (a separate app). ContextCompat
+            // picks the right registerReceiver overload across API levels (the flag is API 33+).
+            ContextCompat.registerReceiver(
+                context,
+                providerReceiver,
+                IntentFilter(AntChannelProvider.ACTION_CHANNEL_PROVIDER_STATE_CHANGED),
+                ContextCompat.RECEIVER_EXPORTED,
+            )
+            providerRegistered = true
+        }
+        bindAnt()
+    }
+
+    /** Bind the ANT Radio Service; if the bind is refused (false / throws), retry after a short delay
+     *  until it succeeds or stop() is called — mirrors Ki2's attemptBindToAntService. */
+    private fun bindAnt() {
+        if (stopped) return
+        val ok = runCatching { AntService.bindService(context, conn) }.getOrDefault(false)
+        if (!ok) scheduleRebind("bindService returned false")
+    }
+
+    private fun scheduleRebind(reason: String) {
+        if (stopped) return
+        scope.launch {
+            delay(REBIND_DELAY_MS)
+            if (stopped || antService != null) return@launch
+            Timber.w("RawAntChannel #%d rebind (%s)", deviceNumber, reason)
+            runCatching { context.unbindService(conn) }   // drop a half-up binding before re-binding
+            bindAnt()
+        }
     }
 
     /**
@@ -98,6 +163,19 @@ class RawAntChannel(
         scope.launch {
             while (true) {
                 delay(15_000)
+                // Heartbeat watchdog (always on, not gated on logging): if the channel is open and was
+                // delivering data but has gone SILENT for > HEARTBEAT_TIMEOUT_MS without a search-timeout
+                // or death, recycle it — covers meters that stop broadcasting while the channel still
+                // reads as tracking. Budget-exempt (reuses the search-timeout duty-cycle path). lastPageMs
+                // is reset to 0 so we don't recycle again until real data returns.
+                val lp = lastPageMs
+                if (!stopped && channel != null && !opening.get() && lp > 0L &&
+                    System.currentTimeMillis() - lp > HEARTBEAT_TIMEOUT_MS
+                ) {
+                    Timber.i("RawAntChannel #%d silent %dms — recycling", deviceNumber, System.currentTimeMillis() - lp)
+                    lastPageMs = 0L
+                    reopenAfterSearchTimeout("heartbeat")
+                }
                 if (com.enderthor.kpower.extension.FileLogTree.enabled && pageCounts.isNotEmpty()) {
                     val accumMoved = firstAccumPower >= 0 && lastAccumPower != firstAccumPower
                     Timber.tag("ANTLOG").d(
@@ -182,26 +260,56 @@ class RawAntChannel(
                     return
                 }
                 channel = ch
+                // Fresh channel: no page yet. Reset so the heartbeat watchdog can't recycle this new
+                // channel using a stale lastPageMs left over from the previous (dead) one before it has
+                // had a chance to (re-)acquire the meter.
+                lastPageMs = 0L
                 ch.setChannelEventHandler(object : IAntChannelEventHandler {
                     override fun onReceiveMessage(type: MessageFromAntType?, msg: AntMessageParcel?) {
-                        if (type == MessageFromAntType.BROADCAST_DATA && msg != null) {
-                            // Receiving a page proves the link is healthy — clear the failure budget
-                            // so a death hours later still gets a full set of retries.
-                            failures = 0
-                            runCatching {
-                                val payload = BroadcastDataMessage(msg).payload
-                                // Diagnostic ANT page logging — gated so it costs ~nothing when off.
-                                if (com.enderthor.kpower.extension.FileLogTree.enabled) logPage(payload)
-                                onPayload(payload)
+                        if (msg == null) return
+                        // Ignore late events from a channel we've already replaced: this handler belongs
+                        // to `ch`, but a reopen may have moved `channel` to a newer instance. Acting on a
+                        // stale event would tear down the new channel (and reset failures/lastPageMs from
+                        // a dead one). Only the current channel's events count.
+                        if (ch !== channel) return
+                        when (type) {
+                            MessageFromAntType.BROADCAST_DATA -> {
+                                // Receiving a page proves the link is healthy — clear the failure budget
+                                // so a death hours later still gets a full set of retries.
+                                failures = 0
+                                lastPageMs = System.currentTimeMillis()
+                                runCatching {
+                                    val payload = BroadcastDataMessage(msg).payload
+                                    // Diagnostic ANT page logging — gated so it costs ~nothing when off.
+                                    if (com.enderthor.kpower.extension.FileLogTree.enabled) logPage(payload)
+                                    onPayload(payload)
+                                }
                             }
+                            MessageFromAntType.CHANNEL_EVENT -> {
+                                // The finite low-priority search window expired (meter asleep / out of
+                                // range) or the channel closed: recycle + retry as a duty cycle so the
+                                // radio isn't pinned searching forever. Budget-exempt — sleeping meters
+                                // are normal and must keep retrying for the whole ride.
+                                // ONLY RX_SEARCH_TIMEOUT: CHANNEL_CLOSED also fires on OUR OWN close()
+                                // (reopenAfterSearchTimeout/reopenAfterDeath/stop), which would self-trigger
+                                // a second reopen and double-schedule open().
+                                val ev = runCatching { ChannelEventMessage(msg).eventCode }.getOrNull()
+                                if (ev == EventCode.RX_SEARCH_TIMEOUT) reopenAfterSearchTimeout(ev.toString())
+                            }
+                            else -> {}
                         }
                     }
-                    override fun onChannelDeath() { reopenAfterDeath() }
+                    override fun onChannelDeath() { if (ch === channel) reopenAfterDeath() }
                 })
                 ch.assign(ChannelType.SLAVE_RECEIVE_ONLY); delay(50)
                 ch.setChannelId(ChannelId(deviceNumber, 11, 0)); delay(50)  // SPECIFIC device, type 11
                 ch.setRfFrequency(57); delay(50)
                 ch.setPeriod(8182); delay(50)
+                // Bound the low-priority search: when it expires (meter asleep / out of range) the
+                // channel reports RX_SEARCH_TIMEOUT and reopenAfterSearchTimeout duty-cycles it, instead
+                // of the radio searching nonstop. Search priority is left at the default (lowest) so this
+                // additive read-only channel yields to the Karoo's own paired sensors.
+                runCatching { ch.setSearchTimeout(LowPrioritySearchTimeout.TWENTY_FIVE_SECONDS, HighPrioritySearchTimeout.DISABLED) }; delay(50)
                 // Re-check right before open(): a stop() during the configure delays must win.
                 if (stopped) {
                     runCatching { ch.close() }
@@ -214,15 +322,24 @@ class RawAntChannel(
                 if (com.enderthor.kpower.extension.FileLogTree.enabled)
                     Timber.tag("ANTLOG").d("dev=%d channel open (type=11 rf=57 period=8182)", deviceNumber)
             }.onFailure { e ->
-                Timber.e(e, "RawAntChannel #%d open failed", deviceNumber)
-                // Drop any half-acquired channel, then back off and retry — the failure is usually
-                // transient (service restarting). scheduleReopen() enforces the budget/backoff.
+                // Drop any half-acquired channel first.
                 val dead = channel
                 channel = null
                 runCatching { dead?.close() }
                 runCatching { dead?.unassign() }
                 runCatching { dead?.release() }
-                scheduleReopen(e.message ?: "open failure")
+                if (e is ChannelNotAvailableException) {
+                    // All ANT channels busy (Karoo's own sensors + others). Don't burn the failure
+                    // budget — providerReceiver retries open() when a channel frees up. Plus a long
+                    // budget-exempt backstop in case that broadcast is missed/coalesced (so the meter
+                    // can't be permanently dead).
+                    Timber.w("RawAntChannel #%d no channel available; awaiting provider", deviceNumber)
+                    scope.launch { delay(NO_CHANNEL_RETRY_MS); if (!stopped && channel == null && !opening.get()) open() }
+                } else {
+                    Timber.e(e, "RawAntChannel #%d open failed", deviceNumber)
+                    // Usually transient (service restarting); scheduleReopen() enforces budget/backoff.
+                    scheduleReopen(e.message ?: "open failure")
+                }
             }
         } finally {
             opening.set(false)
@@ -234,6 +351,24 @@ class RawAntChannel(
      * reopen. Shares the [failures] budget/backoff with open()-failure so a SERVICE_INITIALIZING
      * (ANT service restart) is ridden out rather than giving up after one try.
      */
+    /**
+     * Search window expired (or the channel closed) without finding the meter. Recycle the channel and
+     * retry after a short rest — a duty cycle that lets the radio breathe vs. searching nonstop. NOT
+     * counted against the failure budget: a sleeping meter is normal and must keep retrying all ride.
+     */
+    private fun reopenAfterSearchTimeout(reason: String) {
+        // Re-entrancy guard: if an open() is already in flight (or a reopen already nulled the channel),
+        // don't stack another delayed open().
+        if (stopped || (channel == null && opening.get())) return
+        val dead = channel
+        channel = null
+        runCatching { dead?.close() }
+        runCatching { dead?.unassign() }
+        runCatching { dead?.release() }
+        Timber.i("RawAntChannel #%d search idle (%s) — retry in %dms", deviceNumber, reason, SEARCH_REST_MS)
+        scope.launch { delay(SEARCH_REST_MS); if (!stopped) open() }
+    }
+
     private fun reopenAfterDeath() {
         Timber.w("RawAntChannel #%d death", deviceNumber)
         if (stopped) return
@@ -267,6 +402,7 @@ class RawAntChannel(
 
     fun stop() {
         stopped = true
+        if (providerRegistered) { runCatching { context.unregisterReceiver(providerReceiver) }; providerRegistered = false }
         scope.launch {
             val ch = channel
             channel = null
@@ -286,6 +422,10 @@ class RawAntChannel(
         const val MAX_FAILURES = 10
         const val REOPEN_BACKOFF_MS = 1000L
         const val MAX_BACKOFF_MS = 5000L
+        const val SEARCH_REST_MS = 5000L   // rest between low-priority search windows (duty cycle)
+        const val REBIND_DELAY_MS = 2000L  // wait before re-binding the ANT Radio Service
+        const val NO_CHANNEL_RETRY_MS = 15000L  // backstop retry if the provider broadcast is missed
+        const val HEARTBEAT_TIMEOUT_MS = 30000L // recycle a tracking channel that has gone silent this long
 
         /** Pages we know how to decode (parser pages + ANT+ common pages); others are UNKNOWN. */
         const val MAX_UNKNOWN_VARIANTS = 40   // cap distinct payloads logged per unknown page

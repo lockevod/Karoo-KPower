@@ -13,7 +13,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -24,15 +23,14 @@ import kotlin.time.Duration.Companion.seconds
 
 fun realFieldTypeId(slot: Int, metric: String) = "real-$metric-$slot"   // e.g. real-power-0, real-3s-0, real-np-0, real-avg-0
 
-/** Live metric of a real ANT+ meter slot; shows `---` when the gate is off (no meter enabled),
- *  no enabled meter is mapped to the slot, or the meter has no sample yet. [gateFlow] is the
- *  "a meter is enabled" gate (NOT comparison mode — the real meter is independent of it). */
+/** Live metric of THE active real ANT+ meter; shows `---` when no meter is enabled (null dn) and
+ *  SEARCHING when one is but has no sample yet. [activeDnFlow] is the single shared "active meter
+ *  device number (or null)" flow — computed once in KpowerExtension, NOT per field (avoids N
+ *  duplicated combine chains + Pair garbage; Ki2 resolves one currentDeviceId the same way). */
 class RealPowerDataType(
     extension: String,
     typeId: String,
-    private val slot: Int,
-    private val gateFlow: () -> Flow<Boolean>,
-    private val savedMetersFlow: () -> Flow<List<com.enderthor.kpower.ant.SavedMeter>>,
+    private val activeDnFlow: () -> Flow<Int?>,
     private val metricFlowFor: (deviceNumber: Int) -> StateFlow<Double>,
 ) : DataTypeImpl(extension, typeId) {
 
@@ -40,21 +38,16 @@ class RealPowerDataType(
     override fun startStream(emitter: Emitter<StreamState>) {
         val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         scope.launch {
-            combine(gateFlow(), savedMetersFlow()) { enabled, meters ->
-                enabled to meters.firstOrNull { it.slot == slot && it.enabled }?.deviceNumber
-            }
-                .flatMapLatest { (enabled, dn) ->
-                    if (dn == null) flowOf(enabled to Double.NaN)
-                    else metricFlowFor(dn).map { enabled to it }
+            activeDnFlow()
+                .flatMapLatest { dn ->
+                    // null sentinel = no enabled meter (→ NotAvailable); NaN = enabled but no value yet.
+                    if (dn == null) flowOf<Double?>(null) else metricFlowFor(dn).map<Double, Double?> { it }
                 }
                 .sample(1.seconds)
                 .distinctUntilChanged()
-                .collect { (enabled, value) ->
+                .collect { value ->
                     when {
-                        // No enabled meter at all → genuinely "no device".
-                        !enabled -> emitter.onNext(StreamState.NotAvailable)
-                        // A meter IS configured but there's no live value yet (not in an active ride,
-                        // connecting, or coasting) → SEARCHING, not "no device" — the device exists.
+                        value == null -> emitter.onNext(StreamState.NotAvailable)
                         value.isNaN() -> emitter.onNext(StreamState.Searching)
                         else -> emitter.onNext(
                             StreamState.Streaming(

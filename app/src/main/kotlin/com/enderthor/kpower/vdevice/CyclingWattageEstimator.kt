@@ -20,6 +20,11 @@ private const val CAP_FTP_SLOPE = 1.2
 private const val CAP_BASE_W = 130.0
 private const val KNEE_FRACTION = 0.8
 
+// Min ground speed (m/s ≈ 5.4 km/h) for a sample to count toward field calibration: only excludes
+// near-standstill noise. LOW-speed samples are kept on purpose — they're where rolling dominates aero,
+// which is exactly what separates (identifies) Crr from CdA in the regression.
+private const val CALIB_MIN_SPEED_MS = 1.5
+
 class CyclingWattageEstimator(
     private val gravity: Double = 9.80665,
     private val slope:  Double,
@@ -59,7 +64,23 @@ class CyclingWattageEstimator(
         return knee + range * tanh((estimatedPower - knee) / range)
     }
 
+    /**
+     * Returns the instantaneous power as the cap applied to the SIGNED total (road load + signed inertial
+     * power `m·a·v`). The value can be NEGATIVE (hard decel): the caller is responsible for the floor.
+     *
+     * Why return the SIGNED total rather than flooring here: the cap must bound the WHOLE total. If road
+     * load were floored/capped first and inertia added on top, a big acceleration spike could blow past
+     * the cap. Capping `roadLoad + inertia` together keeps a single sane ceiling. The CALLER (the engine)
+     * then floors per sample with `max(0, …)`, because a real power meter never reports negative power —
+     * so for the estimate's instant/3s/NP/avg to be comparable to a real meter's they must floor per
+     * sample too (NP especially: it 4th-powers samples, and (−x)⁴ = (+x)⁴ would rectify negatives into a
+     * positive bias). GPS-derived acceleration noise is smoothed upstream by AccelerationTracker's EMA,
+     * not by letting power go negative.
+     */
     fun calculateCyclingWattage(): Double {
+        // Not pedaling (and not forced) → no pedal power, regardless of inertia/gravity.
+        if (!isforcepower && !isPedaling) return 0.0
+
         val slopeAngle = atan(slope)
 
         val gravityForce = calculateGravityForce(slopeAngle)
@@ -71,10 +92,38 @@ class CyclingWattageEstimator(
         // the power to NaN/Infinity (coerceIn alone leaves NaN unchanged).
         val safeLoss = if (powerLoss.isFinite()) powerLoss.coerceIn(0.0, 0.5) else 0.0
         val lossFactor = 1.0 - safeLoss
-        val estimatedPower = (gravityForce + rollingResistanceForce + aerodynamicDragForce +
-                calculateDynamicRollingResistanceForce(slopeAngle) + inertiaForce) * speed / lossFactor
+        val roadLoadPower = (gravityForce + rollingResistanceForce + aerodynamicDragForce +
+                calculateDynamicRollingResistanceForce(slopeAngle)) * speed / lossFactor
+        val inertiaPower = inertiaForce * speed / lossFactor    // SIGNED — caller floors per sample
 
-        return maxOf(0.0, applyPowerCap(estimatedPower))
+        // Cap the SIGNED total: applyPowerCap passes everything below the knee unchanged (negatives too)
+        // and only compresses high positives, so a big acceleration spike can't yield an absurd value.
+        return applyPowerCap(roadLoadPower + inertiaPower)
+    }
+
+    /**
+     * Field-calibration regressors for ONE sample: returns (Y, X1, X2) such that `Y = Crr_eff·X1 +
+     * CdA·X2` (Martin power balance, see [FieldCalibrator]), computed from the REAL crank power and the
+     * SAME inputs the estimate uses. X1's coefficient is the EFFECTIVE Crr for the sample's surface
+     * (base Crr × surface factor — the surface factor is NOT folded into X1, so the per-surface fit
+     * yields each surface's effective Crr) and X2's is CdA = dragCoefficient·frontalArea. Returns null
+     * for samples that shouldn't be fitted: not moving fast enough (tiny/aliased aero signal), or bad
+     * real power.
+     */
+    fun calibrationRegressors(realPowerW: Double): Triple<Double, Double, Double>? {
+        if (!realPowerW.isFinite() || realPowerW <= 0.0 || speed < CALIB_MIN_SPEED_MS) return null
+        val slopeAngle = atan(slope)
+        val safeLoss = if (powerLoss.isFinite()) powerLoss.coerceIn(0.0, 0.5) else 0.0
+        val wheelPower = realPowerW * (1.0 - safeLoss)                 // real power delivered to the wheel
+        val gravityPower = gravity * sin(slopeAngle) * totalMass * speed
+        val dynRollPower = calculateDynamicRollingResistanceForce(slopeAngle) * speed
+        val inertiaPower = totalMass * acceleration * speed
+        val y = wheelPower - gravityPower - dynRollPower - inertiaPower
+        val x1 = gravity * cos(slopeAngle) * totalMass * speed                    // coeff = effective Crr (per surface)
+        val vRel = speed + windSpeed
+        val x2 = 0.5 * airDensity(pressurePa, temperatureC, elevation) * vRel * abs(vRel) * speed   // coeff = CdA
+        if (!y.isFinite() || !x1.isFinite() || !x2.isFinite()) return null
+        return Triple(y, x1, x2)
     }
 
     // Pequeño término de rodadura dinámica que el usuario añadió a propósito y quiere mantener

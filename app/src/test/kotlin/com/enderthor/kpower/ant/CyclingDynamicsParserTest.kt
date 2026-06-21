@@ -165,8 +165,9 @@ class CyclingDynamicsParserTest {
         assertEquals(1, d.manufacturerId)
         assertEquals(3578, d.modelNumber)
         assertEquals("Garmin", AntManufacturers.name(d.manufacturerId))
-        // Garmin model code 3578 resolves to the product name.
-        assertEquals("Rally 200", antDeviceDisplayName(d.manufacturerId, d.modelNumber))
+        // Full display name is "Brand Model"; the COMPACT name (used for the KPW label) is model-only.
+        assertEquals("Garmin Rally 200", antDeviceDisplayName(d.manufacturerId, d.modelNumber))
+        assertEquals("Rally 200", antDeviceShortName(d.manufacturerId, d.modelNumber))
     }
 
     @Test fun parseBatteryStatus_readsByte7DescriptiveBits() {

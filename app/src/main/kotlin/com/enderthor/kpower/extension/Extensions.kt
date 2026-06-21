@@ -14,12 +14,13 @@ import com.enderthor.kpower.activity.dataStore
 import com.enderthor.kpower.data.GpsCoordinates
 import com.enderthor.kpower.data.KnownProfile
 import com.enderthor.kpower.data.OpenMeteoCurrentWeatherResponse
-import com.enderthor.kpower.data.OpenWeatherCurrentWeatherResponse
 import com.enderthor.kpower.data.HeadwindStats
 import com.enderthor.kpower.data.ConfigData
 import com.enderthor.kpower.data.OpenMeteoData
 import com.enderthor.kpower.data.RETRY_CHECK_STREAMS
 import com.enderthor.kpower.data.STREAM_TIMEOUT
+import com.enderthor.kpower.data.WEATHER_STREAM_FUTURE_SKEW_MS
+import com.enderthor.kpower.data.WEATHER_STREAM_MAX_AGE_MS
 import com.enderthor.kpower.data.StreamData
 import com.enderthor.kpower.data.WAIT_STREAMS_LONG
 import com.enderthor.kpower.data.WAIT_STREAMS_MEDIUM
@@ -37,6 +38,7 @@ import io.hammerhead.karooext.models.OnHttpResponse
 import io.hammerhead.karooext.models.OnLocationChanged
 import io.hammerhead.karooext.models.OnStreamState
 import io.hammerhead.karooext.models.RideProfile
+import io.hammerhead.karooext.models.SavedDevices
 import io.hammerhead.karooext.models.StreamState
 
 
@@ -44,7 +46,8 @@ import io.hammerhead.karooext.models.StreamState
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.awaitClose
-import kotlinx.coroutines.channels.trySendBlocking
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -102,6 +105,7 @@ val lastKnownPositionKey = stringPreferencesKey("lastKnownPosition")
 val preferencesKey = stringPreferencesKey("configdata")
 val comparisonModeKey = booleanPreferencesKey("comparisonMode")
 val antMetersKey = stringPreferencesKey("antPowerMeters")
+val calibrationKey = stringPreferencesKey("fieldCalibration")
 
 suspend fun saveComparisonMode(context: Context, enabled: Boolean) {
     context.dataStore.edit { it[comparisonModeKey] = enabled }
@@ -131,10 +135,6 @@ suspend fun saveBatteryAlert(context: Context, enabled: Boolean) {
  *  (LOW) y otro si pasa a crítica (CRITICAL), como mucho uno por nivel y ride. */
 fun Context.batteryAlertFlow(): Flow<Boolean> =
     dataStore.data.map { it[batteryAlertKey] ?: false }.distinctUntilChanged()
-
-suspend fun saveAntMeters(context: Context, meters: List<com.enderthor.kpower.ant.SavedMeter>) {
-    context.dataStore.edit { it[antMetersKey] = Json.encodeToString(meters) }
-}
 
 /**
  * Atomic read-modify-write of the saved meters: decode the current value, apply [transform], and
@@ -184,7 +184,7 @@ fun Context.knownProfilesFlow(): Flow<List<KnownProfile>> =
         }
     }.distinctUntilChanged()
 
-suspend fun savePreferences(context: Context, configDatas: MutableList<ConfigData>) {
+suspend fun savePreferences(context: Context, configDatas: List<ConfigData>) {
     context.dataStore.edit { t ->
         t[preferencesKey] = Json.encodeToString(configDatas)
     }
@@ -196,6 +196,20 @@ suspend fun saveStats(context: Context, stats: HeadwindStats) {
     }
 }
 
+suspend fun saveCalibration(context: Context, s: com.enderthor.kpower.data.CalibrationSuggestion) {
+    context.dataStore.edit { it[calibrationKey] = Json.encodeToString(s) }
+}
+
+suspend fun clearCalibration(context: Context) {
+    context.dataStore.edit { it.remove(calibrationKey) }
+}
+
+/** Latest field-calibration suggestion (or null). */
+fun Context.calibrationFlow(): Flow<com.enderthor.kpower.data.CalibrationSuggestion?> =
+    dataStore.data.map { prefs ->
+        prefs[calibrationKey]?.let { runCatching { jsonWithUnknownKeys.decodeFromString<com.enderthor.kpower.data.CalibrationSuggestion>(it) }.getOrNull() }
+    }
+
 suspend fun saveCurrentData(context: Context, forecast: OpenMeteoCurrentWeatherResponse) {
     context.dataStore.edit { t ->
         t[currentDataKey] = Json.encodeToString(forecast)
@@ -204,13 +218,16 @@ suspend fun saveCurrentData(context: Context, forecast: OpenMeteoCurrentWeatherR
 
 fun KarooSystemService.streamDataFlow(dataTypeId: String): Flow<StreamState> {
     return callbackFlow {
+        // trySend + CONFLATED: the callback runs on the Karoo binder thread, so it must NOT block
+        // (trySendBlocking on a RENDEZVOUS channel would stall that foreign thread on a slow collector).
+        // For a streaming value, latest-wins (conflate) is the right drop policy.
         val listenerId = addConsumer(OnStreamState.StartStreaming(dataTypeId)) { event: OnStreamState ->
-            trySendBlocking(event.state)
+            trySend(event.state)
         }
         awaitClose {
             removeConsumer(listenerId)
         }
-    }
+    }.buffer(Channel.CONFLATED)
 }
 
 fun Context.streamCurrentWeatherData(): Flow<OpenMeteoCurrentWeatherResponse> {
@@ -222,7 +239,17 @@ fun Context.streamCurrentWeatherData(): Flow<OpenMeteoCurrentWeatherResponse> {
             Timber.e("Failed to stream current weather data $e")
             null
         }
-    }.filterNotNull().distinctUntilChanged().filter { it.current.time * 1000 >= System.currentTimeMillis() - (1000 * 60 * 60 ) }
+    }.filterNotNull().distinctUntilChanged().filter {
+        // A missing/zero observation timestamp can't be aged — ACCEPT it rather than silently starving
+        // the estimator to ISA defaults (the refresh loop owns actual freshness).
+        if (it.current.time <= 0L) return@filter true
+        // Otherwise accept weather whose observation time is recent-ish (generous: the API time lags
+        // fetch time) and not implausibly in the future (clock skew). Log drops — they're silent ISA.
+        val ageMs = System.currentTimeMillis() - it.current.time * 1000
+        val ok = ageMs in -WEATHER_STREAM_FUTURE_SKEW_MS..WEATHER_STREAM_MAX_AGE_MS
+        if (!ok) Timber.w("Dropping weather sample: age=${ageMs}ms (out of [-${WEATHER_STREAM_FUTURE_SKEW_MS}, ${WEATHER_STREAM_MAX_AGE_MS}])")
+        ok
+    }
 }
 
 fun Context.streamStats(): Flow<HeadwindStats> {
@@ -279,42 +306,21 @@ fun Context.importBikesConfig(): List<ConfigData>? {
 
 
 fun Context.parseWeatherResponse(responseString: String): OpenMeteoCurrentWeatherResponse {
-    val decoded = try {
-        if (responseString.contains("\"current\"")) {
-            jsonWithUnknownKeys.decodeFromString<OpenMeteoCurrentWeatherResponse>(responseString)
-        } else {
-            val weather = jsonWithUnknownKeys.decodeFromString<OpenWeatherCurrentWeatherResponse>(responseString)
-            OpenMeteoCurrentWeatherResponse(
-                current = OpenMeteoData(
-                    windSpeed = weather.wind.speed,
-                    windDirection = weather.wind.deg,
-                    time = weather.time,
-                    interval = 0,
-                    temperature = weather.main?.temp,
-                    surfacePressure = weather.main?.pressure
-                ),
-                latitude = weather.coord.lat,
-                longitude = weather.coord.lon,
-                timezone = "",
-                elevation = 0.0,
-                utfOffsetSeconds = 0
-            )
-        }
+    return try {
+        jsonWithUnknownKeys.decodeFromString<OpenMeteoCurrentWeatherResponse>(responseString)
     } catch (e: Exception) {
         throw IllegalArgumentException("Invalid response format parse weather", e)
-
     }
-
-    return decoded
 }
 
 
 @OptIn(FlowPreview::class)
-suspend fun KarooSystemService.makeOpenMeteoHttpRequest(gpsCoordinates: GpsCoordinates, isOpenWeather: Boolean, api: String): HttpResponseState.Complete {
+suspend fun KarooSystemService.makeOpenMeteoHttpRequest(gpsCoordinates: GpsCoordinates): HttpResponseState.Complete {
     return callbackFlow {
 
-        val url = if(isOpenWeather && api.trim().isNotEmpty())  "https://api.openweathermap.org/data/2.5/weather?lat=${gpsCoordinates.lat}&lon=${gpsCoordinates.lon}&units=metric&appid=$api"
-        else "https://api.open-meteo.com/v1/forecast?latitude=${gpsCoordinates.lat}&longitude=${gpsCoordinates.lon}&current=wind_speed_10m,wind_direction_10m,temperature_2m,surface_pressure&timeformat=unixtime&wind_speed_unit=ms"
+        // Open-Meteo is the sole weather provider (free, no API key). Surface pressure (not sea-level)
+        // and m/s wind are requested so the estimator can use them directly.
+        val url = "https://api.open-meteo.com/v1/forecast?latitude=${gpsCoordinates.lat}&longitude=${gpsCoordinates.lon}&current=wind_speed_10m,wind_direction_10m,temperature_2m,surface_pressure&timeformat=unixtime&wind_speed_unit=ms"
 
         if (BuildConfig.DEBUG) Timber.d("Http request to %s", url)
 
@@ -333,7 +339,7 @@ suspend fun KarooSystemService.makeOpenMeteoHttpRequest(gpsCoordinates: GpsCoord
         awaitClose {
             removeConsumer(listenerId)
         }
-    }.timeout(20.seconds).catch { e: Throwable ->
+    }.buffer(Channel.CONFLATED).timeout(20.seconds).catch { e: Throwable ->
         if (e is TimeoutCancellationException){
             emit(HttpResponseState.Complete(500, mapOf(), null, "Timeout"))
         } else {
@@ -371,6 +377,7 @@ fun Context.isHeadwindInstalled(): Boolean = try {
 suspend fun KarooSystemService.fetchHeadwindWeatherSnapshot(
     gps: GpsCoordinates,
     isImperial: Boolean,
+    windUnit: com.enderthor.kpower.data.HeadwindWindUnit,
 ): OpenMeteoCurrentWeatherResponse? {
     // Nombre de la extensión karoo-ext de Headwind (DataTypeImpl("karoo-headwind", ...)),
     // distinto de su package Android (de.timklge.karooheadwind).
@@ -387,7 +394,7 @@ suspend fun KarooSystemService.fetchHeadwindWeatherSnapshot(
                     wind is StreamState.Streaming && dir is StreamState.Streaming
                 ) {
                     val windRaw = wind.dataPoint.singleValue ?: 0.0
-                    val windMs = if (isImperial) windRaw / 2.2369362920544 else windRaw / 3.6
+                    val windMs = windUnit.toMetersPerSecond(windRaw, isImperial)
                     OpenMeteoCurrentWeatherResponse(
                         current = OpenMeteoData(
                             time = System.currentTimeMillis() / 1000,
@@ -446,8 +453,10 @@ fun KarooSystemService.getHeadingFlow(context: Context): Flow<HeadingResponse> {
 }
 
 fun signedAngleDifference(angle1: Double, angle2: Double): Double {
-    val a1 = angle1 % 360
-    val a2 = angle2 % 360
+    // Normalise into [0,360): Kotlin's % keeps the dividend's sign, so a negative bearing (e.g. wind
+    // direction math) would otherwise skew the result. (+360)%360 makes it non-negative.
+    val a1 = ((angle1 % 360) + 360) % 360
+    val a2 = ((angle2 % 360) + 360) % 360
     var diff = abs(a1 - a2)
 
     val sign = if (a1 < a2) {
@@ -528,13 +537,14 @@ suspend fun Context.getLastKnownPosition(): GpsCoordinates? {
 
 fun KarooSystemService.streamLocation(): Flow<OnLocationChanged> {
     return callbackFlow {
+        // trySend + CONFLATED — don't block the binder thread; latest position wins. See streamDataFlow.
         val listenerId = addConsumer { event: OnLocationChanged ->
-            trySendBlocking(event)
+            trySend(event)
         }
         awaitClose {
             removeConsumer(listenerId)
         }
-    }
+    }.buffer(Channel.CONFLATED)
 }
 
 fun<T> Flow<T>.throttle(timeout: Long): Flow<T> = flow {
@@ -562,6 +572,10 @@ suspend fun saveLastKnownPosition(context: Context, gpsCoordinates: GpsCoordinat
 
 }
 inline fun <reified T : KarooEvent> KarooSystemService.consumerFlow(): Flow<T> {
+    // buffer(UNLIMITED) + trySend: the callback runs on the Karoo's binder thread, so it must NOT block
+    // (trySendBlocking on the default RENDEZVOUS channel would stall that foreign thread on a slow
+    // collector — e.g. a DataStore write). The unlimited buffer makes trySend always succeed (no dropped
+    // RideState transition) without ever blocking. Events here are low-rate, so the buffer stays tiny.
     return callbackFlow {
         val listenerId = addConsumer<T> {
             trySend(it)
@@ -569,11 +583,36 @@ inline fun <reified T : KarooEvent> KarooSystemService.consumerFlow(): Flow<T> {
         awaitClose {
             removeConsumer(listenerId)
         }
-    }
+    }.buffer(Channel.UNLIMITED)
 }
 
 fun KarooSystemService.streamRideProfile(): Flow<RideProfile> =
     consumerFlow<ActiveRideProfile>().map { it.profile }
+
+/** The Karoo's saved/paired sensors (name + connection type + battery + serial). SavedDevices needs
+ *  an explicit Params, so it can't use the generic consumerFlow<T>() (no-params) helper. */
+fun KarooSystemService.savedDevicesFlow(): Flow<SavedDevices> = callbackFlow {
+    // trySend + buffer (never block the binder thread); see consumerFlow for the rationale.
+    val listenerId = addConsumer(SavedDevices.Params) { event: SavedDevices -> trySend(event) }
+    awaitClose { removeConsumer(listenerId) }
+}.buffer(Channel.UNLIMITED)
+
+/** True when a Karoo SavedDevice is (very likely) the ANT meter [dn]: an ANT connection whose id or
+ *  serial carries the device number as a standalone token. A BLE/other device that merely contains the
+ *  digits is excluded. The exact id format varies by firmware (the KAROODEV diag log captures it). */
+fun SavedDevices.SavedDevice.matchesAntNumber(dn: Int): Boolean {
+    val conn = connectionType ?: ""
+    if (conn.isNotBlank() && !conn.contains("ant", ignoreCase = true)) return false
+    val n = dn.toString()
+    val serial = details.serialNumber ?: ""
+    if (serial == n) return true
+    val token = Regex("(^|\\D)" + Regex.escape(n) + "(\\D|$)")
+    return token.containsMatchIn(id ?: "") || token.containsMatchIn(serial)
+}
+
+/** The Karoo's friendly name for ANT device [dn] among these saved devices, or null if unknown. */
+fun List<SavedDevices.SavedDevice>.karooNameForAnt(dn: Int): String? =
+    firstOrNull { it.matchesAntNumber(dn) }?.name?.trim()?.takeIf { it.isNotEmpty() }
 
 
 

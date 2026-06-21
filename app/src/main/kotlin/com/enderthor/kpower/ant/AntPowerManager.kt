@@ -287,15 +287,17 @@ class AntPowerManager(private val context: Context) {
     }
 
     /**
-     * Full teardown for an owner whose lifetime ends (e.g. the settings/scan screen being left):
-     * release this manager's toggle holdings AND cancel its coroutine scope so the scope + Job graph
-     * don't linger until GC across repeated screen visits. The service's long-lived manager (reused
-     * for the whole service lifetime) must NOT call this.
+     * Full teardown for an owner whose lifetime ends (e.g. the settings/scan screen being left, or the
+     * extension service's onDestroy): release this manager's toggle holdings AND cancel its coroutine
+     * scope so the scope + Job graph don't linger until GC. Safe for the service to call in onDestroy
+     * because the service's manager is a per-instance `by lazy` — a re-created service gets a fresh one,
+     * so there's no "closed manager reused" hazard. Do NOT call this if you intend to keep using the
+     * same manager instance afterwards (it sets `closed` and cancels the scope permanently).
      */
     @Synchronized
     fun close() {
         closed = true
-        disconnectAll()
+        disconnectAll()   // also stopScan()s the MultiDeviceSearch (not tied to scope)
         scope.cancel()
     }
 }

@@ -11,7 +11,7 @@ android {
 
     defaultConfig {
         applicationId = "com.enderthor.kpower"
-        minSdk = 23
+        minSdk = 26   // Karoo 2 = Android 8 (API 26); lets FileLogTree's java.time work without desugaring
         targetSdk = 34
         versionCode = 202606131
         versionName = "3.0.0"

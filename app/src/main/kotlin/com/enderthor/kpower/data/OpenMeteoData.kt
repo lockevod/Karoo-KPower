@@ -18,19 +18,6 @@ data class OpenMeteoData(
 
 
 @Serializable
-data class OpenWeatherData(
-    @SerialName("speed") val speed: Double,
-    @SerialName("deg") val deg: Double,
-)
-
-@Serializable
-data class OpenWeatherCoord(
-    @SerialName("lon") val lon: Double,
-    @SerialName("lat") val lat: Double,
-)
-
-
-@Serializable
 data class OpenMeteoCurrentWeatherResponse(
     val current: OpenMeteoData,
     val latitude: Double,
@@ -40,18 +27,31 @@ data class OpenMeteoCurrentWeatherResponse(
     @SerialName("utc_offset_seconds") val utfOffsetSeconds: Int
 )
 
+/** One surface's calibrated effective Crr + its std error. crrEff null + sufficient=false when too few
+ *  samples; reliable=false when the fit's relative std error is too high (poorly identified). */
 @Serializable
-data class OpenWeatherMain(
-    @SerialName("temp") val temp: Double? = null,
-    @SerialName("pressure") val pressure: Double? = null,
+data class SurfaceCrrSuggestion(
+    val surface: String,      // KarooSurface.name
+    val crrEff: Double? = null,
+    val crrSe: Double? = null,
+    val samples: Long = 0,
+    val sufficient: Boolean = false,
+    val reliable: Boolean = false,
 )
 
+/** Field-calibration suggestion (CdA + per-surface effective Crr fitted from a comparison ride's
+ *  real-meter data), persisted so the UI can offer it after the ride (the extension process may be
+ *  killed at ride end). [cdaSe]/[crrSe] are the coefficient std errors — the honest identifiability
+ *  metric; [reliable] flags mean "well-identified and in range", gating Apply. */
 @Serializable
-data class OpenWeatherCurrentWeatherResponse(
-    val wind: OpenWeatherData,
-    @SerialName("dt") val time: Long,
-    val coord: OpenWeatherCoord,
-    val main: OpenWeatherMain? = null,
+data class CalibrationSuggestion(
+    val cda: Double,
+    val cdaSe: Double,
+    val cdaReliable: Boolean,
+    val perSurface: List<SurfaceCrrSuggestion> = emptyList(),
+    val samples: Long,
+    val bikeId: Int,          // the bike (ConfigData.id) active when it was computed
+    val timestampMs: Long,
 )
 
 @Serializable

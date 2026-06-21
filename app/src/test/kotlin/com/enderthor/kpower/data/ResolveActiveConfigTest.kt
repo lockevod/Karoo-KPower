@@ -6,7 +6,7 @@ import org.junit.Test
 
 class ResolveActiveConfigTest {
     private fun cfg(id: Int, profileId: String? = null, active: Boolean = false) =
-        ConfigData(id, "b$id", active, "8", "0.005", "0.8", "0.4", "2", "", false, "", "200",
+        ConfigData(id, "b$id", active, "8", "0.005", "0.8", "0.4", "2", "", "200",
             karooProfileId = profileId)
 
     @Test fun `profile mapping wins`() {

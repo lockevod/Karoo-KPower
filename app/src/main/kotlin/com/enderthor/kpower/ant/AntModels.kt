@@ -14,6 +14,10 @@ data class SavedMeter(
     val slot: Int,
     val enabled: Boolean = true,
     val userNamed: Boolean = false,
+    // Last battery status code (1=New..5=Critical) seen for this meter, persisted so the settings
+    // screen can show it at a glance WITHOUT holding the meter's raw ANT channel open (which fights
+    // the scan and the radio). Filled during a ride; null until first seen.
+    val lastBatteryCode: Int? = null,
 )
 
 /** True when [label] is an auto/placeholder name (empty, the bare device number, "Device: N",

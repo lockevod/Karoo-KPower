@@ -16,7 +16,6 @@ import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -40,9 +39,7 @@ import kotlin.time.Duration.Companion.seconds
 class DualValueDataType(
     extension: String,
     typeId: String,
-    private val slot: Int = 0,
-    private val gateFlow: () -> Flow<Boolean>,
-    private val savedMetersFlow: () -> Flow<List<com.enderthor.kpower.ant.SavedMeter>>,
+    private val activeDnFlow: () -> Flow<Int?>,
     /** Left/right pair (each nullable) for a device number. */
     private val pairFlowFor: (deviceNumber: Int) -> Flow<Pair<Double?, Double?>>,
 ) : DataTypeImpl(extension, typeId) {
@@ -72,22 +69,22 @@ class DualValueDataType(
 
         val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         scope.launch {
-            combine(gateFlow(), savedMetersFlow()) { enabled, meters ->
-                enabled to meters.firstOrNull { it.slot == slot && it.enabled }?.deviceNumber
-            }
-                .flatMapLatest { (enabled, dn) ->
-                    if (dn == null) flowOf(enabled to (null to null))
-                    else pairFlowFor(dn).map { enabled to it }
+            activeDnFlow()
+                .flatMapLatest { dn ->
+                    // null sentinel = no enabled meter → "--".
+                    if (dn == null) flowOf<Pair<Double?, Double?>?>(null)
+                    else pairFlowFor(dn).map<Pair<Double?, Double?>, Pair<Double?, Double?>?> { it }
                 }
                 .sample(1.seconds)
                 .distinctUntilChanged()
-                .collect { (enabled, pair) ->
-                    val (l, r) = pair
+                .collect { pair ->
+                    val l = pair?.first
+                    val r = pair?.second
                     // Show "L/R" only when BOTH sides exist. A single side shows just that number —
                     // covers combined pedal smoothness (0x13 b5=0xFE → left carries the COMBINED
                     // value, right is null) and single-sided meters, instead of a confusing "24/–".
                     val text = when {
-                        !enabled || (l == null && r == null) -> "--"
+                        pair == null || (l == null && r == null) -> "--"
                         l == null -> fmt(r)
                         r == null -> fmt(l)
                         else -> "${fmt(l)}/${fmt(r)}"

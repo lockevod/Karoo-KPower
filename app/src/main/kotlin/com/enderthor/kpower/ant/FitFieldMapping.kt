@@ -35,3 +35,22 @@ object DynField {
     const val TORQUE_LEFT = DYN_FIELD_BASE + 16 // 48 Nm
     const val TORQUE_RIGHT = DYN_FIELD_BASE + 17// 49 Nm
 }
+
+/**
+ * STANDARD FIT `record` (global mesg 20) field numbers for cycling dynamics, exactly as a Garmin head
+ * unit writes them — so intervals.icu / Garmin Connect recognise KPower's recorded dynamics natively
+ * (the Karoo never writes these for a non-bound sensor; KPower writes the FIT directly). Encodings per
+ * the FIT global profile; the host's FIT encoder applies each field's scale, so we pass DISPLAY units
+ * (%, degrees, mm) — except left_right_balance which is a raw uint8 (bit7 = right indicator).
+ */
+object FitRecordField {
+    const val LEFT_RIGHT_BALANCE = 30          // uint8: bit7=right, bits0-6 = right %
+    const val LEFT_TORQUE_EFFECTIVENESS = 43   // % (profile scale 2)
+    const val RIGHT_TORQUE_EFFECTIVENESS = 44  // %
+    const val LEFT_PEDAL_SMOOTHNESS = 45       // % (profile scale 2)
+    const val RIGHT_PEDAL_SMOOTHNESS = 46      // %
+    const val LEFT_PCO = 67                    // mm (sint8)
+    const val RIGHT_PCO = 68                   // mm
+    // NOTE: power_phase (69-72) are FIT ARRAY fields. karoo-ext's FieldValue is a single scalar with no
+    // array index, so we can't write them as standard fields — power phase stays in developer fields.
+}

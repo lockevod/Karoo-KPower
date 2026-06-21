@@ -83,24 +83,6 @@ fun ConfigDataAppNavHost(modifier: Modifier = Modifier, navController: NavHostCo
 
     val ctx = LocalContext.current
 
-
-/*
-    LaunchedEffect(Unit) {
-        ctx.dataStore.data.distinctUntilChanged().collect { t ->
-            configDatas.clear()
-            try {
-                val entries = Json.decodeFromString<MutableList<ConfigData>>(
-                    t[preferencesKey] ?: defaultConfigData
-                ).map { configData ->
-                    configData.copy(surface = configData.surface)
-                }
-                configDatas.addAll(entries)
-            } catch(e: Throwable){
-                Timber.tag("kpower").e(e, "Failed to read preferences PCM")
-            }
-        }
-    }*/
-
     LaunchedEffect(Unit) {
         ctx.loadPreferencesFlow().collect{
             configDatas.clear()
@@ -132,15 +114,25 @@ fun ConfigDataAppNavHost(modifier: Modifier = Modifier, navController: NavHostCo
                     configdata = r,
                     onUpdate = { updated ->
                         val idx = configDatas.indexOfFirst { it.id == updated.id }
-                        if (idx >= 0) configDatas[idx] = updated
-                        scope.launch { savePreferences(ctx, configDatas) }
+                        if (idx >= 0) {
+                            configDatas[idx] = updated
+                            // A Karoo ride profile maps to exactly ONE bike: clear this profile from any
+                            // OTHER bike so resolveActiveConfig can't silently pick the wrong one.
+                            if (updated.karooProfileId != null) {
+                                for (i in configDatas.indices) {
+                                    if (i != idx && configDatas[i].karooProfileId == updated.karooProfileId)
+                                        configDatas[i] = configDatas[i].copy(karooProfileId = null)
+                                }
+                            }
+                        }
+                        scope.launch { savePreferences(ctx, configDatas.toList()) }
                     },
                     onDelete = {
                         configDatas.removeAll { it.id == r.id }
                         if (r.isActive && configDatas.isNotEmpty() && configDatas.none { it.isActive }) {
                             configDatas[0] = configDatas[0].copy(isActive = true)
                         }
-                        scope.launch { savePreferences(ctx, configDatas) }
+                        scope.launch { savePreferences(ctx, configDatas.toList()) }
                         navController.popBackStack()
                     },
                     onBack = { navController.popBackStack() },
@@ -167,7 +159,7 @@ fun ConfigDataAppNavHost(modifier: Modifier = Modifier, navController: NavHostCo
                     }
                     configDatas.clear()
                     configDatas.addAll(normalized)
-                    scope.launch { savePreferences(ctx, configDatas) }
+                    scope.launch { savePreferences(ctx, configDatas.toList()) }
                 },
                 onNavigateToConfigData = { configdata -> navController.navigate(route = "configData/${configdata.id}") },
                 onNavigateToCreate = {
@@ -179,7 +171,7 @@ fun ConfigDataAppNavHost(modifier: Modifier = Modifier, navController: NavHostCo
                         isActive = configDatas.isEmpty(),
                     )
                     configDatas.add(newConfigData)
-                    scope.launch { savePreferences(ctx, configDatas) }
+                    scope.launch { savePreferences(ctx, configDatas.toList()) }
                     navController.navigate(route = "configData/${newConfigData.id}")
                 },
             )
@@ -214,7 +206,10 @@ fun MainScreen(
                                 menuExpanded = false
                                 val snapshot = configDatas.toList()
                                 scope.launch {
+                                    // Show the path the way the Karoo mounts it (/sdcard/Android/data/…);
+                                    // the canonical /storage/emulated/0 prefix is the same place but confusing.
                                     val path = withContext(Dispatchers.IO) { ctx.exportBikesConfig(snapshot).absolutePath }
+                                        .replaceFirst("/storage/emulated/0", "/sdcard")
                                     Toast.makeText(ctx, ctx.getString(R.string.export_done, path), Toast.LENGTH_LONG).show()
                                 }
                             },
@@ -251,6 +246,14 @@ fun MainScreen(
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
                     .background(MaterialTheme.colorScheme.background)) {
+
+                // One-line onboarding: what KPower does + how to actually see power on a data field.
+                Text(
+                    stringResource(R.string.bikes_subtitle),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                )
 
                 configDatas.forEach { configData ->
                     Card(Modifier

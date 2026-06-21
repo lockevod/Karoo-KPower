@@ -1,11 +1,7 @@
 <resources>
     <string name="app_name">KPower</string>
     <string name="extension_name">KPower</string>
-    <string name="drag_coefficient_desc">Cd (aero drag coefficient). Only useful if you have a real power meter</string>
-    <string name="drag_coefficient">Cd</string>
     <string name="profile_power_source_hint">To show power, add the “KPW Estim.” sensor as the power source in this Karoo ride profile.</string>
-    <string name="weather_provider_label">Weather provider</string>
-    <string name="weather_provider_switch">Use OpenWeather (needs API key); off = OpenMeteo (free)</string>
     <string name="est_instant_name">Est. Power</string>
     <string name="est_instant_desc">KPower estimated instantaneous power. Add it to a page to show it live; logging to the FIT is separate (“Log estimated power”).</string>
     <string name="est_3s_name">Est. Power 3s</string>
@@ -55,6 +51,7 @@
     <!-- Main / bikes list -->
     <string name="bikes_add">Add</string>
     <string name="bikes_empty">No bikes yet — tap + to add one.</string>
+    <string name="bikes_subtitle">KPower estimates your power. Add a bike, then pair the “KPW Estim.” sensor as the power source in your Karoo ride profile.</string>
     <string name="menu_more">More</string>
     <string name="menu_export">Export config</string>
     <string name="menu_import">Import config</string>
@@ -64,13 +61,13 @@
 
     <!-- Comparison screen -->
     <string name="comparison_mode_label">Log estimated power (FIT)</string>
-    <string name="comparison_mode_desc">Writes KPower\'s estimated power to the FIT as extra fields (est_power, est_np…) to compare against a real meter. Off by default.</string>
+    <string name="comparison_mode_desc">Writes KPower\'s estimated power to the FIT as extra fields (est_power, est_np…) to compare against a real meter, AND field-calibrates your bike\'s Crr/CdA from the real meter (suggestion shown in the bike editor afterwards). Needs a real meter recording. Off by default.</string>
     <string name="dynamics_auto_info">Cycling dynamics from an enabled meter are written to the FIT automatically (the Karoo can\'t record them itself).</string>
     <string name="diagnostic_log_path_prefix">Log: </string>
 
     <!-- ANT+ scan -->
     <string name="ant_meters_title">ANT+ power meters</string>
-    <string name="ant_meters_subtitle">Record one extra meter alongside the estimate.</string>
+    <string name="ant_meters_subtitle">Record one ANT+ meter alongside the estimate (only one records at a time).</string>
     <string name="ant_recorded_meters">Recorded meters</string>
     <string name="ant_no_meters">No meters recorded yet — pick one below.</string>
     <string name="ant_available">Available</string>
@@ -79,6 +76,7 @@
     <string name="ant_scan_warning">Don\'t scan while recording a ride — it can disrupt the meter you\'re recording.</string>
     <string name="ant_max_meters">Maximum: %1$d meter</string>
     <string name="ant_scanning">Scanning…</string>
+    <string name="ant_identifying">Identifying…</string>
     <string name="ant_tap_scan">Tap Scan to find meters.</string>
     <string name="ant_remove">Remove</string>
     <string name="ant_rename">Rename</string>
@@ -88,9 +86,16 @@
 
     <!-- Meter detail panel + battery -->
     <string name="meter_details">Details</string>
-    <string name="meter_brand">Device</string>
-    <string name="meter_connecting">connecting…</string>
-    <string name="meter_calibration_soon">Calibration: coming soon</string>
+    <string name="btn_calibrate">Calibrate</string>
+    <string name="btn_close">Close</string>
+    <string name="calibrate_title">Calibration</string>
+    <string name="calibrate_running">Calibrating…</string>
+    <string name="calibrate_instruction">Keep the cranks still (don\'t pedal) during calibration. Don\'t calibrate while recording a ride.</string>
+    <string name="calibrate_success">Calibration OK (zero offset %1$d)</string>
+    <string name="calibrate_success_no_value">Calibration OK</string>
+    <string name="calibrate_failed">Calibration failed. Make sure the meter is awake and the cranks are still.</string>
+    <string name="calibrate_unreachable">Couldn\'t reach the meter (asleep or in use). Try again, or pair it in the Karoo first.</string>
+    <string name="calibrate_timeout">No response from the meter. Make sure it\'s awake and try again.</string>
     <string name="battery_ok">Battery OK</string>
     <string name="battery_low">Battery low</string>
     <string name="battery_critical">Battery critical</string>
@@ -135,8 +140,14 @@
     <string name="section_weather">Weather</string>
     <string name="use_headwind_label">Use Headwind weather if installed</string>
     <string name="headwind_detected_hint">Headwind detected: KPower will take temperature, pressure and wind from it and skip its own weather lookups. Wind assumes Headwind\'s default unit (km/h metric / mph imperial); if you set it to m/s or knots in Headwind, wind will be wrong.</string>
-    <string name="headwind_not_installed_hint">Headwind not installed: KPower will use its own weather (OpenMeteo/OpenWeather below).</string>
-    <string name="cfg_api_openweather">API OpenWeather</string>
+    <string name="headwind_not_installed_hint">Headwind not installed: KPower uses its own weather (Open-Meteo, automatic — no setup or API key).</string>
+    <string name="headwind_wind_unit_label">Headwind wind unit</string>
+    <!-- Field calibration (derives Crr/CdA from a comparison ride's real meter) -->
+    <string name="calib_title">Field calibration</string>
+    <string name="calib_summary">From your comparison ride · %1$d samples (± = uncertainty)</string>
+    <string name="calib_insufficient">not enough data</string>
+    <string name="calib_unreliable">too uncertain — ride more/varied speeds</string>
+    <string name="calib_apply">Apply to this bike</string>
     <string name="section_advanced">Advanced</string>
     <string name="cfg_frontal_area">Frontal Area</string>
     <string name="cfg_power_loss">Power Loss</string>

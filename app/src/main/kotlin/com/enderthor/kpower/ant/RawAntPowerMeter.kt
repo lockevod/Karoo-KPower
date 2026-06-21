@@ -156,8 +156,9 @@ class RawAntPowerMeter(
                 // Device identity (brand). Not a "live" value, so it does NOT update lastEventMs and
                 // is not cleared by reset()/expireIfStale.
                 CyclingDynamicsParser.parseManufacturer(p)?.let {
-                    // "Brand Model" when the model is known (e.g. "Garmin Rally 200"), else the brand.
-                    _manufacturerName.value = antDeviceDisplayName(it.manufacturerId, it.modelNumber)
+                    // COMPACT name (model if known, e.g. "Rally 200", else brand) so KPW's paired-sensor
+                    // name stays short. null for an unknown brand → caller falls back to the device number.
+                    antDeviceShortName(it.manufacturerId, it.modelNumber)?.let { n -> _manufacturerName.value = n }
                 }
             }
             CyclingDynamicsParser.PAGE_BATTERY -> {

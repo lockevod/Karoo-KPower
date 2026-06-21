@@ -55,9 +55,13 @@ class CyclingWattageEstimatorTest {
     }
 
     @Test
-    fun `hard braking never yields negative power (floor at 0W)`() {
+    fun `hard braking yields a signed (negative) value, floored downstream`() {
+        // calculateCyclingWattage now returns a SIGNED value: the 0 W floor is applied by the engine
+        // AFTER smoothing/averaging, so the zero-mean inertial term can't be rectified into an upward
+        // bias. Hard braking (large negative acceleration) therefore yields a negative instantaneous
+        // value here; the engine clamps the published/averaged outputs to >= 0.
         val p = estimator(slope = 0.0, acceleration = -2.0, speed = 5.0).calculateCyclingWattage()
-        assert(p >= 0.0) { "power=$p must be >= 0" }
+        assert(p < 0.0) { "hard braking should yield a negative signed value, got $p" }
     }
 
     @Test

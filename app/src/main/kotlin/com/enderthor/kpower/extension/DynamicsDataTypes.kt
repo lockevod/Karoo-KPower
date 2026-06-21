@@ -12,7 +12,6 @@ import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -44,9 +43,7 @@ fun dynFieldTypeId(metric: String) = "dyn-$metric-0"   // e.g. dyn-balance-0, dy
 class DynamicsDataType(
     extension: String,
     typeId: String,
-    private val slot: Int = 0,
-    private val gateFlow: () -> Flow<Boolean>,
-    private val savedMetersFlow: () -> Flow<List<com.enderthor.kpower.ant.SavedMeter>>,
+    private val activeDnFlow: () -> Flow<Int?>,
     private val metricFlowFor: (deviceNumber: Int) -> Flow<Double>,
 ) : DataTypeImpl(extension, typeId) {
 
@@ -54,21 +51,16 @@ class DynamicsDataType(
     override fun startStream(emitter: Emitter<StreamState>) {
         val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         scope.launch {
-            combine(gateFlow(), savedMetersFlow()) { enabled, meters ->
-                enabled to meters.firstOrNull { it.slot == slot && it.enabled }?.deviceNumber
-            }
-                .flatMapLatest { (enabled, dn) ->
-                    if (dn == null) flowOf(enabled to Double.NaN)
-                    else metricFlowFor(dn).map { enabled to it }
+            activeDnFlow()
+                .flatMapLatest { dn ->
+                    // null sentinel = no enabled meter (→ NotAvailable); NaN = enabled but no value yet.
+                    if (dn == null) flowOf<Double?>(null) else metricFlowFor(dn).map<Double, Double?> { it }
                 }
                 .sample(1.seconds)
                 .distinctUntilChanged()
-                .collect { (enabled, value) ->
+                .collect { value ->
                     when {
-                        // No enabled meter at all → genuinely "no device".
-                        !enabled -> emitter.onNext(StreamState.NotAvailable)
-                        // Meter present but this metric isn't streaming yet (not in an active ride,
-                        // connecting, coasting, or the meter doesn't send this page) → SEARCHING.
+                        value == null -> emitter.onNext(StreamState.NotAvailable)
                         value.isNaN() -> emitter.onNext(StreamState.Searching)
                         else -> emitter.onNext(
                             StreamState.Streaming(

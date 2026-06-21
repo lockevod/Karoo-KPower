@@ -9,7 +9,7 @@ Compatible with Karoo 2 and Karoo 3 devices running Karoo OS version 1.524.2003 
 ## What's new
 
 - **Simple / Advanced configuration.** New profiles start in a **Simple** mode: pick a bike **preset** (road hoods/drops, TT, gravel, MTB), your **height**, and your **tyre** (width, pressure, tread), and the app derives the aerodynamic and rolling values for you. Advanced mode still lets you fine-tune Crr, Cd, frontal area and power loss by hand.
-- **Better air drag.** Air density is now computed from real **temperature and pressure** (from Open-Meteo/OpenWeather, with the Karoo barometer/sensor as fallback) instead of altitude only — colder/denser air now correctly needs more power.
+- **Better air drag.** Air density is now computed from real **temperature and pressure** (from Open-Meteo — free, no API key — with the Karoo barometer/sensor as fallback) instead of altitude only — colder/denser air now correctly needs more power.
 - **Acceleration/inertia term.** Accelerations and surges are accounted for, not just steady-state riding.
 - **FTP from your Karoo profile.** New profiles can take your FTP automatically from the Karoo user profile (the FTP field becomes read-only while this is on).
 - **Headwind integration.** If the Headwind extension is installed, KPower reuses its temperature, pressure and wind instead of doing its own weather lookups (with automatic fallback, and a switch to opt out).
@@ -45,13 +45,55 @@ If you've Karoo 3 and v > 1.527 you can sideload the app using the following ste
 1. After installing this app on your Karoo, you need to configure the power extension in the settings.
 Power is an estimation and you need these parameters correct to get a good estimation, so it's very important to configure them well (this README is the reference; the in-app help tab has been removed).
 
+### Examples — common setups
+
+KPower has two independent things that both end up as “power”, and people mix them up. Quick map:
+
+- **Estimator bike** = the *physics estimate* (no sensor). Shows up when pairing as **“KPW Estim.”** Lives under the **Estimator** tab.
+- **Real meter** = a *real ANT+ power meter* KPower records directly. Shows up when pairing as **“KPW &lt;brand model&gt;”** (e.g. *KPW Garmin Rally 200*). Lives under the **Real meter** tab.
+
+#### A) I just want estimated power (no power meter)
+
+1. *Estimator* tab → **+** → fill in the bike (Simple mode: preset, height, tyre, bike weight). FTP comes from your Karoo profile.
+2. On the Karoo: **ride profile → sensors → pair “KPW Estim.”** as the power source.
+3. Ride. Power fields, NP, TSS, etc. all work as if it were a real meter. (You can also just drop the **Est. Power / 3s / NP / Avg** data fields on a page without pairing anything.)
+
+#### B) I only want my real power meter (and its cycling dynamics)
+
+You have a real ANT+ meter and don't care about the estimate. Use KPower (instead of pairing the meter natively) because it **records the cycling dynamics the Karoo can't** — L/R balance, torque effectiveness, pedal smoothness, power phase — plus auto-name and battery alert.
+
+1. *Real meter* tab → **Scan** → **Add** your meter → toggle **Enable**. It auto-names (e.g. *Garmin Rally 200*) and shows battery.
+2. On the Karoo: **ride profile → sensors → pair “KPW &lt;brand model&gt;”** (e.g. *KPW Garmin Rally 200*) as the power source. **Don't also pair the meter natively**, or power is recorded twice.
+3. Ride. Power/cadence record as normal **and** the cycling dynamics go into the FIT automatically (open it in [intervals.icu](https://intervals.icu) to see them). You don't need any Estimator bike, the Est. fields, or the “Log estimated power” toggle for this.
+
+> Don't enable an Estimator power source at the same time as the real one — pair only **one** “KPW …” sensor as the Karoo's power. (You can still drop Est. fields on a page to glance at the estimate without pairing it.)
+
+#### C) I have a real meter AND I want the estimate too (e.g. to compare)
+
+You can run **both at once** — one real, one estimated:
+
+1. **Set up the estimator bike** as in (A).
+2. **Add the real meter:** *Real meter* tab → **Scan** → **Add** your meter → toggle **Enable** (only one real meter active at a time). It auto-names itself (e.g. *Garmin Rally 200*) and shows battery.
+3. **Pick which one the Karoo records as its main `power`** by choosing which sensor you pair in the **Karoo ride profile → sensors**:
+   - Pair **“KPW &lt;brand model&gt;”** → the **real** meter is your main power (recommended when you have a meter).
+   - Pair **“KPW Estim.”** → the **estimate** is your main power.
+   - **Pair only ONE of them** as the power source — pairing both records power twice. (Don't pair the meter *natively* either; let KPower feed it as “KPW …”.)
+4. **See both side by side (optional):** the **Real Power / Real 3s / Real NP / Real Avg** fields show the meter, and the **Est. Power / 3s / NP / Avg** fields show the estimate — put them on the same page to watch live. The real meter's **cycling dynamics** (L/R balance, TE, PS, power phase) are recorded to the FIT automatically too.
+5. **Log both to the FIT for later:** turn on **“Log estimated power (FIT)”** (*Real meter* tab). The real meter is recorded as `pm1_power`; the estimate as `est_power`/`est_np`. Open the FIT in [intervals.icu](https://intervals.icu) to overlay them.
+
+> In short: the *real meter* and the *estimate* always coexist as separate data fields; the only either/or choice is **which single “KPW …” sensor you pair** as the Karoo's recorded power source.
+
+#### D) Use the real meter to calibrate the estimate
+
+Do (C), ride with **varied speeds**, then open the bike in *Estimator* — KPower will offer measured **Crr/CdA** to apply. See *Field calibration* below.
+
 ### Simple mode (recommended for most users)
 
 Pick the things you actually know and let the app derive the rest:
 
 - **Bike preset / position**: Road (hoods), Road (drops), Time trial, Gravel or MTB. Sets a sensible aerodynamic drag and a default tyre/surface.
 - **Rider height** (cm): used together with your weight (from the Karoo profile) to estimate your **frontal area** (Bassett et al. regression).
-- **Tyre**: width (mm for road/gravel, or inches for MTB — e.g. `2.3`), pressure (bar), tread (road slick / gravel / MTB knobby) and whether it is **tubeless**. The app derives the **rolling resistance (Crr)** from these (tubeless saving based on bicyclerollingresistance.com data). If your front and rear tyres differ (width or pressure), enter the **rear** one — it carries most of the weight and dominates rolling resistance.
+- **Tyre**: width (mm for road/gravel, or inches for MTB — e.g. `2.3`), pressure (bar), tread (road slick / gravel / MTB knobby) and whether it is **tubeless**. The app derives the **rolling resistance (Crr)** from these (tubeless saving based on bicyclerollingresistance.com data). The pressure penalty is relative to an **optimal pressure** that scales with your **load** (rider + bike weight) and falls with tyre width, following Frank Berto's 15%-drop tables — so wide tyres correctly want much lower pressure than narrow ones. If your front and rear tyres differ (width or pressure), enter the **rear** one — it carries most of the weight and dominates rolling resistance.
 - **Surface**: the terrain you ride (asphalt, mix, gravel, off-road/sand). It scales the rolling resistance. Pick the one that matches your usual route.
 - **FTP**: taken from your Karoo profile automatically. While "Use FTP from Karoo profile" is on, the FTP field is read-only and shows the value from your Karoo profile; turn the switch off to type a manual FTP.
 - **Weight of Bike** (kg): bike plus any extra gear.
@@ -70,13 +112,11 @@ Toggle Advanced to set the physics values **directly by hand**. In Advanced the 
 
 ### Wind and weather
 
-- **Use Headwind weather if installed** (on by default): if you also run the [Headwind](https://github.com/timklge/karoo-headwind) extension, KPower reads temperature, pressure and wind from Headwind's stream instead of polling its own weather API — no point in both extensions looking up the weather. If Headwind isn't installed (or it has no data yet), KPower falls back to its own lookup automatically. Turn this switch off to always use KPower's own weather even when Headwind is present.
-  - Note on units: temperature and pressure come from Headwind exactly; for wind, KPower assumes Headwind's **default** wind unit (km/h in metric, mph in imperial) and converts it to m/s. If you changed Headwind's wind unit to m/s or knots, the wind will be wrong — either keep Headwind on its default unit or turn this switch off.
-- **Wind API Key**: you can use OpenWeatherMap for wind/temperature/pressure (free, requires an account and an API key). It is usually more accurate (nearby stations) than Open-Meteo. Otherwise KPower uses Open-Meteo automatically. (Used when Headwind is not providing the data.)
+- **Weather provider: Open-Meteo, automatic.** KPower gets temperature, pressure and wind from [Open-Meteo](https://open-meteo.com/) — **free, no account, no API key, nothing to configure**. (Earlier versions also supported OpenWeatherMap; that has been removed — Open-Meteo is now the only built-in provider.)
+- **Use Headwind weather if installed** (on by default): if you also run the [Headwind](https://github.com/timklge/karoo-headwind) extension, KPower reads temperature, pressure and wind from Headwind's stream instead of polling Open-Meteo itself — no point in both extensions looking up the weather. If Headwind isn't installed (or it has no data yet), KPower falls back to Open-Meteo automatically. Turn this switch off to always use KPower's own Open-Meteo lookup even when Headwind is present.
+  - **Headwind wind unit**: temperature and pressure come from Headwind exactly. For wind, KPower needs to know which unit Headwind is sending. The **Headwind wind unit** dropdown defaults to **Auto** (assume Headwind's default — km/h in metric, mph in imperial). If you changed Headwind's wind unit to **m/s** or **knots**, pick that here so the wind is converted correctly.
 
-Kpower  will get the wind speed from openweathermap (you need to select openweather option also) or openmeteo automatically. 
-
-Kpower virtual sensor gives 0 W when you're not pedalling (cadence gate: off below 20 rpm, on above 25 rpm); you can force power even at low cadence in the config.
+KPower's virtual sensor gives 0 W when you're not pedalling (cadence gate: off below 20 rpm, on above 25 rpm); you can force power even at low cadence in the config.
 
 Here are some typical values for these parameters:
 
@@ -197,6 +237,19 @@ The four **Est. Power / 3s / NP / Avg** fields are **always** available on your 
 
 **Why logging is off by default:** writing the estimate to the FIT adds extra columns to every ride. The estimate fields themselves cost nothing unless you place them; recording a real meter costs a little battery while you ride.
 
+### Field calibration (let KPower measure your Crr & CdA)
+
+The estimate is only as good as its inputs — and the two hardest to guess are your **rolling resistance (Crr)** and **aerodynamic drag (CdA = Cd × frontal area)**. If you have a real meter, KPower can **measure them from your own data** instead of you guessing:
+
+1. **Enable a real meter** (*Real meter* tab) and turn on **“Log estimated power (FIT)”** (same tab). Both are needed — calibration runs while the comparison is active.
+2. **Go for a ride with varied speeds** — include some slow stretches *and* some fast ones (and ride the surfaces you care about). Variety is what lets the maths separate Crr from CdA; a ride at one constant speed can't be calibrated. ~5+ minutes of moving data minimum, ~2+ minutes per surface.
+3. **After the ride, open that bike in the *Estimator* tab.** If KPower gathered enough data, a **Field calibration** card appears showing, for this bike:
+   - **CdA** (and the matching **Cd** for your frontal area), each with a **± uncertainty**;
+   - **effective Crr per surface** (asphalt / standard / gravel / sand) you actually rode, each with its ± and sample count; surfaces you barely rode are shown as *not enough data*.
+4. Tap **Apply to this bike** to write the measured values in (this switches the bike to Advanced so the measured Crr/Cd are used directly). **Apply is only enabled for results that are reliable** — i.e. well-identified by your ride. A “⚠ too uncertain” line means *ride more / more varied speeds* and try again; KPower never applies a guessed-looking number.
+
+> The **±** is the honest part: a big ± means your ride didn't pin that number down (too constant a pace, too little data), so don't trust it. A small ± means the data really constrains it. This is why Apply is gated on reliability rather than just showing a single confident-looking value.
+
 ## Upgrading from a previous version
 
 > Coming from a version **older than 1.9.5**? Uninstall the old version first and then install this one (older builds used an incompatible data format).
@@ -214,7 +267,7 @@ The new behaviour you will notice on existing profiles is only the genuine model
 ## Features
 
 New in this release:
-- **Air density from real temperature and pressure** (ideal-gas law) using Open-Meteo / OpenWeather, with Karoo barometer/sensor and altitude as fallbacks.
+- **Air density from real temperature and pressure** (ideal-gas law) using Open-Meteo (free, no API key), with Karoo barometer/sensor and altitude as fallbacks.
 - **Acceleration / inertia term** (mass × acceleration), smoothed and clamped, so surges and stops are modelled more realistically.
 - **Simple / Advanced configuration** with bike presets, height-based frontal area (Bassett et al.), and tyre-based rolling resistance (width / pressure / tread).
 - **FTP from the Karoo user profile** (optional, on by default for new profiles; field is read-only while enabled).
@@ -236,14 +289,13 @@ Previous features:
 - Updated power estimation formula.
 - Added wind speed parameter with openmeteo (from Timklge repository headwind).
 - Added FTP to smooth the power estimation.
-- Added wind speed using openweathermap.
+- Added wind speed using openweathermap (later removed — Open-Meteo is now the only provider).
 - Added cadence to discard some power estimations (cadence lower than 22 rpm ). Cadence is better estimator than speed, but we cannot use directly because we need to know torque (and don't have this value) but we can use cadence to discard some bad estimations (when you go down a hill, for example, and you don't pedal). There is an option (v1.9.1) to force power calculation in any situation (with low cadences)
 
 ## Known issues
 
-- Power meter is not 100% accurate, it is only a estimation based in power formula. It is not possible to get the real power data from the Karoo without a power meter.
-There is currently a big important parameter in the power estimation, the wind. The wind can change the power needed to maintain a speed. 
-You can use openmeteo or openweathermap If you want to use openweathermap (better because they use near stations), you need to get an API key from openweathermap (free but you need to create an account) and introduce it in the configuration.
+- Power meter is not 100% accurate, it is only an estimation based on the power formula. It is not possible to get real power data from the Karoo without a power meter.
+The biggest unknown in the estimate is the **wind**, which strongly changes the power needed to hold a speed. KPower gets wind from Open-Meteo automatically (or from Headwind if installed) — there is nothing to configure. If you want the most accurate calibration of your bike's Crr/CdA, record a comparison ride with a real meter and let **field calibration** fit them from your data (see *Field calibration* below).
 
 - Power meter use values from Karoo (real), sometimes Karoo has some "delays/lags" or Karoo expose bad information (for example, current slope grade) then Power Meter will estimate not accurate values. Most of times 5-10 seconds later all is fine ;)
 
@@ -268,7 +320,6 @@ You can use openmeteo or openweathermap If you want to use openweathermap (bette
 
 [karoo-ext source](https://github.com/hammerheadnav/karoo-ext)
 [openmeteo](https://open-meteo.com/)
-[openweathermap](https://openweathermap.org/)
 [headwind](https://headwind.app/)
 [rolling resistance](https://www.bicyclerollingresistance.com/)
 https://sites.google.com/view/powerbikepro/configuration

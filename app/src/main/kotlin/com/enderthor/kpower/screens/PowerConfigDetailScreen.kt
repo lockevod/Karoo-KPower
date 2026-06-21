@@ -28,6 +28,11 @@ import com.enderthor.kpower.data.ConfigData
 import com.enderthor.kpower.data.bikeDotColors
 import com.enderthor.kpower.data.KarooSurface
 import com.enderthor.kpower.data.TreadType
+import com.enderthor.kpower.data.HeadwindWindUnit
+import com.enderthor.kpower.extension.calibrationFlow
+import com.enderthor.kpower.extension.clearCalibration
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import com.enderthor.kpower.extension.antMetersFlow
 import com.enderthor.kpower.extension.consumerFlow
 import com.enderthor.kpower.extension.isHeadwindInstalled
@@ -46,38 +51,41 @@ import kotlinx.coroutines.flow.collectLatest
 @Composable
 fun DetailScreen(configdata: ConfigData, onUpdate: (ConfigData) -> Unit, onDelete: () -> Unit, onBack: () -> Unit) {
     val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    // Field-calibration suggestion (computed from a comparison ride) for THIS bike, if any.
+    val calibration by ctx.calibrationFlow().collectAsState(initial = null)
     val karooSystem = remember { KarooSystemService(ctx) }
-    LaunchedEffect(Unit) {
+    DisposableEffect(Unit) {
         karooSystem.connect {}
+        onDispose { karooSystem.disconnect() }
     }
 
-    var title by remember { mutableStateOf(configdata.name) }
-    var bikeMass by remember { mutableStateOf(configdata.bikeMass) }
-    var rollingResistanceCoefficient by remember { mutableStateOf(configdata.rollingResistanceCoefficient) }
-    var dragCoefficient by remember { mutableStateOf(configdata.dragCoefficient) }
-    var isActive by remember { mutableStateOf(configdata.isActive) }
-    var powerLoss by remember { mutableStateOf(configdata.powerLoss) }
-    var frontalArea by remember { mutableStateOf(configdata.frontalArea) }
-    var headwind by remember { mutableStateOf(configdata.headwindconf) }
-    var apikey by remember { mutableStateOf(configdata.apikey) }
-    var isOpenWeather by remember { mutableStateOf(configdata.isOpenWeather) }
-    var ftp by remember { mutableStateOf(configdata.ftp) }
-    var surface by remember { mutableStateOf(configdata.surface) }
-    var isforcepower by remember { mutableStateOf(configdata.isforcepower) }
+    var title by remember(configdata.id) { mutableStateOf(configdata.name) }
+    var bikeMass by remember(configdata.id) { mutableStateOf(configdata.bikeMass) }
+    var rollingResistanceCoefficient by remember(configdata.id) { mutableStateOf(configdata.rollingResistanceCoefficient) }
+    var dragCoefficient by remember(configdata.id) { mutableStateOf(configdata.dragCoefficient) }
+    var isActive by remember(configdata.id) { mutableStateOf(configdata.isActive) }
+    var powerLoss by remember(configdata.id) { mutableStateOf(configdata.powerLoss) }
+    var frontalArea by remember(configdata.id) { mutableStateOf(configdata.frontalArea) }
+    var headwind by remember(configdata.id) { mutableStateOf(configdata.headwindconf) }
+    var ftp by remember(configdata.id) { mutableStateOf(configdata.ftp) }
+    var surface by remember(configdata.id) { mutableStateOf(configdata.surface) }
+    var isforcepower by remember(configdata.id) { mutableStateOf(configdata.isforcepower) }
 
-    var bikePosition by remember { mutableStateOf(configdata.bikePosition) }
-    var riderHeight by remember { mutableStateOf(configdata.riderHeight) }
-    var tyreWidth by remember { mutableStateOf(configdata.tyreWidth) }
-    var tyrePressure by remember { mutableStateOf(configdata.tyrePressure) }
-    var treadType by remember { mutableStateOf(configdata.treadType) }
-    var useProfileFtp by remember { mutableStateOf(configdata.useProfileFtp) }
-    var simpleMode by remember { mutableStateOf(configdata.simpleMode) }
-    var useKarooTemp by remember { mutableStateOf(configdata.useKarooTemp) }
-    var tubeless by remember { mutableStateOf(configdata.tubeless) }
-    var preferHeadwind by remember { mutableStateOf(configdata.preferHeadwind) }
-    var useRouteSurface by remember { mutableStateOf(configdata.useRouteSurface) }
-    var karooProfileId by remember { mutableStateOf(configdata.karooProfileId) }
-    var dotColor by remember { mutableStateOf(configdata.dotColorArgb) }
+    var bikePosition by remember(configdata.id) { mutableStateOf(configdata.bikePosition) }
+    var riderHeight by remember(configdata.id) { mutableStateOf(configdata.riderHeight) }
+    var tyreWidth by remember(configdata.id) { mutableStateOf(configdata.tyreWidth) }
+    var tyrePressure by remember(configdata.id) { mutableStateOf(configdata.tyrePressure) }
+    var treadType by remember(configdata.id) { mutableStateOf(configdata.treadType) }
+    var useProfileFtp by remember(configdata.id) { mutableStateOf(configdata.useProfileFtp) }
+    var simpleMode by remember(configdata.id) { mutableStateOf(configdata.simpleMode) }
+    var useKarooTemp by remember(configdata.id) { mutableStateOf(configdata.useKarooTemp) }
+    var tubeless by remember(configdata.id) { mutableStateOf(configdata.tubeless) }
+    var preferHeadwind by remember(configdata.id) { mutableStateOf(configdata.preferHeadwind) }
+    var headwindWindUnit by remember(configdata.id) { mutableStateOf(configdata.headwindWindUnit) }
+    var useRouteSurface by remember(configdata.id) { mutableStateOf(configdata.useRouteSurface) }
+    var karooProfileId by remember(configdata.id) { mutableStateOf(configdata.karooProfileId) }
+    var dotColor by remember(configdata.id) { mutableStateOf(configdata.dotColorArgb) }
     val headwindInstalled = remember { ctx.isHeadwindInstalled() }
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
@@ -91,7 +99,11 @@ fun DetailScreen(configdata: ConfigData, onUpdate: (ConfigData) -> Unit, onDelet
         val w = tyreWidth.toDoubleLocale()
         val p = tyrePressure.toDoubleLocale()
         if (w > 0 && p > 0) {
-            rollingResistanceCoefficient = String.format(java.util.Locale.US, "%.4f", estimateCrr(tyreWidthToMm(w), p, treadType, tubeless))
+            // System mass (rider + bike) feeds the load-dependent reference pressure; fall back to ~85 kg
+            // total when the rider weight isn't known yet (no Karoo profile).
+            val riderKg = riderWeightKg.takeIf { it > 0.0 } ?: 75.0
+            val bikeKg = bikeMass.toDoubleLocale().takeIf { it > 0.0 } ?: 10.0
+            rollingResistanceCoefficient = String.format(java.util.Locale.US, "%.4f", estimateCrr(tyreWidthToMm(w), p, treadType, tubeless, riderKg + bikeKg))
         }
     }
 
@@ -120,23 +132,22 @@ fun DetailScreen(configdata: ConfigData, onUpdate: (ConfigData) -> Unit, onDelet
         karooSystem.consumerFlow<UserProfile>().collect {
             riderWeightKg = it.weight.toDouble()
             riderFtp = it.ftp
-            recomputeArea()
+            // Simple mode only: re-derive area AND Crr now that the rider weight is known (the Crr
+            // reference pressure is load-dependent, so without this the load term stayed inert until a
+            // tyre field was touched). Gated on simpleMode so it never clobbers advanced/calibrated values.
+            if (simpleMode) { recomputeArea(); recomputeCrr() }
         }
     }
 
     fun getUpdatedConfigData(): ConfigData {
-        // The OpenWeather provider control is hidden in Simple mode and when Headwind is the active
-        // weather source. Don't persist a stranded isOpenWeather=true the rider can no longer see or
-        // turn off (it would keep hitting OpenWeather with an uneditable key); fall back to OpenMeteo.
-        val openWeatherVisible = !simpleMode && !(preferHeadwind && headwindInstalled)
-        val effectiveOpenWeather = isOpenWeather && openWeatherVisible
         return ConfigData(
         configdata.id, title, isActive, bikeMass, rollingResistanceCoefficient, dragCoefficient,
-        frontalArea, powerLoss, headwind, effectiveOpenWeather, apikey, ftp, surface, isforcepower,
+        frontalArea, powerLoss, headwind, ftp, surface, isforcepower,
         bikePosition, riderHeight, tyreWidth, tyrePressure, treadType, useProfileFtp, simpleMode, useKarooTemp, tubeless,
         preferHeadwind, useRouteSurface,
         karooProfileId = karooProfileId,
         dotColorArgb = dotColor,
+        headwindWindUnit = headwindWindUnit,
         )
     }
 
@@ -373,28 +384,63 @@ fun DetailScreen(configdata: ConfigData, onUpdate: (ConfigData) -> Unit, onDelet
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                // Wind-unit selector: Headwind emits wind in the unit you picked there. AUTO assumes its
+                // default (Karoo units); set it explicitly if you changed it, so KPower converts to m/s.
+                if (headwindInstalled) {
+                    val windUnitOptions = HeadwindWindUnit.entries.toList().map { DropdownOption(it.name, it.label) }
+                    val selectedWindUnit by remember(headwindWindUnit) {
+                        mutableStateOf(windUnitOptions.first { it.id == headwindWindUnit.name })
+                    }
+                    KarooKeyDropdown(remotekey = stringResource(R.string.headwind_wind_unit_label), options = windUnitOptions, selectedOption = selectedWindUnit) { opt ->
+                        headwindWindUnit = HeadwindWindUnit.valueOf(opt.id)
+                    }
+                }
             }
 
-            // Weather-provider switch + API key are expert knobs hidden in Simple mode, and
-            // are also hidden when Headwind is installed and selected (it supplies weather).
-            if (!simpleMode && !(preferHeadwind && headwindInstalled)) {
-                Text(stringResource(R.string.weather_provider_label), style = MaterialTheme.typography.bodySmall)
+            // Weather provider is Open-Meteo (free, no API key) — no provider/key controls needed.
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Switch(checked = isOpenWeather, onCheckedChange = {
-                        isOpenWeather = it
-                       // if (it) isActive = false
-                    })
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text(stringResource(R.string.weather_provider_switch))
-                }
+            // Field-calibration card: appears when a comparison ride produced a Crr/CdA fit for THIS bike.
+            // Shows each coefficient with its ± std error (the honest identifiability metric) and only
+            // enables Apply for the RELIABLE ones (well-identified + in range).
+            calibration?.takeIf { it.bikeId == configdata.id && it.samples >= 300 }?.let { cal ->
+                fun fmt(v: Double, d: Int) = String.format(java.util.Locale.US, "%.${d}f", v)
+                val bestSurface = cal.perSurface
+                    .filter { it.reliable && it.crrEff != null }
+                    .maxByOrNull { it.samples }
+                val area = frontalArea.toDoubleLocale().takeIf { it > 0.0 } ?: 0.42
+                val canApply = cal.cdaReliable || bestSurface != null
 
-                OutlinedTextField(value = apikey.toString(), modifier = Modifier.fillMaxWidth(),
-                    onValueChange = { apikey = it },
-                    label = { Text(stringResource(R.string.cfg_api_openweather)) },
-                    singleLine = true,
-                    enabled = isOpenWeather
+                Text(stringResource(R.string.calib_title), style = MaterialTheme.typography.titleSmall)
+                Text(
+                    stringResource(R.string.calib_summary, cal.samples),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                Text(
+                    if (cal.cdaReliable) "CdA ${fmt(cal.cda, 3)} ±${fmt(cal.cdaSe, 3)} → Cd ${fmt(cal.cda / area, 3)}"
+                    else "CdA ${fmt(cal.cda, 3)} ±${fmt(cal.cdaSe, 3)}  ⚠ ${stringResource(R.string.calib_unreliable)}",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                cal.perSurface.forEach { s ->
+                    val line = when {
+                        !s.sufficient || s.crrEff == null -> "${s.surface}: ${stringResource(R.string.calib_insufficient)} (n=${s.samples})"
+                        !s.reliable -> "${s.surface}: Crr ${fmt(s.crrEff!!, 4)} ±${s.crrSe?.let { fmt(it, 4) } ?: "—"}  ⚠"
+                        else -> "${s.surface}: Crr ${fmt(s.crrEff!!, 4)} ±${s.crrSe?.let { fmt(it, 4) } ?: "—"} (n=${s.samples})"
+                    }
+                    Text(line, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Button(
+                    onClick = {
+                        if (cal.cdaReliable) dragCoefficient = fmt(cal.cda / area, 3)
+                        bestSurface?.let { s ->
+                            val factor = runCatching { KarooSurface.valueOf(s.surface).factor }.getOrDefault(1.0)
+                            if (factor > 0.0) rollingResistanceCoefficient = fmt(s.crrEff!! / factor, 4)
+                        }
+                        simpleMode = false   // use the measured raw Crr/Cd, not the tyre-derived estimate
+                        scope.launch { clearCalibration(ctx) }   // consumed → don't re-offer a stale fit
+                    },
+                    enabled = canApply,
+                ) { Text(stringResource(R.string.calib_apply)) }
             }
 
             if (!simpleMode) {

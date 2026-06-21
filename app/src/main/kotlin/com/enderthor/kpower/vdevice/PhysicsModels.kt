@@ -53,11 +53,26 @@ fun estimateFrontalArea(heightCm: Double, weightKg: Double, position: BikePositi
 fun tyreWidthToMm(width: Double): Double =
     if (width > 0.0 && width <= 5.0) width * 25.4 else width
 
-fun estimateCrr(widthMm: Double, pressureBar: Double, treadType: TreadType, tubeless: Boolean = false): Double {
+fun estimateCrr(
+    widthMm: Double,
+    pressureBar: Double,
+    treadType: TreadType,
+    tubeless: Boolean = false,
+    systemMassKg: Double = 85.0,
+): Double {
     val base = treadType.baseCrr
     val w = widthMm.coerceIn(18.0, 70.0)
-    val refPressure = (6.5 - (w - 25.0) * 0.07).coerceIn(1.5, 7.0)
+    // Reference (optimal) pressure ≈ 22.8·wheelLoad / width^1.55, anchored to Frank Berto's 15%-tyre-drop
+    // tables: the optimum scales with LOAD and FALLS STEEPLY with width (not a shallow width-only line).
+    // Anchors matching Berto: 25mm@40kg→~6.2 bar, 32mm→~4.2, 40mm→~3.0, 50mm→~2.1. wheelLoad ≈ ½ the
+    // rider+bike mass (≈50/50). NOTE Berto runs a touch HIGH on narrow road tyres vs modern impedance
+    // models (SILCA/Poertner) — field calibration refines it empirically. Upper clamp = the `p` clamp
+    // (9 bar) so a heavy rider on a narrow tyre at a legitimately high pressure isn't falsely penalised.
+    val wheelLoadKg = (systemMassKg.coerceIn(40.0, 150.0)) / 2.0
+    val refPressure = (22.8 * wheelLoadKg / w.pow(1.55)).coerceIn(1.5, 9.0)
     val p = pressureBar.coerceIn(1.0, 9.0)
+    // Real-road Crr-vs-pressure is U-shaped (impedance/vibration losses above the optimum, casing losses
+    // below) — Silca/Poertner — so deviating EITHER way from the reference penalises. ~6% per bar.
     val penalty = 1.0 + 0.06 * abs(p - refPressure)
     // Tubeless rueda mejor que con cámara; el ahorro depende del tipo de neumático
     // (ver TreadType.tubelessFactor, basado en bicyclerollingresistance.com).

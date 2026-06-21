@@ -7,6 +7,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
 import timber.log.Timber
 import com.enderthor.kpower.BuildConfig
+import com.enderthor.kpower.ant.BatteryLevel
+import com.enderthor.kpower.ant.batteryLevelOf
 
 private sealed interface Sample {
     @JvmInline value class Power(val value: Double) : Sample
@@ -14,13 +16,13 @@ private sealed interface Sample {
     @JvmInline value class Battery(val code: Int?) : Sample
 }
 
-/** ANT+ battery status code (1=New..5=Critical) -> karoo-ext BatteryStatus. Unknown -> GOOD (don't alarm). */
-private fun batteryStatusOf(code: Int?): BatteryStatus = when (code) {
-    1 -> BatteryStatus.NEW
-    2, 3 -> BatteryStatus.GOOD
-    4 -> BatteryStatus.LOW
-    5 -> BatteryStatus.CRITICAL
-    else -> BatteryStatus.GOOD
+/** ANT+ battery status code (1=New..5=Critical) -> karoo-ext BatteryStatus, reusing [batteryLevelOf]
+ *  so the LOW/CRITICAL thresholds live in ONE place. Unknown -> GOOD (don't alarm on the sensor card). */
+private fun batteryStatusOf(code: Int?): BatteryStatus = when (batteryLevelOf(code)) {
+    BatteryLevel.LOW -> BatteryStatus.LOW
+    BatteryLevel.CRITICAL -> BatteryStatus.CRITICAL
+    BatteryLevel.OK -> if (code == 1) BatteryStatus.NEW else BatteryStatus.GOOD
+    BatteryLevel.UNKNOWN -> BatteryStatus.GOOD
 }
 
 class RealPowerSource(

@@ -59,3 +59,12 @@ fun antDeviceDisplayName(manufacturerId: Int, modelNumber: Int): String {
     val model = if (manufacturerId == 1) GarminProducts.name(modelNumber) else null
     return if (model != null) "$brand $model" else brand
 }
+
+/** COMPACT name for KPW's own paired-sensor label, so it stays short ("KPW Rally 200", not
+ *  "KPW Garmin Rally 200"): the MODEL if known, else the brand ("Bkool"), else null when the
+ *  manufacturer is unknown — callers then fall back to the device number ("KPW #<id>"). */
+fun antDeviceShortName(manufacturerId: Int, modelNumber: Int): String? {
+    if (manufacturerId == 1) GarminProducts.name(modelNumber)?.let { return it }
+    val brand = AntManufacturers.name(manufacturerId)
+    return if (brand.startsWith("ANT #")) null else brand
+}

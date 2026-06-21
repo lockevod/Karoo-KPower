@@ -10,9 +10,11 @@ import io.hammerhead.karooext.models.DeveloperField
 import io.hammerhead.karooext.models.Device
 import io.hammerhead.karooext.models.DeviceEvent
 import io.hammerhead.karooext.models.FieldValue
+import io.hammerhead.karooext.models.BatteryStatus
 import io.hammerhead.karooext.models.FitEffect
 import io.hammerhead.karooext.models.InRideAlert
 import io.hammerhead.karooext.models.RideState
+import io.hammerhead.karooext.models.SavedDevices
 import io.hammerhead.karooext.models.StreamState
 import io.hammerhead.karooext.models.UserProfile
 import io.hammerhead.karooext.models.WriteToRecordMesg
@@ -28,6 +30,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flatMapLatest
@@ -61,11 +64,22 @@ private data class FitTick(
     val comparisonMode: Boolean,
 )
 
-/** Holder for the 3-way combine driving the ride-state connect gate. */
+/** Holder for the 3-way combine driving the ride-state connect gate. Carries only the ENABLED device
+ *  numbers (not the full meter list) so battery/label persistence writes can't flap the channel. */
 private data class RideGate(
     val state: RideState,
     val mode: Boolean,
-    val meters: List<com.enderthor.kpower.ant.SavedMeter>,
+    val enabledDns: List<Int>,
+)
+
+/** One battery-alert event. flatMapLatest only SELECTS the flow that produces these (pure); the arm/
+ *  fire state machine lives entirely in the collector. code == null is a gate-only event (ride/meter
+ *  changed, no battery sample) so the collector can still (dis)arm. */
+private data class BatEvent(
+    val ride: RideState,
+    val meter: com.enderthor.kpower.ant.SavedMeter?,
+    val enabled: Boolean,
+    val code: Int?,
 )
 
 class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
@@ -109,8 +123,14 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
     private val sharedMeters by lazy {
         applicationContext.antMetersFlow().shareIn(serviceScope, SharingStarted.WhileSubscribed(5_000), replay = 1)
     }
-    private val sharedEnabledGate by lazy {
-        sharedMeters.map { ms -> ms.any { it.enabled } }.distinctUntilChanged()
+    /**
+     * The SINGLE resolved "active meter device number (or null)" — one enabled meter drives every real
+     * field. Computed once and shared so the ~16 real/dynamics fields don't each run their own
+     * combine(gate, meters)+firstOrNull scan (Ki2 resolves one currentDeviceId the same way). Also
+     * reused by the brand/battery collectors below.
+     */
+    private val sharedActiveDn by lazy {
+        sharedMeters.map { ms -> ms.firstOrNull { it.enabled }?.deviceNumber }.distinctUntilChanged()
     }
 
     override val types: List<DataTypeImpl> by lazy {
@@ -119,28 +139,27 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
             EstimatedPowerDataType(extension, TYPE_EST_3S, engine) { it.power3sW },
             EstimatedPowerDataType(extension, TYPE_EST_NP, engine) { it.npW },
             EstimatedPowerDataType(extension, TYPE_EST_AVG, engine) { it.avgW },
-            RealPowerDataType(extension, realFieldTypeId(0, "power"), 0, { sharedEnabledGate }, { sharedMeters }) { dn -> antManager.powerFlow(dn) },
-            RealPowerDataType(extension, realFieldTypeId(0, "3s"),    0, { sharedEnabledGate }, { sharedMeters }) { dn -> antManager.power3sFlow(dn) },
-            RealPowerDataType(extension, realFieldTypeId(0, "np"),    0, { sharedEnabledGate }, { sharedMeters }) { dn -> antManager.npFlow(dn) },
-            RealPowerDataType(extension, realFieldTypeId(0, "avg"),   0, { sharedEnabledGate }, { sharedMeters }) { dn -> antManager.avgFlow(dn) },
-            RealPowerDataType(extension, realFieldTypeId(0, "max"),     0, { sharedEnabledGate }, { sharedMeters }) { dn -> antManager.maxFlow(dn) },
-            RealPowerDataType(extension, realFieldTypeId(0, "10s"),     0, { sharedEnabledGate }, { sharedMeters }) { dn -> antManager.power10sFlow(dn) },
-            RealPowerDataType(extension, realFieldTypeId(0, "cadence"), 0, { sharedEnabledGate }, { sharedMeters }) { dn -> antManager.cadenceFlow(dn) },
-            RealPowerDataType(extension, realFieldTypeId(0, "torque"),  0, { sharedEnabledGate }, { sharedMeters }) { dn -> antManager.torqueFlow(dn) },
-            // Live cycling-dynamics fields (slot 0), gated on "a meter is recorded" (saved meters
-            // list non-empty). Each metricFlowFor maps a STABLE manager-level dynamics sink to a
-            // Double (null -> NaN -> `---`). These sinks survive meter reconnect: the bridges[dn]
-            // coroutine re-mirrors each new RawAntPowerMeter into the same MutableStateFlow, so the
-            // field never freezes.
-            // Two-sided dynamics shown as graphical "L/R" (e.g. "47/53"): balance, torque
-            // effectiveness, pedal smoothness. Left value first (left pedal), right second.
-            DualValueDataType(extension, dynFieldTypeId("balance"), 0, { sharedEnabledGate }, { sharedMeters }) { dn -> antManager.balanceFlow(dn).map { r -> if (r.isNaN()) null to null else (100.0 - r) to r } },
-            DualValueDataType(extension, dynFieldTypeId("te"), 0, { sharedEnabledGate }, { sharedMeters }) { dn -> antManager.tePsFlow(dn).map { it?.teLeftPct to it?.teRightPct } },
-            DualValueDataType(extension, dynFieldTypeId("ps"), 0, { sharedEnabledGate }, { sharedMeters }) { dn -> antManager.tePsFlow(dn).map { it?.psLeftPct to it?.psRightPct } },
-            DynamicsDataType(extension, dynFieldTypeId("pp-left"), 0, { sharedEnabledGate }, { sharedMeters }) { dn -> antManager.forceLeftFlow(dn).map { it?.startAngleDeg ?: Double.NaN } },
-            DynamicsDataType(extension, dynFieldTypeId("pp-right"), 0, { sharedEnabledGate }, { sharedMeters }) { dn -> antManager.forceRightFlow(dn).map { it?.startAngleDeg ?: Double.NaN } },
-            DynamicsDataType(extension, dynFieldTypeId("peakpp-left"), 0, { sharedEnabledGate }, { sharedMeters }) { dn -> antManager.forceLeftFlow(dn).map { it?.startPeakDeg ?: Double.NaN } },
-            DynamicsDataType(extension, dynFieldTypeId("peakpp-right"), 0, { sharedEnabledGate }, { sharedMeters }) { dn -> antManager.forceRightFlow(dn).map { it?.startPeakDeg ?: Double.NaN } },
+            RealPowerDataType(extension, realFieldTypeId(0, "power"),   { sharedActiveDn }) { dn -> antManager.powerFlow(dn) },
+            RealPowerDataType(extension, realFieldTypeId(0, "3s"),      { sharedActiveDn }) { dn -> antManager.power3sFlow(dn) },
+            RealPowerDataType(extension, realFieldTypeId(0, "np"),      { sharedActiveDn }) { dn -> antManager.npFlow(dn) },
+            RealPowerDataType(extension, realFieldTypeId(0, "avg"),     { sharedActiveDn }) { dn -> antManager.avgFlow(dn) },
+            RealPowerDataType(extension, realFieldTypeId(0, "max"),     { sharedActiveDn }) { dn -> antManager.maxFlow(dn) },
+            RealPowerDataType(extension, realFieldTypeId(0, "10s"),     { sharedActiveDn }) { dn -> antManager.power10sFlow(dn) },
+            RealPowerDataType(extension, realFieldTypeId(0, "cadence"), { sharedActiveDn }) { dn -> antManager.cadenceFlow(dn) },
+            RealPowerDataType(extension, realFieldTypeId(0, "torque"),  { sharedActiveDn }) { dn -> antManager.torqueFlow(dn) },
+            // Live cycling-dynamics fields driven by the SAME single active-meter flow. Each metricFlowFor
+            // maps a STABLE manager-level dynamics sink to a Double (null -> NaN -> `---`). These sinks
+            // survive meter reconnect: the bridges[dn] coroutine re-mirrors each new RawAntPowerMeter into
+            // the same MutableStateFlow, so the field never freezes.
+            // Two-sided dynamics shown as graphical "L/R" (e.g. "47/53"): balance, torque effectiveness,
+            // pedal smoothness. Left value first (left pedal), right second.
+            DualValueDataType(extension, dynFieldTypeId("balance"), { sharedActiveDn }) { dn -> antManager.balanceFlow(dn).map { r -> if (r.isNaN()) null to null else (100.0 - r) to r } },
+            DualValueDataType(extension, dynFieldTypeId("te"), { sharedActiveDn }) { dn -> antManager.tePsFlow(dn).map { it?.teLeftPct to it?.teRightPct } },
+            DualValueDataType(extension, dynFieldTypeId("ps"), { sharedActiveDn }) { dn -> antManager.tePsFlow(dn).map { it?.psLeftPct to it?.psRightPct } },
+            DynamicsDataType(extension, dynFieldTypeId("pp-left"), { sharedActiveDn }) { dn -> antManager.forceLeftFlow(dn).map { it?.startAngleDeg ?: Double.NaN } },
+            DynamicsDataType(extension, dynFieldTypeId("pp-right"), { sharedActiveDn }) { dn -> antManager.forceRightFlow(dn).map { it?.startAngleDeg ?: Double.NaN } },
+            DynamicsDataType(extension, dynFieldTypeId("peakpp-left"), { sharedActiveDn }) { dn -> antManager.forceLeftFlow(dn).map { it?.startPeakDeg ?: Double.NaN } },
+            DynamicsDataType(extension, dynFieldTypeId("peakpp-right"), { sharedActiveDn }) { dn -> antManager.forceRightFlow(dn).map { it?.startPeakDeg ?: Double.NaN } },
         )
     }
 
@@ -148,9 +167,11 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
     // tick was a needless allocation. ConcurrentHashMap + computeIfAbsent: the FIT collect loop is
     // normally the only writer, but if the host ever overlaps two startFit subscriptions a plain
     // HashMap could ConcurrentModificationException mid-recording — this makes it crash-proof.
-    private val meterFieldCache = java.util.concurrent.ConcurrentHashMap<Pair<Int, Int>, DeveloperField>()
+    // Key packed into an Int ((slot shl 8) or kind) so the 1 Hz FIT loop probes the cache without
+    // allocating a Pair every tick.
+    private val meterFieldCache = java.util.concurrent.ConcurrentHashMap<Int, DeveloperField>()
     private fun meterField(slot: Int, kind: Int, name: String, units: String) =
-        meterFieldCache.computeIfAbsent(slot to kind) {
+        meterFieldCache.computeIfAbsent((slot shl 8) or kind) {
             DeveloperField(
                 (com.enderthor.kpower.ant.fitFieldBase(slot) + kind).toShort(), 136, name, units,
             )
@@ -184,6 +205,43 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
             karooSystem.updateLastKnownGps(this@KpowerExtension)
         }
 
+        // Field calibration: feed the engine the ACTIVE real meter's live power, and persist the running
+        // CdA + per-surface-Crr fit every 30 s while recording, so the settings UI can offer it after the
+        // ride (the extension process may be killed at ride end).
+        engine.realPowerProvider = {
+            val dn = savedMetersSnapshot.firstOrNull { it.enabled }?.deviceNumber
+            if (dn != null) antManager.meter(dn)?.power?.value ?: Double.NaN else Double.NaN
+        }
+        serviceScope.launch {
+            var lastSavedSamples = -1L
+            while (isActive) {
+                delay(30_000L)
+                if (!isRecording) continue
+                val fit = engine.calibrationFit() ?: continue
+                if (fit.samples == lastSavedSamples) continue   // no new data → skip the DataStore write
+                val bikeId = com.enderthor.kpower.data.resolveActiveConfig(
+                    applicationContext.loadPreferencesFlow().first(), activeProfileIdFlow.value
+                )?.id ?: continue
+                val suggestion = com.enderthor.kpower.data.CalibrationSuggestion(
+                    cda = fit.cda,
+                    cdaSe = fit.cdaSe,
+                    cdaReliable = fit.cdaReliable,
+                    perSurface = fit.perSurface.map {
+                        com.enderthor.kpower.data.SurfaceCrrSuggestion(it.surface.name, it.crrEff, it.crrSe, it.samples, it.sufficient, it.reliable)
+                    },
+                    samples = fit.samples,
+                    bikeId = bikeId,
+                    timestampMs = System.currentTimeMillis(),
+                )
+                runCatching { saveCalibration(applicationContext, suggestion) }
+                lastSavedSamples = fit.samples
+                if (FileLogTree.enabled) Timber.tag("CALIB").d(
+                    "fit cda=%.3f±%.3f n=%d %s", fit.cda, fit.cdaSe, fit.samples,
+                    fit.perSurface.joinToString(" ") { s -> "${s.surface}:${s.crrEff?.let { "%.4f".format(it) } ?: "—"}±${s.crrSe?.let { "%.4f".format(it) } ?: "—"}(${s.samples})" },
+                )
+            }
+        }
+
         // Drive the diagnostic file logger from the rider's toggle (off by default). On turn-OFF,
         // flush the tail and close the writer so the last seconds aren't lost and the fd isn't leaked.
         serviceScope.launch {
@@ -208,9 +266,7 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
         // Only meaningful while the meter is connected (recording). The write is an ATOMIC transform
         // so it can't clobber a concurrent rename/toggle.
         serviceScope.launch {
-            sharedMeters
-                .map { it.firstOrNull { m -> m.enabled }?.deviceNumber }
-                .distinctUntilChanged()
+            sharedActiveDn
                 .flatMapLatest { dn -> if (dn == null) emptyFlow() else antManager.manufacturerFlow(dn).map { dn to it } }
                 .collect { (dn, brand) ->
                     if (brand.isNullOrBlank()) return@collect
@@ -219,6 +275,52 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                             if (it.deviceNumber == dn && !it.userNamed && isAutoMeterLabel(it.label, dn))
                                 it.copy(label = brand) else it
                         }
+                    }
+                }
+        }
+
+        // HYBRID name+battery (PRIMARY source): the Karoo already knows its paired sensors. SavedDevices
+        // gives their real NAME + battery with NO raw channel and NO scan conflict — same data the Karoo
+        // shows, just read from its cache. Adopt it onto our saved meters, matched by ANT device number.
+        // The raw-channel identify (ComparisonScreen, after Add) is the FALLBACK for meters the Karoo
+        // hasn't paired. A manual rename (userNamed) is never overwritten.
+        serviceScope.launch {
+            combine(sharedMeters, karooSystem.savedDevicesFlow()) { meters, sd -> meters to sd.devices }
+                .collect { (meters, devices) ->
+                    if (FileLogTree.enabled) devices.forEach { d ->
+                        Timber.tag("KAROODEV").d(
+                            "saved id=%s conn=%s name=%s serial=%s batt=%s",
+                            d.id, d.connectionType, d.name, d.details.serialNumber, d.details.lastBattery,
+                        )
+                    }
+                    if (meters.isEmpty()) return@collect
+                    updateAntMeters(applicationContext) { current ->
+                        current.map { m ->
+                            val match = devices.firstOrNull { it.matchesAntNumber(m.deviceNumber) } ?: return@map m
+                            val name = match.name.trim()
+                            val newLabel = if (name.isNotEmpty() && !m.userNamed && isAutoMeterLabel(m.label, m.deviceNumber)) name else m.label
+                            // Only SEED the battery from the Karoo's (possibly stale) cache when we have
+                            // none yet. The live ride collector owns ongoing updates — otherwise the two
+                            // ping-pong (cached vs fresh), each a real change, and storm the DataStore.
+                            val newBatt = m.lastBatteryCode ?: batteryCodeOf(match.details.lastBattery)
+                            if (newLabel == m.label && newBatt == m.lastBatteryCode) m
+                            else m.copy(label = newLabel, lastBatteryCode = newBatt)
+                        }
+                    }
+                }
+        }
+
+        // Persist the active meter's last battery level into its SavedMeter, so the settings screen can
+        // show a battery icon at a glance WITHOUT opening the raw ANT channel there (which fought the
+        // scan). batteryFlow has fresh data while the meter's channel is open — i.e. during a ride.
+        // updateAntMeters skips no-op writes, so this only persists on an actual level change.
+        serviceScope.launch {
+            sharedActiveDn
+                .flatMapLatest { dn -> if (dn == null) emptyFlow() else antManager.batteryFlow(dn).map { dn to it } }
+                .collect { (dn, code) ->
+                    if (code == null) return@collect
+                    updateAntMeters(applicationContext) { meters ->
+                        meters.map { if (it.deviceNumber == dn && it.lastBatteryCode != code) it.copy(lastBatteryCode = code) else it }
                     }
                 }
         }
@@ -244,30 +346,36 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                 karooSystem.consumerFlow<RideState>().distinctUntilChanged(),
                 sharedMeters.map { it.firstOrNull { m -> m.enabled } }.distinctUntilChanged(),
             ) { enabled, ride, meter -> Triple(enabled, ride, meter) }
+                // PURE: only select the flow. No state mutation here — flatMapLatest re-runs on every
+                // upstream emission and on flow re-assembly, so mutating arm flags here would be a
+                // non-idempotent side effect. We emit a gate-only event (null code) for the non-recording
+                // path so the collector can still (dis)arm.
                 .flatMapLatest { (enabled, ride, meter) ->
-                    when (ride) {
+                    if (!enabled || ride !is RideState.Recording || meter == null)
+                        flowOf(BatEvent(ride, meter, enabled, null))
+                    else
+                        antManager.batteryFlow(meter.deviceNumber).map { code -> BatEvent(ride, meter, enabled, code) }
+                }
+                // The arm/fire state machine lives ONLY here — runs exactly once per collected event.
+                .collect { ev ->
+                    when (ev.ride) {
                         is RideState.Idle -> sawIdle = true
+                        // Re-arm ONLY on Idle -> Recording (a genuine new ride), never on Paused -> Recording.
                         is RideState.Recording -> if (sawIdle) { firedLow = false; firedCritical = false; sawIdle = false }
                         else -> {} // Paused: keep flags, don't re-arm
                     }
-                    if (!enabled || ride !is RideState.Recording || meter == null) emptyFlow()
-                    else {
-                        // Re-arm when the ACTIVE meter changes — but ONLY here, inside the recording +
-                        // enabled path. Doing it earlier would let a meter swap during an autopause
-                        // (Paused) re-arm and then re-fire on resume, exceeding the per-ride cap.
-                        if (meter.deviceNumber != lastAlertDn) {
-                            firedLow = false; firedCritical = false; lastAlertDn = meter.deviceNumber
-                        }
-                        antManager.batteryFlow(meter.deviceNumber).map { code -> meter to code }
+                    if (!ev.enabled || ev.ride !is RideState.Recording || ev.meter == null) return@collect
+                    // Re-arm when the ACTIVE meter changes (different battery) — inside the recording path.
+                    if (ev.meter.deviceNumber != lastAlertDn) {
+                        firedLow = false; firedCritical = false; lastAlertDn = ev.meter.deviceNumber
                     }
-                }
-                .collect { (meter, code) ->
+                    val code = ev.code ?: return@collect
                     when (batteryLevelOf(code)) {
-                        BatteryLevel.CRITICAL -> if (!firedCritical) { firedCritical = true; dispatchBatteryAlert(meter, critical = true) }
+                        BatteryLevel.CRITICAL -> if (!firedCritical) { firedCritical = true; dispatchBatteryAlert(ev.meter, critical = true) }
                         // Critical implies low is already covered: don't fire a (lesser) LOW after a
                         // CRITICAL has fired — the ANT+ code can oscillate 5->4->5 near the threshold,
                         // which would otherwise read as a confusing "recovered to low" message.
-                        BatteryLevel.LOW -> if (!firedLow && !firedCritical) { firedLow = true; dispatchBatteryAlert(meter, critical = false) }
+                        BatteryLevel.LOW -> if (!firedLow && !firedCritical) { firedLow = true; dispatchBatteryAlert(ev.meter, critical = false) }
                         else -> {}
                     }
                 }
@@ -276,7 +384,13 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
         // Mirror the active Karoo ride-profile id (drives bike resolution in the engine)
         // and learn profiles (id+name) so the Settings UI can offer them for mapping.
         serviceScope.launch {
-            karooSystem.streamRideProfile().collect { profile ->
+            // distinctUntilChanged: the host re-emits ActiveRideProfile periodically; without this we'd
+            // do a DataStore read + JSON decode of known profiles on every (usually unchanged) emission.
+            karooSystem.streamRideProfile().distinctUntilChanged().collect { profile ->
+                // A genuine mid-ride profile change means a different bike → drop calibration samples
+                // collected under the previous bike so the fit isn't mis-attributed.
+                val prev = activeProfileIdFlow.value
+                if (prev != null && prev != profile.id && isRecording) engine.resetCalibration()
                 activeProfileIdFlow.value = profile.id
                 runCatching {
                     val known = applicationContext.knownProfilesFlow().first()
@@ -300,15 +414,18 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
             kotlinx.coroutines.flow.combine(
                 karooSystem.consumerFlow<RideState>(),
                 applicationContext.comparisonModeFlow(),
-                sharedMeters,
-            ) { state, mode, meters -> RideGate(state, mode, meters) }
+                // Only the ENABLED device numbers, SORTED + deduped: a battery/label write (or a list
+                // reorder) that doesn't change the enabled SET won't re-trigger this gate — so no channel
+                // close/reopen flap mid-ride. (sorted() makes distinctUntilChanged order-insensitive.)
+                sharedMeters.map { ms -> ms.filter { it.enabled }.map { it.deviceNumber }.sorted() }.distinctUntilChanged(),
+            ) { state, mode, dns -> RideGate(state, mode, dns) }
                 // Dedup is safe: RideState.Recording/Idle are payload-free objects, so
                 // collapsing identical emissions never drops a real transition. And
                 // engine.onRideState(state) is intentionally called before the comparison
                 // shouldRun gate below, so NP/avg reset + pause-freeze work even when
                 // comparison mode is OFF.
                 .distinctUntilChanged()
-                .collect { (state, mode, meters) ->
+                .collect { (state, mode, enabledDns) ->
                     engine.onRideState(state)
                     antManager.onRideState(state)
                     isRecording = state is RideState.Recording
@@ -332,13 +449,13 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                     // Comparison mode no longer drives the meter connection — it only drives the
                     // estimate engine, acquired separately via shouldRunComparison above.
                     val inActiveRide = state is RideState.Recording || state is RideState.Paused
-                    val shouldConnect = meters.any { it.enabled } && inActiveRide
+                    val shouldConnect = enabledDns.isNotEmpty() && inActiveRide
                     if (shouldRunComparison && !acquiredForComparison) {
                         engine.acquire(comparisonToken); acquiredForComparison = true
                     } else if (!shouldRunComparison && acquiredForComparison) {
                         engine.release(comparisonToken); acquiredForComparison = false
                     }
-                    if (shouldConnect) antManager.connectMeters(meters.filter { it.enabled }.map { it.deviceNumber })
+                    if (shouldConnect) antManager.connectMeters(enabledDns)
                     else antManager.disconnectAll()
                 }
         }
@@ -372,7 +489,10 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                     delay(WEATHER_CHECK_INTERVAL_MS)
                     continue
                 }
-                val cfg = preferences[0]
+                // Use the bike actually in use (mapped profile / active), NOT preferences[0] — otherwise
+                // the weather policy (preferHeadwind) is read from the wrong bike whenever the active one
+                // isn't first, and the estimator consumes mismatched weather.
+                val cfg = com.enderthor.kpower.data.resolveActiveConfig(preferences, activeProfileIdFlow.value) ?: preferences[0]
                 val gps = karooSystem.getGpsCoordinateFlow(this@KpowerExtension)
                     .firstOrNull()
                 if (gps == null) {
@@ -386,7 +506,8 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                 val lastMs = stats.lastSuccessfulWeatherRequest ?: 0L
                 val movedFarEnough = lastPos == null ||
                     gps.distanceTo(lastPos) >= WEATHER_MIN_MOVE_KM
-                val tooOld = lastMs == 0L || (now - lastMs) >= WEATHER_MAX_AGE_MS
+                // coerceAtLeast(0): a backward GPS clock jump must not make weather look "fresh" forever.
+                val tooOld = lastMs == 0L || (now - lastMs).coerceAtLeast(0L) >= WEATHER_MAX_AGE_MS
 
                 if (!movedFarEnough && !tooOld) {
                     delay(WEATHER_CHECK_INTERVAL_MS)
@@ -402,7 +523,7 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                             .preferredUnit.distance == UserProfile.PreferredUnit.UnitType.IMPERIAL
                     }.getOrDefault(false)
 
-                    val hw = karooSystem.fetchHeadwindWeatherSnapshot(gps, isImperial)
+                    val hw = karooSystem.fetchHeadwindWeatherSnapshot(gps, isImperial, cfg.headwindWindUnit)
                     if (hw != null) {
                         try {
                             saveCurrentData(applicationContext, hw)
@@ -422,11 +543,7 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                     Timber.w("Headwind installed but no data; falling back to own weather API")
                 }
 
-                val response = karooSystem.makeOpenMeteoHttpRequest(
-                    gps,
-                    cfg.isOpenWeather,
-                    cfg.apikey,
-                )
+                val response = karooSystem.makeOpenMeteoHttpRequest(gps)
 
                 if (response.error != null) {
                     runCatching {
@@ -503,6 +620,16 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
         return if (!model.isNullOrBlank()) "KPW $model" else "KPW #$deviceNumber"
     }
 
+    /** Map the Karoo's BatteryStatus to our 1..5 code (matches the ANT+ 0x52 levels; INVALID -> null). */
+    private fun batteryCodeOf(b: BatteryStatus?): Int? = when (b) {
+        BatteryStatus.NEW -> 1
+        BatteryStatus.GOOD -> 2
+        BatteryStatus.OK -> 3
+        BatteryStatus.LOW -> 4
+        BatteryStatus.CRITICAL -> 5
+        else -> null
+    }
+
     /** Fire the battery in-ride alert, naming the meter. Colours/icon are @ColorRes/@DrawableRes (the
      *  host resolves them via Context.getColor — a packed ARGB would crash the ride app). */
     private fun dispatchBatteryAlert(meter: com.enderthor.kpower.ant.SavedMeter, critical: Boolean) {
@@ -569,17 +696,22 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                         }
                     }
                     // A real meter recorded through KPower always writes its pm*_ fields (the Karoo
-                    // doesn't record the extension's meter natively). Only one meter can be enabled
-                    // at a time, but we filter defensively.
-                    metersSnapshot.filter { it.enabled }.forEach { m ->
+                    // doesn't record the extension's meter natively). Exactly ONE meter is active — use
+                    // firstOrNull, NOT filter{enabled}: two enabled meters would write conflicting values
+                    // into the same record fields (the host keeps one → corrupt FIT).
+                    metersSnapshot.firstOrNull { it.enabled }?.let { m ->
                         val reader = antManager.meter(m.deviceNumber)
                         val pw = reader?.power?.value ?: Double.NaN
                         val cad = reader?.cadence?.value ?: Double.NaN
                         val bal = reader?.balanceRightPct?.value ?: Double.NaN
                         val tq = reader?.torque?.value ?: Double.NaN
+                        // power/cadence/torque stay DEVELOPER fields: standard power(7)/cadence(4) may be
+                        // written by the Karoo for the bound sensor (don't clobber), and torque has no
+                        // standard record field. Balance goes to the STANDARD left_right_balance (30),
+                        // right-referenced like Garmin (bit7 set + right %), so tools show it natively.
                         if (!pw.isNaN()) recordValues.add(FieldValue(meterField(m.slot, 0, "pm${m.slot + 1}_power", "W"), pw))
                         if (!cad.isNaN()) recordValues.add(FieldValue(meterField(m.slot, 1, "pm${m.slot + 1}_cad", "rpm"), cad))
-                        if (!bal.isNaN()) recordValues.add(FieldValue(meterField(m.slot, 2, "pm${m.slot + 1}_balance", "%"), bal))
+                        if (!bal.isNaN()) recordValues.add(FieldValue(com.enderthor.kpower.ant.FitRecordField.LEFT_RIGHT_BALANCE, ((bal.toInt().coerceIn(0, 100)) or 0x80).toDouble()))
                         if (!tq.isNaN()) recordValues.add(FieldValue(meterField(m.slot, 3, "pm${m.slot + 1}_torque", "Nm"), tq))
                     }
                     // Cycling-dynamics developer fields. Written for every recorded meter
@@ -588,14 +720,21 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                     // its dynamics (the Karoo can't record them natively). Each metric field is
                     // nullable; skip the write when null/NaN so the FIT stays clean while coasting.
                     // They join the SAME record message emitted below.
-                    metersSnapshot.filter { it.enabled }.forEach { m ->
-                        val reader = antManager.meter(m.deviceNumber) ?: return@forEach
+                    metersSnapshot.firstOrNull { it.enabled }?.let { m ->
+                        val reader = antManager.meter(m.deviceNumber) ?: return@let
+                        val F = com.enderthor.kpower.ant.FitRecordField
+                        // TE / PS → STANDARD record fields (43-46), display % (host applies the profile scale).
                         reader.tePs.value?.let { d ->
-                            d.teLeftPct?.let { recordValues.add(FieldValue(dynField(com.enderthor.kpower.ant.DynField.TE_LEFT, "dyn_te_l", "%"), it)) }
-                            d.teRightPct?.let { recordValues.add(FieldValue(dynField(com.enderthor.kpower.ant.DynField.TE_RIGHT, "dyn_te_r", "%"), it)) }
-                            d.psLeftPct?.let { recordValues.add(FieldValue(dynField(com.enderthor.kpower.ant.DynField.PS_LEFT, "dyn_ps_l", "%"), it)) }
-                            d.psRightPct?.let { recordValues.add(FieldValue(dynField(com.enderthor.kpower.ant.DynField.PS_RIGHT, "dyn_ps_r", "%"), it)) }
+                            d.teLeftPct?.let { recordValues.add(FieldValue(F.LEFT_TORQUE_EFFECTIVENESS, it)) }
+                            d.teRightPct?.let { recordValues.add(FieldValue(F.RIGHT_TORQUE_EFFECTIVENESS, it)) }
+                            d.psLeftPct?.let { recordValues.add(FieldValue(F.LEFT_PEDAL_SMOOTHNESS, it)) }
+                            d.psRightPct?.let { recordValues.add(FieldValue(F.RIGHT_PEDAL_SMOOTHNESS, it)) }
                         }
+                        // Power phase / peak are FIT ARRAY fields [start, end]. karoo-ext's FieldValue is a
+                        // single scalar (no array index) — two FieldValue with the same fieldNum collide
+                        // (the host keeps one), so we CANNOT write the standard array fields (69-72) and
+                        // keep these as per-element DEVELOPER fields, which preserve both angles. Torque
+                        // likewise has no standard record field → dev.
                         reader.forceAngleLeft.value?.let { d ->
                             d.startAngleDeg?.let { recordValues.add(FieldValue(dynField(com.enderthor.kpower.ant.DynField.PP_START_L, "dyn_pp_start_l", "deg"), it)) }
                             d.endAngleDeg?.let { recordValues.add(FieldValue(dynField(com.enderthor.kpower.ant.DynField.PP_END_L, "dyn_pp_end_l", "deg"), it)) }
@@ -610,9 +749,11 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                             d.endPeakDeg?.let { recordValues.add(FieldValue(dynField(com.enderthor.kpower.ant.DynField.PEAK_END_R, "dyn_peak_end_r", "deg"), it)) }
                             d.torqueNm?.let { recordValues.add(FieldValue(dynField(com.enderthor.kpower.ant.DynField.TORQUE_RIGHT, "dyn_torque_r", "Nm"), it)) }
                         }
+                        // PCO → STANDARD left/right_pco (67/68) in mm. Rider position has no standard
+                        // record field → dev.
                         reader.pedalPosition.value?.let { d ->
-                            d.leftPcoMm?.let { recordValues.add(FieldValue(dynField(com.enderthor.kpower.ant.DynField.PCO_LEFT, "dyn_pco_l", "mm"), it.toDouble())) }
-                            d.rightPcoMm?.let { recordValues.add(FieldValue(dynField(com.enderthor.kpower.ant.DynField.PCO_RIGHT, "dyn_pco_r", "mm"), it.toDouble())) }
+                            d.leftPcoMm?.let { recordValues.add(FieldValue(F.LEFT_PCO, it.toDouble())) }
+                            d.rightPcoMm?.let { recordValues.add(FieldValue(F.RIGHT_PCO, it.toDouble())) }
                             recordValues.add(FieldValue(dynField(com.enderthor.kpower.ant.DynField.RIDER_POSITION, "dyn_rider_pos", ""), d.riderPosition.ordinal.toDouble()))
                         }
                         reader.barycenter.value?.angleDeg?.let {
@@ -640,9 +781,11 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
     }
 
     override fun onDestroy() {
-        runCatching { antManager.disconnectAll() }
+        // close() (not just disconnectAll) so any source-device-held channels + the manager's own scope
+        // are torn down deterministically if the service is destroyed without the process dying.
+        runCatching { antManager.close() }
         runCatching { serviceScope.cancel() }
-        karooSystem.disconnect()
+        runCatching { karooSystem.disconnect() }   // can throw if the binder is already dead at teardown
         super.onDestroy()
     }
 }

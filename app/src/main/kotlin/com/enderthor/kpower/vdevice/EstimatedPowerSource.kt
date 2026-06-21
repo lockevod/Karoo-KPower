@@ -35,7 +35,8 @@ class EstimatedPowerSource(
                 delay(1000)
                 emitter.onNext(OnBatteryStatus(BatteryStatus.GOOD))
                 delay(1000)
-                emitter.onNext(OnManufacturerInfo(ManufacturerInfo("Enderthor", "1234", "POWER-EXT-1")))
+                // Readable identity in the Karoo pairing screen (was a meaningless "1234 / POWER-EXT-1").
+                emitter.onNext(OnManufacturerInfo(ManufacturerInfo("KPower", "Estimate", "KPW-EST")))
 
                 engine.powerEmaW
                     .filter { !it.isNaN() }

@@ -5,6 +5,7 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -18,7 +19,6 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -31,7 +31,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.enderthor.kpower.R
 import com.enderthor.kpower.ant.AntDeviceInfo
-import com.enderthor.kpower.ant.AntPowerManager
 import com.enderthor.kpower.ant.BatteryLevel
 import com.enderthor.kpower.ant.SavedMeter
 import com.enderthor.kpower.ant.batteryLevelOf
@@ -45,8 +44,7 @@ const val MAX_METERS = 5
  * No nested LazyColumn — all state is collected by the caller (@Composable context)
  * and passed in as plain values.
  *
- * [manager]     The AntPowerManager created + disposed by ComparisonScreen.
- * [saved]       Snapshot of persisted meters.
+ * [saved]       Snapshot of persisted meters (name + last-known battery come from these).
  * [detected]    Snapshot of currently-detected devices from the scan.
  * [scanning]    Whether a scan is currently running.
  * [onToggleScan] Called when the Scan/Stop button is tapped.
@@ -54,9 +52,11 @@ const val MAX_METERS = 5
  * [onDelete]    Called when the user taps Delete on a saved meter.
  * [onToggleEnabled] Called when the per-meter Record switch is toggled.
  * [onRename]    Called when the user taps the rename (edit) icon on a saved meter.
+ * [onCalibrate] Called when the user taps Calibrate in a saved meter's detail panel.
+ * [karooNameFor] Resolves a detected device number to the Karoo's known name (from its paired
+ *                sensors), so the scan list shows e.g. "Garmin Rally 200" instead of "Device: 6593".
  */
 fun LazyListScope.antScanItems(
-    manager: AntPowerManager,
     saved: List<SavedMeter>,
     detected: List<AntDeviceInfo>,
     scanning: Boolean,
@@ -65,6 +65,8 @@ fun LazyListScope.antScanItems(
     onDelete: (SavedMeter) -> Unit,
     onToggleEnabled: (SavedMeter, Boolean) -> Unit,
     onRename: (SavedMeter) -> Unit,
+    onCalibrate: (SavedMeter) -> Unit,
+    karooNameFor: (Int) -> String? = { null },
 ) {
     val atCap = saved.size >= MAX_METERS
     val available = detected.filterNot { dev -> saved.any { it.deviceNumber == dev.deviceNumber } }
@@ -94,13 +96,16 @@ fun LazyListScope.antScanItems(
             modifier = Modifier.padding(horizontal = 8.dp),
         )
     }
-    item {
-        Text(
-            stringResource(R.string.meter_double_pair_warning),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-        )
+    // Only relevant once a meter is saved (don't warn about double-pairing when there's nothing to pair).
+    if (saved.isNotEmpty()) {
+        item {
+            Text(
+                stringResource(R.string.meter_double_pair_warning),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            )
+        }
     }
     if (saved.isEmpty()) {
         item {
@@ -112,14 +117,12 @@ fun LazyListScope.antScanItems(
         }
     } else {
         items(saved) { m: SavedMeter ->
-            // Battery + brand come from the raw 0x52/0x50 pages, which only arrive while the meter's
-            // channel is open — ComparisonScreen acquires it for saved meters while this screen shows.
-            val battery by manager.batteryFlow(m.deviceNumber).collectAsState()
-            val brand by manager.manufacturerFlow(m.deviceNumber).collectAsState()
+            // Name (label) and battery are LAST-KNOWN values persisted during a ride — no raw channel
+            // is opened here, so the scan keeps working. They appear once the meter has streamed once.
             var expanded by remember(m.deviceNumber) { mutableStateOf(false) }
 
             Column {
-                // Main row: record switch · name/status · battery (always visible) · expand chevron.
+                // Main row: record switch · name/status · battery (last known) · expand chevron.
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -139,7 +142,7 @@ fun LazyListScope.antScanItems(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    BatteryIcon(battery)
+                    BatteryIcon(m.lastBatteryCode)
                     IconButton(onClick = { expanded = !expanded }) {
                         Icon(
                             if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
@@ -148,16 +151,10 @@ fun LazyListScope.antScanItems(
                     }
                 }
 
-                // Detail panel (the extensible "actions" area). Brand + rename/remove today; Calibrate
-                // and other per-meter actions land here later.
+                // Detail panel (the "actions" area): rename / remove / calibrate. (The device name is
+                // the row title above.)
                 if (expanded) {
                     Column(Modifier.fillMaxWidth().padding(start = 24.dp, end = 8.dp, bottom = 8.dp)) {
-                        Text(
-                            stringResource(R.string.meter_brand) + ": " +
-                                (brand ?: stringResource(R.string.meter_connecting)),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             TextButton(onClick = { onRename(m) }) {
                                 Icon(Icons.Default.Edit, contentDescription = null)
@@ -170,11 +167,11 @@ fun LazyListScope.antScanItems(
                                 Text(stringResource(R.string.ant_remove))
                             }
                         }
-                        Text(
-                            stringResource(R.string.meter_calibration_soon),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        TextButton(onClick = { onCalibrate(m) }) {
+                            Icon(Icons.Default.Build, contentDescription = null)
+                            Spacer(Modifier.width(4.dp))
+                            Text(stringResource(R.string.btn_calibrate))
+                        }
                     }
                 }
             }
@@ -235,7 +232,9 @@ fun LazyListScope.antScanItems(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "${dev.name}  (#${dev.deviceNumber})",
+                    // Show the real meter NAME (resolved live via the PCC), never the bare number —
+                    // "Identifying…" until the manufacturer page arrives (usually ~1 s).
+                    karooNameFor(dev.deviceNumber) ?: stringResource(R.string.ant_identifying),
                     modifier = Modifier.weight(1f),
                 )
                 TextButton(
