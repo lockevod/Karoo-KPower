@@ -44,7 +44,7 @@ android {
 
 dependencies {
     implementation(libs.hammerhead.karoo.ext)
-    implementation(files("libs/android_antlib_4-12-0.jar"))
+    implementation(files("libs/android_antlib_4-16-0.aar"))
     implementation(files("libs/antpluginlib_3-9-0.aar"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.bundles.androidx.lifeycle)
@@ -55,11 +55,7 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.color)
     implementation(libs.androidx.datastore.preferences)
-    implementation(libs.androidx.cardview)
     implementation(libs.androidx.lifecycle.runtime.ktx)
-    implementation(libs.androidx.glance.appwidget)
-    implementation(libs.androidx.glance.preview)
-    implementation(libs.androidx.glance.appwidget.preview)
     implementation(libs.timber)
     implementation(libs.androidx.foundation.android)
     implementation(libs.androidx.foundation.layout.android)

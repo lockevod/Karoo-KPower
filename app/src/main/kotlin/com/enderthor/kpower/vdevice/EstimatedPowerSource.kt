@@ -13,7 +13,7 @@ class EstimatedPowerSource(
     private val engine: PowerEstimationEngine,
 ) {
     val source by lazy {
-        Device(extension, "estimated-power-$hr", listOf(DataType.Source.POWER), "KPW Estim.")
+        Device(extension, "estimated-power-$hr", listOf(DataType.Source.POWER), "KPOWER Estim.")
     }
 
     @Volatile private var activeScope: CoroutineScope? = null
@@ -40,7 +40,7 @@ class EstimatedPowerSource(
                 emitter.onNext(OnBatteryStatus(BatteryStatus.GOOD))
                 delay(1000)
                 // Readable identity in the Karoo pairing screen (was a meaningless "1234 / POWER-EXT-1").
-                emitter.onNext(OnManufacturerInfo(ManufacturerInfo("KPower", "Estimate", "KPW-EST")))
+                emitter.onNext(OnManufacturerInfo(ManufacturerInfo("Enderthor", "Estimate", "KPOWER")))
 
                 engine.powerEmaW
                     .filter { !it.isNaN() }

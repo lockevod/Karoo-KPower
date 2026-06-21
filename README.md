@@ -81,11 +81,7 @@ You can run **both at once** — one real, one estimated:
 4. **See both side by side (optional):** the **Real Power / Real 3s / Real NP / Real Avg** fields show the meter, and the **Est. Power / 3s / NP / Avg** fields show the estimate — put them on the same page to watch live. The real meter's **cycling dynamics** (L/R balance, TE, PS, power phase) are recorded to the FIT automatically too.
 5. **Log both to the FIT for later:** turn on **“Log estimated power (FIT)”** (*Real meter* tab). The real meter is recorded as `pm1_power`; the estimate as `est_power`/`est_np`. Open the FIT in [intervals.icu](https://intervals.icu) to overlay them.
 
-> In short: the *real meter* and the *estimate* always coexist as separate data fields; the only either/or choice is **which single “KPW …” sensor you pair** as the Karoo's recorded power source.
-
-#### D) Use the real meter to calibrate the estimate
-
-Do (C), ride with **varied speeds**, then open the bike in *Estimator* — KPower will offer measured **Crr/CdA** to apply. See *Field calibration* below.
+> In short: the *real meter* and the *estimate* always coexist as separate data fields; the only either/or choice is **which single “KPOWER …” sensor you pair** as the Karoo's recorded power source.
 
 ### Simple mode (recommended for most users)
 
@@ -237,18 +233,9 @@ The four **Est. Power / 3s / NP / Avg** fields are **always** available on your 
 
 **Why logging is off by default:** writing the estimate to the FIT adds extra columns to every ride. The estimate fields themselves cost nothing unless you place them; recording a real meter costs a little battery while you ride.
 
-### Field calibration (let KPower measure your Crr & CdA)
+### Field calibration (diagnostic, for tuning the model)
 
-The estimate is only as good as its inputs — and the two hardest to guess are your **rolling resistance (Crr)** and **aerodynamic drag (CdA = Cd × frontal area)**. If you have a real meter, KPower can **measure them from your own data** instead of you guessing:
-
-1. **Enable a real meter** (*Real meter* tab) and turn on **“Log estimated power (FIT)”** (same tab). Both are needed — calibration runs while the comparison is active.
-2. **Go for a ride with varied speeds** — include some slow stretches *and* some fast ones (and ride the surfaces you care about). Variety is what lets the maths separate Crr from CdA; a ride at one constant speed can't be calibrated. ~5+ minutes of moving data minimum, ~2+ minutes per surface.
-3. **After the ride, open that bike in the *Estimator* tab.** If KPower gathered enough data, a **Field calibration** card appears showing, for this bike:
-   - **CdA** (and the matching **Cd** for your frontal area), each with a **± uncertainty**;
-   - **effective Crr per surface** (asphalt / standard / gravel / sand) you actually rode, each with its ± and sample count; surfaces you barely rode are shown as *not enough data*.
-4. Tap **Apply to this bike** to write the measured values in (this switches the bike to Advanced so the measured Crr/Cd are used directly). **Apply is only enabled for results that are reliable** — i.e. well-identified by your ride. A “⚠ too uncertain” line means *ride more / more varied speeds* and try again; KPower never applies a guessed-looking number.
-
-> The **±** is the honest part: a big ± means your ride didn't pin that number down (too constant a pace, too little data), so don't trust it. A small ± means the data really constrains it. This is why Apply is gated on reliability rather than just showing a single confident-looking value.
+KPower can fit your effective **Crr per surface** and **CdA** from a real-meter ride by least squares (Martin power balance), as a **diagnostic aid for refining the coefficients** — it is **not** a user-facing setting (there is no "apply" button). When you ride with a **real meter enabled**, **“Log estimated power (FIT)”** on, and **diagnostic logging** on, the fitted values (each with a ± std error) are written to the diagnostic log (`CALIB …`) so they can be analysed offline. A small ± means the ride pinned the value down; a large ± means it didn't (too constant a pace / too little data). Pull the log the same way as any diagnostic log.
 
 ## Upgrading from a previous version
 
@@ -295,7 +282,7 @@ Previous features:
 ## Known issues
 
 - Power meter is not 100% accurate, it is only an estimation based on the power formula. It is not possible to get real power data from the Karoo without a power meter.
-The biggest unknown in the estimate is the **wind**, which strongly changes the power needed to hold a speed. KPower gets wind from Open-Meteo automatically (or from Headwind if installed) — there is nothing to configure. If you want the most accurate calibration of your bike's Crr/CdA, record a comparison ride with a real meter and let **field calibration** fit them from your data (see *Field calibration* below).
+The biggest unknown in the estimate is the **wind**, which strongly changes the power needed to hold a speed. KPower gets wind from Open-Meteo automatically (or from Headwind if installed) — there is nothing to configure. To dial in your Crr/CdA, set them in Advanced mode from rolling-resistance/aero references; the diagnostic *Field calibration* log (below) can help refine them from a real-meter ride.
 
 - Power meter use values from Karoo (real), sometimes Karoo has some "delays/lags" or Karoo expose bad information (for example, current slope grade) then Power Meter will estimate not accurate values. Most of times 5-10 seconds later all is fine ;)
 

@@ -10,7 +10,6 @@ import io.hammerhead.karooext.models.DeveloperField
 import io.hammerhead.karooext.models.Device
 import io.hammerhead.karooext.models.DeviceEvent
 import io.hammerhead.karooext.models.FieldValue
-import io.hammerhead.karooext.models.BatteryStatus
 import io.hammerhead.karooext.models.FitEffect
 import io.hammerhead.karooext.models.InRideAlert
 import io.hammerhead.karooext.models.RideState
@@ -212,33 +211,19 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
             val dn = savedMetersSnapshot.firstOrNull { it.enabled }?.deviceNumber
             if (dn != null) antManager.meter(dn)?.power?.value ?: Double.NaN else Double.NaN
         }
+        // Field calibration is a DEV tuning aid: the fitted CdA + per-surface Crr (with ± std error) are
+        // written to the DIAGNOSTIC LOG so they can be analysed offline to refine the model coefficients.
+        // It is NOT a user-facing feature (no Apply). The per-tick accumulation runs in the engine (cheap,
+        // O(surfaces) scalars); here we only periodically SOLVE + log, gated on recording + the estimate
+        // engine active (comparison mode) + diagnostic logging on, so the matrix solve isn't wasted.
         serviceScope.launch {
-            var lastSavedSamples = -1L
+            var lastLoggedSamples = -1L
             while (isActive) {
                 delay(30_000L)
-                if (!isRecording) continue
+                if (!isRecording || !engine.isActive() || !FileLogTree.enabled) continue
                 val fit = engine.calibrationFit() ?: continue
-                if (fit.samples == lastSavedSamples) continue   // no new data → skip the DataStore write
-                val bikeId = com.enderthor.kpower.data.resolveActiveConfig(
-                    applicationContext.loadPreferencesFlow().first(), activeProfileIdFlow.value
-                )?.id ?: continue
-                val suggestion = com.enderthor.kpower.data.CalibrationSuggestion(
-                    cda = fit.cda,
-                    cdaSe = fit.cdaSe,
-                    cdaReliable = fit.cdaReliable,
-                    perSurface = fit.perSurface.map {
-                        com.enderthor.kpower.data.SurfaceCrrSuggestion(it.surface.name, it.crrEff, it.crrSe, it.samples, it.sufficient, it.reliable)
-                    },
-                    samples = fit.samples,
-                    bikeId = bikeId,
-                    timestampMs = System.currentTimeMillis(),
-                )
-                runCatching { saveCalibration(applicationContext, suggestion) }
-                lastSavedSamples = fit.samples
-                if (FileLogTree.enabled) Timber.tag("CALIB").d(
-                    "fit cda=%.3f±%.3f n=%d %s", fit.cda, fit.cdaSe, fit.samples,
-                    fit.perSurface.joinToString(" ") { s -> "${s.surface}:${s.crrEff?.let { "%.4f".format(it) } ?: "—"}±${s.crrSe?.let { "%.4f".format(it) } ?: "—"}(${s.samples})" },
-                )
+                if (fit.samples == lastLoggedSamples) continue
+                logCalibration(fit); lastLoggedSamples = fit.samples
             }
         }
 
@@ -298,29 +283,9 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                         current.map { m ->
                             val match = devices.firstOrNull { it.matchesAntNumber(m.deviceNumber) } ?: return@map m
                             val name = match.name.trim()
-                            val newLabel = if (name.isNotEmpty() && !m.userNamed && isAutoMeterLabel(m.label, m.deviceNumber)) name else m.label
-                            // Only SEED the battery from the Karoo's (possibly stale) cache when we have
-                            // none yet. The live ride collector owns ongoing updates — otherwise the two
-                            // ping-pong (cached vs fresh), each a real change, and storm the DataStore.
-                            val newBatt = m.lastBatteryCode ?: batteryCodeOf(match.details.lastBattery)
-                            if (newLabel == m.label && newBatt == m.lastBatteryCode) m
-                            else m.copy(label = newLabel, lastBatteryCode = newBatt)
+                            if (name.isEmpty() || m.userNamed || !isAutoMeterLabel(m.label, m.deviceNumber)) return@map m
+                            m.copy(label = name)
                         }
-                    }
-                }
-        }
-
-        // Persist the active meter's last battery level into its SavedMeter, so the settings screen can
-        // show a battery icon at a glance WITHOUT opening the raw ANT channel there (which fought the
-        // scan). batteryFlow has fresh data while the meter's channel is open — i.e. during a ride.
-        // updateAntMeters skips no-op writes, so this only persists on an actual level change.
-        serviceScope.launch {
-            sharedActiveDn
-                .flatMapLatest { dn -> if (dn == null) emptyFlow() else antManager.batteryFlow(dn).map { dn to it } }
-                .collect { (dn, code) ->
-                    if (code == null) return@collect
-                    updateAntMeters(applicationContext) { meters ->
-                        meters.map { if (it.deviceNumber == dn && it.lastBatteryCode != code) it.copy(lastBatteryCode = code) else it }
                     }
                 }
         }
@@ -433,6 +398,11 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                     // toggle is off). Fires once per ride start, not on every emission.
                     if (isRecording && !wasRecording) {
                         FileLogTree.newRide(System.currentTimeMillis())
+                    }
+                    // Ride ended: log the final calibration fit the 30 s loop may not have captured
+                    // (the FieldCalibrator keeps its data until the next ride start, so the fit is valid).
+                    if (wasRecording && !isRecording && FileLogTree.enabled) {
+                        serviceScope.launch { engine.calibrationFit()?.let { logCalibration(it) } }
                     }
                     wasRecording = isRecording
                     // Estimate engine acquire/release stays tied to COMPARISON mode only;
@@ -610,24 +580,29 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
         }
     }
 
-    /** Friendly Karoo display name for a real meter: "KPW <name>". When the rider hasn't named it, use
-     *  the detected model ("KPW Garmin Rally 200") if the 0x50 page has been seen this service lifetime,
-     *  else the bare number ("KPW #<deviceNumber>") — never just a number when we know the model. */
+    /** Friendly Karoo display name for a real meter: "KPOWER <name>". When the rider hasn't named it, use
+     *  the detected brand+model ("KPOWER Garmin Rally 200") if the 0x50 page has been seen this service
+     *  lifetime, else the bare number ("KPOWER #<deviceNumber>") — never just a number when we know it. */
     private fun meterDisplayName(deviceNumber: Int, label: String?): String {
         val clean = label?.trim().orEmpty()
-        if (!isAutoMeterLabel(clean, deviceNumber)) return "KPW $clean"
-        val model = antManager.manufacturerFlow(deviceNumber).value
-        return if (!model.isNullOrBlank()) "KPW $model" else "KPW #$deviceNumber"
+        if (!isAutoMeterLabel(clean, deviceNumber)) return "KPOWER $clean"
+        val name = antManager.manufacturerFlow(deviceNumber).value
+        return if (!name.isNullOrBlank()) "KPOWER $name" else "KPOWER #$deviceNumber"
     }
 
-    /** Map the Karoo's BatteryStatus to our 1..5 code (matches the ANT+ 0x52 levels; INVALID -> null). */
-    private fun batteryCodeOf(b: BatteryStatus?): Int? = when (b) {
-        BatteryStatus.NEW -> 1
-        BatteryStatus.GOOD -> 2
-        BatteryStatus.OK -> 3
-        BatteryStatus.LOW -> 4
-        BatteryStatus.CRITICAL -> 5
-        else -> null
+    /** Write the field-calibration fit to the diagnostic log (dev tuning aid). Includes the active bike id
+     *  for context. Caller already gated on FileLogTree.enabled. */
+    private suspend fun logCalibration(fit: com.enderthor.kpower.vdevice.FieldCalibrator.Fit) {
+        val bikeId = com.enderthor.kpower.data.resolveActiveConfig(
+            applicationContext.loadPreferencesFlow().first(), activeProfileIdFlow.value
+        )?.id
+        Timber.tag("CALIB").d(
+            "bike=%s cda=%.3f±%.3f (%s) n=%d | %s",
+            bikeId?.toString() ?: "?", fit.cda, fit.cdaSe, if (fit.cdaReliable) "ok" else "uncertain", fit.samples,
+            fit.perSurface.joinToString(" ") { s ->
+                "${s.surface}:${s.crrEff?.let { "%.4f".format(it) } ?: "—"}±${s.crrSe?.let { "%.4f".format(it) } ?: "—"}(${s.samples}${if (s.reliable) "" else "?"})"
+            },
+        )
     }
 
     /** Fire the battery in-ride alert, naming the meter. Colours/icon are @ColorRes/@DrawableRes (the

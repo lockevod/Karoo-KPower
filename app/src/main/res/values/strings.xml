@@ -1,7 +1,7 @@
 <resources>
     <string name="app_name">KPower</string>
     <string name="extension_name">KPower</string>
-    <string name="profile_power_source_hint">To show power, add the “KPW Estim.” sensor as the power source in this Karoo ride profile.</string>
+    <string name="profile_power_source_hint">To show power, add the “KPOWER Estim.” sensor as the power source in this Karoo ride profile.</string>
     <string name="est_instant_name">Est. Power</string>
     <string name="est_instant_desc">KPower estimated instantaneous power. Add it to a page to show it live; logging to the FIT is separate (“Log estimated power”).</string>
     <string name="est_3s_name">Est. Power 3s</string>
@@ -40,7 +40,7 @@
     <string name="dyn_peakpp_left_desc">Left peak power-phase start angle, degrees (real ANT+ meter)</string>
     <string name="dyn_peakpp_right_name">Peak Power Phase R</string>
     <string name="dyn_peakpp_right_desc">Right peak power-phase start angle, degrees (real ANT+ meter)</string>
-    <string name="meter_double_pair_warning">Tip: to feed this meter to the Karoo, pair the sensor named “KPW …” (your meter\'s name with a KPW prefix) in your ride profile — don\'t also pair the meter natively, or power will be recorded twice.</string>
+    <string name="meter_double_pair_warning">Tip: to feed this meter to the Karoo, pair the sensor named “KPOWER …” (your meter\'s name with a KPOWER prefix) in your ride profile — don\'t also pair the meter natively, or power will be recorded twice.</string>
     <string name="diagnostic_log_label">Diagnostic logging</string>
     <string name="diagnostic_log_desc">Records a detailed log file for each ride (every ANT+ page including unknown ones, parsed values, and connection events) so it can be analysed later. Off by default — it uses some extra battery and storage.</string>
 
@@ -51,7 +51,7 @@
     <!-- Main / bikes list -->
     <string name="bikes_add">Add</string>
     <string name="bikes_empty">No bikes yet — tap + to add one.</string>
-    <string name="bikes_subtitle">KPower estimates your power. Add a bike, then pair the “KPW Estim.” sensor as the power source in your Karoo ride profile.</string>
+    <string name="bikes_subtitle">KPower estimates your power. Add a bike, then pair the “KPOWER Estim.” sensor as the power source in your Karoo ride profile.</string>
     <string name="menu_more">More</string>
     <string name="menu_export">Export config</string>
     <string name="menu_import">Import config</string>
@@ -142,12 +142,6 @@
     <string name="headwind_detected_hint">Headwind detected: KPower will take temperature, pressure and wind from it and skip its own weather lookups. Wind assumes Headwind\'s default unit (km/h metric / mph imperial); if you set it to m/s or knots in Headwind, wind will be wrong.</string>
     <string name="headwind_not_installed_hint">Headwind not installed: KPower uses its own weather (Open-Meteo, automatic — no setup or API key).</string>
     <string name="headwind_wind_unit_label">Headwind wind unit</string>
-    <!-- Field calibration (derives Crr/CdA from a comparison ride's real meter) -->
-    <string name="calib_title">Field calibration</string>
-    <string name="calib_summary">From your comparison ride · %1$d samples (± = uncertainty)</string>
-    <string name="calib_insufficient">not enough data</string>
-    <string name="calib_unreliable">too uncertain — ride more/varied speeds</string>
-    <string name="calib_apply">Apply to this bike</string>
     <string name="section_advanced">Advanced</string>
     <string name="cfg_frontal_area">Frontal Area</string>
     <string name="cfg_power_loss">Power Loss</string>

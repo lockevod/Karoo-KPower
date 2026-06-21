@@ -33,7 +33,10 @@ class SurfaceConditionReader(private val context: Context) {
 
     private var knownMapfiles: List<MapFileInfo>? = null
     private var lastScanMs = 0L
-    private val openReaders = LinkedHashMap<File, MapFile>()
+    // access-order LRU (true) so trimming evicts the LEAST-RECENTLY-USED reader, not the oldest-inserted —
+    // otherwise a point covered by overlapping mapfiles could evict the hot one and reopen it (header
+    // parse = real I/O) every tile.
+    private val openReaders = LinkedHashMap<File, MapFile>(8, 0.75f, true)
     private var cachedTileKey: Long = Long.MIN_VALUE
     private var cachedWays: List<WaySnapshot> = emptyList()
 
@@ -146,6 +149,6 @@ class SurfaceConditionReader(private val context: Context) {
         private const val ZOOM = 16
         private const val MAX_DIST_M = 30.0
         private const val SCAN_INTERVAL_MS = 5L * 60L * 1000L
-        private const val MAX_OPEN_READERS = 2
+        private const val MAX_OPEN_READERS = 4   // ≥ typical overlapping-mapfile count so we don't thrash
     }
 }

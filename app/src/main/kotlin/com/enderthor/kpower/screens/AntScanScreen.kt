@@ -25,15 +25,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.colorResource
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.enderthor.kpower.R
 import com.enderthor.kpower.ant.AntDeviceInfo
-import com.enderthor.kpower.ant.BatteryLevel
 import com.enderthor.kpower.ant.SavedMeter
-import com.enderthor.kpower.ant.batteryLevelOf
 
 // Several meters may be SAVED (a garage to switch between), but only ONE may be ACTIVE (enabled) at a
 // time — the active one drives the single set of real-power/dynamics fields and the pm1_* FIT fields.
@@ -44,7 +40,7 @@ const val MAX_METERS = 5
  * No nested LazyColumn — all state is collected by the caller (@Composable context)
  * and passed in as plain values.
  *
- * [saved]       Snapshot of persisted meters (name + last-known battery come from these).
+ * [saved]       Snapshot of persisted meters (the name comes from these).
  * [detected]    Snapshot of currently-detected devices from the scan.
  * [scanning]    Whether a scan is currently running.
  * [onToggleScan] Called when the Scan/Stop button is tapped.
@@ -117,12 +113,10 @@ fun LazyListScope.antScanItems(
         }
     } else {
         items(saved) { m: SavedMeter ->
-            // Name (label) and battery are LAST-KNOWN values persisted during a ride — no raw channel
-            // is opened here, so the scan keeps working. They appear once the meter has streamed once.
             var expanded by remember(m.deviceNumber) { mutableStateOf(false) }
 
             Column {
-                // Main row: record switch · name/status · battery (last known) · expand chevron.
+                // Main row: record switch · name/status · expand chevron.
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -142,7 +136,6 @@ fun LazyListScope.antScanItems(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    BatteryIcon(m.lastBatteryCode)
                     IconButton(onClick = { expanded = !expanded }) {
                         Icon(
                             if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
@@ -232,8 +225,8 @@ fun LazyListScope.antScanItems(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    // Show the real meter NAME (resolved live via the PCC), never the bare number —
-                    // "Identifying…" until the manufacturer page arrives (usually ~1 s).
+                    // Show the real meter NAME (resolved live from the 0x50 common page), never the bare
+                    // number — "Identifying…" until the manufacturer page arrives.
                     karooNameFor(dev.deviceNumber) ?: stringResource(R.string.ant_identifying),
                     modifier = Modifier.weight(1f),
                 )
@@ -250,20 +243,3 @@ fun LazyListScope.antScanItems(
     }
 }
 
-/** Battery state from the ANT+ 0x52 code as a tinted icon (no %, see [batteryLevelOf]).
- *  OK=green-full, low=amber-full, critical=red-alert, unknown=grey "?" until the page arrives. */
-@Composable
-private fun BatteryIcon(code: Int?, modifier: Modifier = Modifier) {
-    val (drawable, colorRes, descRes) = when (batteryLevelOf(code)) {
-        BatteryLevel.OK -> Triple(R.drawable.ic_battery_full, R.color.battery_ok, R.string.battery_ok)
-        BatteryLevel.LOW -> Triple(R.drawable.ic_battery_full, R.color.battery_low, R.string.battery_low)
-        BatteryLevel.CRITICAL -> Triple(R.drawable.ic_battery_alert, R.color.battery_critical, R.string.battery_critical)
-        BatteryLevel.UNKNOWN -> Triple(R.drawable.ic_battery_unknown, R.color.battery_unknown, R.string.battery_unknown)
-    }
-    Icon(
-        painter = painterResource(drawable),
-        contentDescription = stringResource(descRes),
-        tint = colorResource(colorRes),
-        modifier = modifier.size(24.dp),
-    )
-}

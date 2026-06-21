@@ -27,33 +27,6 @@ data class OpenMeteoCurrentWeatherResponse(
     @SerialName("utc_offset_seconds") val utfOffsetSeconds: Int
 )
 
-/** One surface's calibrated effective Crr + its std error. crrEff null + sufficient=false when too few
- *  samples; reliable=false when the fit's relative std error is too high (poorly identified). */
-@Serializable
-data class SurfaceCrrSuggestion(
-    val surface: String,      // KarooSurface.name
-    val crrEff: Double? = null,
-    val crrSe: Double? = null,
-    val samples: Long = 0,
-    val sufficient: Boolean = false,
-    val reliable: Boolean = false,
-)
-
-/** Field-calibration suggestion (CdA + per-surface effective Crr fitted from a comparison ride's
- *  real-meter data), persisted so the UI can offer it after the ride (the extension process may be
- *  killed at ride end). [cdaSe]/[crrSe] are the coefficient std errors — the honest identifiability
- *  metric; [reliable] flags mean "well-identified and in range", gating Apply. */
-@Serializable
-data class CalibrationSuggestion(
-    val cda: Double,
-    val cdaSe: Double,
-    val cdaReliable: Boolean,
-    val perSurface: List<SurfaceCrrSuggestion> = emptyList(),
-    val samples: Long,
-    val bikeId: Int,          // the bike (ConfigData.id) active when it was computed
-    val timestampMs: Long,
-)
-
 @Serializable
 data class HeadwindStats(
     val lastSuccessfulWeatherRequest: Long? = null,

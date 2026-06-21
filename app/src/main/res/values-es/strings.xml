@@ -1,7 +1,7 @@
 <resources>
     <string name="app_name">KPower</string>
     <string name="extension_name">KPower</string>
-    <string name="profile_power_source_hint">Para mostrar potencia, añade el sensor “KPW Estim.” como fuente de potencia en este perfil de ruta del Karoo.</string>
+    <string name="profile_power_source_hint">Para mostrar potencia, añade el sensor “KPOWER Estim.” como fuente de potencia en este perfil de ruta del Karoo.</string>
     <string name="est_instant_name">Pot. est.</string>
     <string name="est_instant_desc">Potencia instantánea estimada por KPower. Añádela a una página para verla en directo; grabarla en el FIT es aparte (“Grabar estimada”).</string>
     <string name="est_3s_name">Pot. est. 3s</string>
@@ -40,7 +40,7 @@
     <string name="dyn_peakpp_left_desc">Ángulo de inicio de la fase de potencia pico izquierda, en grados (medidor ANT+ real)</string>
     <string name="dyn_peakpp_right_name">Fase de potencia pico D</string>
     <string name="dyn_peakpp_right_desc">Ángulo de inicio de la fase de potencia pico derecha, en grados (medidor ANT+ real)</string>
-    <string name="meter_double_pair_warning">Consejo: para enviar este potenciómetro al Karoo, empareja el sensor llamado “KPW …” (el nombre de tu potenciómetro con el prefijo KPW) en tu perfil de ruta — no emparejes además el potenciómetro de forma nativa, o la potencia se grabará dos veces.</string>
+    <string name="meter_double_pair_warning">Consejo: para enviar este potenciómetro al Karoo, empareja el sensor llamado “KPOWER …” (el nombre de tu potenciómetro con el prefijo KPOWER) en tu perfil de ruta — no emparejes además el potenciómetro de forma nativa, o la potencia se grabará dos veces.</string>
     <string name="diagnostic_log_label">Registro de diagnóstico</string>
     <string name="diagnostic_log_desc">Graba un archivo de registro detallado en cada salida (cada página ANT+ incluidas las desconocidas, valores interpretados y eventos de conexión) para poder analizarlo después. Off por defecto — consume algo más de batería y almacenamiento.</string>
 
@@ -51,7 +51,7 @@
     <!-- Main / bikes list -->
     <string name="bikes_add">Añadir</string>
     <string name="bikes_empty">Aún no hay bicis — toca + para añadir una.</string>
-    <string name="bikes_subtitle">KPower estima tu potencia. Añade una bici y luego empareja el sensor “KPW Estim.” como fuente de potencia en tu perfil de ruta del Karoo.</string>
+    <string name="bikes_subtitle">KPower estima tu potencia. Añade una bici y luego empareja el sensor “KPOWER Estim.” como fuente de potencia en tu perfil de ruta del Karoo.</string>
     <string name="menu_more">Más</string>
     <string name="menu_export">Exportar configuración</string>
     <string name="menu_import">Importar configuración</string>
@@ -142,12 +142,6 @@
     <string name="headwind_detected_hint">Headwind detectado: KPower tomará de él temperatura, presión y viento, y omitirá sus propias consultas meteorológicas. El viento asume la unidad por defecto de Headwind (km/h métrico / mph imperial); si lo configuras en m/s o nudos en Headwind, el viento será incorrecto.</string>
     <string name="headwind_not_installed_hint">Headwind no instalado: KPower usa su propia meteorología (Open-Meteo, automática — sin configuración ni API key).</string>
     <string name="headwind_wind_unit_label">Unidad de viento de Headwind</string>
-    <!-- Calibración de campo (deriva Crr/CdA de una ruta de comparación con medidor real) -->
-    <string name="calib_title">Calibración de campo</string>
-    <string name="calib_summary">De tu ruta de comparación · %1$d muestras (± = incertidumbre)</string>
-    <string name="calib_insufficient">datos insuficientes</string>
-    <string name="calib_unreliable">demasiado incierto — rueda más/velocidades variadas</string>
-    <string name="calib_apply">Aplicar a esta bici</string>
     <string name="section_advanced">Avanzado</string>
     <string name="cfg_frontal_area">Área frontal</string>
     <string name="cfg_power_loss">Pérdida de potencia</string>

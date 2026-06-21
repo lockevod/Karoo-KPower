@@ -105,7 +105,6 @@ val lastKnownPositionKey = stringPreferencesKey("lastKnownPosition")
 val preferencesKey = stringPreferencesKey("configdata")
 val comparisonModeKey = booleanPreferencesKey("comparisonMode")
 val antMetersKey = stringPreferencesKey("antPowerMeters")
-val calibrationKey = stringPreferencesKey("fieldCalibration")
 
 suspend fun saveComparisonMode(context: Context, enabled: Boolean) {
     context.dataStore.edit { it[comparisonModeKey] = enabled }
@@ -196,19 +195,6 @@ suspend fun saveStats(context: Context, stats: HeadwindStats) {
     }
 }
 
-suspend fun saveCalibration(context: Context, s: com.enderthor.kpower.data.CalibrationSuggestion) {
-    context.dataStore.edit { it[calibrationKey] = Json.encodeToString(s) }
-}
-
-suspend fun clearCalibration(context: Context) {
-    context.dataStore.edit { it.remove(calibrationKey) }
-}
-
-/** Latest field-calibration suggestion (or null). */
-fun Context.calibrationFlow(): Flow<com.enderthor.kpower.data.CalibrationSuggestion?> =
-    dataStore.data.map { prefs ->
-        prefs[calibrationKey]?.let { runCatching { jsonWithUnknownKeys.decodeFromString<com.enderthor.kpower.data.CalibrationSuggestion>(it) }.getOrNull() }
-    }
 
 suspend fun saveCurrentData(context: Context, forecast: OpenMeteoCurrentWeatherResponse) {
     context.dataStore.edit { t ->

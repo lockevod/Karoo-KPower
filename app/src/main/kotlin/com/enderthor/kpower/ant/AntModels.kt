@@ -2,8 +2,16 @@ package com.enderthor.kpower.ant
 
 import kotlinx.serialization.Serializable
 
-/** A meter discovered by the scan. */
-data class AntDeviceInfo(val name: String, val deviceNumber: Int)
+/** A meter discovered by the scan.
+ *  [name] = MultiDeviceSearch's generic display name ("Device: N"). [resolvedName] = the brand/model read
+ *  via PCC (0x50) once the search is paused (null = not resolved yet). [identifyTried] = an identify
+ *  attempt finished (with or without a name) → the UI can stop showing "Identifying…". [battery] = 1..5. */
+data class AntDeviceInfo(
+    val name: String,
+    val deviceNumber: Int,
+    val resolvedName: String? = null,   // FULL "Brand Model" (e.g. "Garmin Rally 200") from the 0x50 page
+    val identifyTried: Boolean = false,
+)
 
 /** A meter the user chose to record; persisted in DataStore. slot is 0-based and drives FIT field numbers.
  *  [userNamed] = the rider set [label] by hand → brand auto-detect must never overwrite it. */
@@ -14,10 +22,6 @@ data class SavedMeter(
     val slot: Int,
     val enabled: Boolean = true,
     val userNamed: Boolean = false,
-    // Last battery status code (1=New..5=Critical) seen for this meter, persisted so the settings
-    // screen can show it at a glance WITHOUT holding the meter's raw ANT channel open (which fights
-    // the scan and the radio). Filled during a ride; null until first seen.
-    val lastBatteryCode: Int? = null,
 )
 
 /** True when [label] is an auto/placeholder name (empty, the bare device number, "Device: N",

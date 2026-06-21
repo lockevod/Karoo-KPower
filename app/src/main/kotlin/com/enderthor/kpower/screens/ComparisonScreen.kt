@@ -27,13 +27,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -43,17 +41,13 @@ import androidx.compose.ui.unit.dp
 import io.hammerhead.karooext.KarooSystemService
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
 
 import com.enderthor.kpower.R
 import com.enderthor.kpower.ant.AntPowerManager
 import com.enderthor.kpower.ant.CalibrationResult
 import com.enderthor.kpower.ant.SavedMeter
 import com.enderthor.kpower.ant.calibrateMeterViaPcc
-import com.enderthor.kpower.ant.identifyMeterViaPcc
 import com.enderthor.kpower.ant.isAutoMeterLabel
 import com.enderthor.kpower.extension.karooNameForAnt
 import com.enderthor.kpower.extension.savedDevicesFlow
@@ -87,14 +81,9 @@ fun ComparisonScreen() {
     // on every recomposition.
     val karooDevicesFlow = remember { karooSystem.savedDevicesFlow().map { it.devices } }
     val karooDevices by karooDevicesFlow.collectAsState(initial = emptyList())
-    // Names READ live via the antlib PCC for detected devices the Karoo has NOT paired (SavedDevices has
-    // no name). Resolved concurrently with the search, like the Karoo's pairing screen.
-    val identifiedNames = remember { mutableStateMapOf<Int, String>() }
-    // Devices whose identify finished WITHOUT a name (asleep / no common page within the timeout): we
-    // fall back to showing the bare number for these instead of "Identifying…" forever.
-    val identifyFailed = remember { mutableStateMapOf<Int, Boolean>() }
-    // Bound concurrent PCC identify connections so a populated scan can't exhaust the ANT radio channels.
-    val identifySem = remember { Semaphore(3) }
+    // Names + battery are now resolved INSIDE AntPowerManager's scan duty-cycle (search → pause →
+    // PCC-identify with the radio free), exposed on each AntDeviceInfo (resolvedName / identifyTried /
+    // battery). The UI just reads them — no concurrent PCC here (that fought the search → USER_CANCELLED).
 
     // Collect all state here (Composable context) so antScanItems (LazyListScope, not
     // @Composable) can receive plain values — no nested @Composable calls inside the
@@ -104,7 +93,9 @@ fun ComparisonScreen() {
     val batteryAlert by ctx.batteryAlertFlow().collectAsState(initial = false)
     val detected by antManager.detectedDevices.collectAsState()
     val saved by ctx.antMetersFlow().collectAsState(initial = emptyList())
-    var scanning by remember { mutableStateOf(false) }
+    // Scan state comes from the manager: a scan SESSION auto-stops after one search window + identify,
+    // so the button must follow the manager, not a local toggle.
+    val scanning by antManager.scanning.collectAsState()
 
     // Meter currently being renamed (null = no dialog).
     var renaming by remember { mutableStateOf<SavedMeter?>(null) }
@@ -113,72 +104,17 @@ fun ComparisonScreen() {
     var calibrationRunning by remember { mutableStateOf(false) }
     var calibrationResult by remember { mutableStateOf<CalibrationResult?>(null) }
 
-    // Resolve each device's name+battery the SAME way the Karoo does: keep MultiDeviceSearch running AND,
-    // as each device appears, open antlib's BikePower PCC for it and requestCommonDataPage → the
-    // manufacturer/model arrive in ~1 s while the search keeps finding others. The PCC multiplexes on the
-    // ANT+ Plugins Service alongside the search (this is exactly what the Karoo's pairing does); the
-    // earlier USER_CANCELLED was OUR re-keying cancelling the PCC, plus the missing Plugins-Service
-    // <queries> entry — both fixed.
-    //
-    // Each device gets its OWN child coroutine (launch), so finding a NEW device never cancels an
-    // in-flight identify. Keyed ONLY on `calibrating`: a calibration needs the device's PCC free, so when
-    // it starts we cancel these (releasing the channels); otherwise this runs continuously (keyed off
-    // `detected` via snapshotFlow inside, NOT as an effect key, so battery writes can't churn it).
-    LaunchedEffect(calibrating) {
-        if (calibrating != null) return@LaunchedEffect
-        val inFlight = HashSet<Int>()
-        snapshotFlow { detected.map { it.deviceNumber } }.collect { dns ->
-            for (dn in dns) {
-                // Skip in-flight, already-named, Karoo-named, and devices that already failed this
-                // session (re-armed by starting a new scan, which clears identifyFailed).
-                if (dn in inFlight || identifiedNames.containsKey(dn) || identifyFailed.containsKey(dn)) continue
-                if (karooDevices.karooNameForAnt(dn) != null) continue
-                inFlight.add(dn)
-                launch {
-                    // Cap concurrent PCC connections (the ANT radio has few channels; the search uses one
-                    // too) so a populated scan can't exhaust the radio. Bounded timeout so a silent/asleep
-                    // device releases its PCC instead of pinning a channel. Returns the name (or null).
-                    val name = identifySem.withPermit {
-                        withTimeoutOrNull(10_000) {
-                            identifyMeterViaPcc(
-                                ctx, dn,
-                                onBattery = { code ->
-                                    // Battery callback is on a binder thread; updateAntMeters needs a
-                                    // coroutine anyway, so launch on the Main scope.
-                                    if (code != null) scope.launch {
-                                        updateAntMeters(ctx) { meters ->
-                                            meters.map { if (it.deviceNumber == dn && it.lastBatteryCode != code) it.copy(lastBatteryCode = code) else it }
-                                        }
-                                    }
-                                },
-                            )
-                        }
-                    }
-                    inFlight.remove(dn)
-                    // This child runs on the LaunchedEffect's Main context, so these SnapshotStateMap
-                    // writes are Main-confined — no marshalling, no number↔name flip. Resolve atomically:
-                    // a name clears the failed flag; only mark failed when no name AND none already known.
-                    if (name != null) { identifiedNames[dn] = name; identifyFailed.remove(dn) }
-                    else if (!identifiedNames.containsKey(dn)) identifyFailed[dn] = true
-                }
-            }
-        }
-    }
-
-    // Persist a resolved name onto a saved meter that still carries an auto label. Separate from the
-    // identify loop so it can re-run on name/saved changes (including a just-added meter) WITHOUT
-    // re-keying — and thus cancelling — the in-flight PCC connection above. Keyed on the resolved-name
-    // COUNT (cheap) rather than a per-recomposition map copy.
-    LaunchedEffect(saved, identifiedNames.size) {
-        saved.forEach { m ->
-            val name = identifiedNames[m.deviceNumber] ?: return@forEach
-            if (!m.userNamed && isAutoMeterLabel(m.label, m.deviceNumber)) {
-                updateAntMeters(ctx) { meters ->
-                    meters.map {
-                        if (it.deviceNumber == m.deviceNumber && !it.userNamed && isAutoMeterLabel(it.label, it.deviceNumber))
-                            it.copy(label = name) else it
-                    }
-                }
+    // Persist a resolved name (and battery) onto a saved meter that still carries an auto label, as the
+    // scan resolves the name. Keyed on `detected` only (NOT `saved`): the trigger is a name filling in;
+    // updateAntMeters reads the CURRENT persisted list internally, so keying on `saved` would just
+    // self-restart the effect on every meter toggle/edit.
+    LaunchedEffect(detected) {
+        val byDn = detected.associateBy { it.deviceNumber }
+        // One transaction for all meters; updateAntMeters skips the commit when nothing changed.
+        updateAntMeters(ctx) { meters ->
+            meters.map { m ->
+                val name = byDn[m.deviceNumber]?.resolvedName ?: return@map m
+                if (m.userNamed || !isAutoMeterLabel(m.label, m.deviceNumber)) m else m.copy(label = name)
             }
         }
     }
@@ -198,27 +134,22 @@ fun ComparisonScreen() {
                     detected = detected,
                     scanning = scanning,
                     karooNameFor = { dn ->
-                        // Real name (paired Karoo name → live PCC name). Fallback to the bare number ONLY
-                        // once identify has finished without a name; while still in-flight, return null so
-                        // the row shows "Identifying…".
-                        karooDevices.karooNameForAnt(dn) ?: identifiedNames[dn]
-                            ?: if (identifyFailed[dn] == true) "#$dn" else null
+                        // Real name: paired Karoo name → resolved PCC name from the scan duty-cycle.
+                        // Fall back to the bare number ONLY once an identify attempt has finished without a
+                        // name; while still pending, return null so the row shows "Identifying…".
+                        val d = detected.firstOrNull { it.deviceNumber == dn }
+                        // Full "Brand Model" (e.g. "Garmin Rally 200") from the 0x50 page.
+                        karooDevices.karooNameForAnt(dn) ?: d?.resolvedName
+                            ?: if (d?.identifyTried == true) "#$dn" else null
                     },
                     onToggleScan = {
-                        if (scanning) { antManager.stopScan(); scanning = false }
-                        else {
-                            // Fresh scan: clear cached names + failed flags so a previously-asleep or
-                            // since-renamed meter is re-identified (and the maps don't grow unbounded).
-                            identifiedNames.clear()
-                            identifyFailed.clear()
-                            antManager.startScan(); scanning = true
-                        }
+                        if (scanning) antManager.stopScan() else antManager.startScan()
                     },
                     onAdd = { dev ->
                         // Adding one meter stops the scan: the raw channel (for live battery/brand) and
                         // MultiDeviceSearch can't coexist, and you normally add one then look at it.
                         // Scan again to add another.
-                        antManager.stopScan(); scanning = false
+                        antManager.stopScan()
                         // Atomic transform off the CURRENT persisted list (not the stale `saved`
                         // snapshot), so a concurrent write can't be clobbered.
                         scope.launch {
@@ -231,8 +162,9 @@ fun ComparisonScreen() {
                                 else current + SavedMeter(dev.deviceNumber, dev.name, slot = 0, enabled = current.none { it.enabled })
                             }
                         }
-                        // Scan stopped → the off-scan identify effect now resolves this meter's name +
-                        // battery via the PCC and persists them onto its label (no extra call needed).
+                        // The wildcard background scan resolves name+battery live (parsed from the 0x50/0x52
+                        // pages); the persist effect below copies them onto the saved meter. If added before
+                        // the name arrived, the recorded meter's own raw channel resolves it once enabled.
                     },
                     onDelete = { m ->
                         scope.launch {
@@ -257,11 +189,11 @@ fun ComparisonScreen() {
                     },
                     onRename = { renaming = it },
                     onCalibrate = { m ->
-                        // Calibration opens a BikePower PCC on the same ANT+ Plugins Service. Stop the scan
-                        // and let the off-scan identify effect release its PCC — setting `calibrating`
-                        // re-keys that effect and cancels it — before we request access, or two PCCs to
-                        // the same device collide (observed: SEARCH_TIMEOUT / Unreachable).
-                        if (scanning) { antManager.stopScan(); scanning = false }
+                        // Calibration opens a BikePower PCC on the ANT+ Plugins Service. Stop the scan
+                        // first: the raw background-scan channel and a PCC both contend for the radio's
+                        // channels, so releasing the scan channel frees the radio. The delay(800) below
+                        // lets that release settle before requesting PCC access.
+                        antManager.stopScan()
                         calibrating = m
                         calibrationResult = null
                         calibrationRunning = true

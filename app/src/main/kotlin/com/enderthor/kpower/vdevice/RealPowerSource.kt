@@ -64,7 +64,8 @@ class RealPowerSource(
                 // one; GOOD until then). Live updates come through the merged collector below.
                 emitter.onNext(OnBatteryStatus(batteryStatusOf(antManager.batteryFlow(deviceNumber).value)))
                 delay(1000)
-                emitter.onNext(OnManufacturerInfo(ManufacturerInfo("Enderthor", "1234", "POWER-REAL-$deviceNumber")))
+                // manufacturer=Enderthor, serial=the ANT device id, model="KPOWER".
+                emitter.onNext(OnManufacturerInfo(ManufacturerInfo("Enderthor", deviceNumber.toString(), "KPOWER")))
 
                 // Power is the primary signal: it governs the CONNECTED/SEARCHING state.
                 // When the meter drops out the watchdog blanks the value to NaN; we must

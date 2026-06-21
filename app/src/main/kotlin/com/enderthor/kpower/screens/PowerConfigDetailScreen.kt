@@ -29,10 +29,6 @@ import com.enderthor.kpower.data.bikeDotColors
 import com.enderthor.kpower.data.KarooSurface
 import com.enderthor.kpower.data.TreadType
 import com.enderthor.kpower.data.HeadwindWindUnit
-import com.enderthor.kpower.extension.calibrationFlow
-import com.enderthor.kpower.extension.clearCalibration
-import androidx.compose.runtime.rememberCoroutineScope
-import kotlinx.coroutines.launch
 import com.enderthor.kpower.extension.antMetersFlow
 import com.enderthor.kpower.extension.consumerFlow
 import com.enderthor.kpower.extension.isHeadwindInstalled
@@ -51,9 +47,6 @@ import kotlinx.coroutines.flow.collectLatest
 @Composable
 fun DetailScreen(configdata: ConfigData, onUpdate: (ConfigData) -> Unit, onDelete: () -> Unit, onBack: () -> Unit) {
     val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
-    // Field-calibration suggestion (computed from a comparison ride) for THIS bike, if any.
-    val calibration by ctx.calibrationFlow().collectAsState(initial = null)
     val karooSystem = remember { KarooSystemService(ctx) }
     DisposableEffect(Unit) {
         karooSystem.connect {}
@@ -398,50 +391,7 @@ fun DetailScreen(configdata: ConfigData, onUpdate: (ConfigData) -> Unit, onDelet
             }
 
             // Weather provider is Open-Meteo (free, no API key) — no provider/key controls needed.
-
-            // Field-calibration card: appears when a comparison ride produced a Crr/CdA fit for THIS bike.
-            // Shows each coefficient with its ± std error (the honest identifiability metric) and only
-            // enables Apply for the RELIABLE ones (well-identified + in range).
-            calibration?.takeIf { it.bikeId == configdata.id && it.samples >= 300 }?.let { cal ->
-                fun fmt(v: Double, d: Int) = String.format(java.util.Locale.US, "%.${d}f", v)
-                val bestSurface = cal.perSurface
-                    .filter { it.reliable && it.crrEff != null }
-                    .maxByOrNull { it.samples }
-                val area = frontalArea.toDoubleLocale().takeIf { it > 0.0 } ?: 0.42
-                val canApply = cal.cdaReliable || bestSurface != null
-
-                Text(stringResource(R.string.calib_title), style = MaterialTheme.typography.titleSmall)
-                Text(
-                    stringResource(R.string.calib_summary, cal.samples),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    if (cal.cdaReliable) "CdA ${fmt(cal.cda, 3)} ±${fmt(cal.cdaSe, 3)} → Cd ${fmt(cal.cda / area, 3)}"
-                    else "CdA ${fmt(cal.cda, 3)} ±${fmt(cal.cdaSe, 3)}  ⚠ ${stringResource(R.string.calib_unreliable)}",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                cal.perSurface.forEach { s ->
-                    val line = when {
-                        !s.sufficient || s.crrEff == null -> "${s.surface}: ${stringResource(R.string.calib_insufficient)} (n=${s.samples})"
-                        !s.reliable -> "${s.surface}: Crr ${fmt(s.crrEff!!, 4)} ±${s.crrSe?.let { fmt(it, 4) } ?: "—"}  ⚠"
-                        else -> "${s.surface}: Crr ${fmt(s.crrEff!!, 4)} ±${s.crrSe?.let { fmt(it, 4) } ?: "—"} (n=${s.samples})"
-                    }
-                    Text(line, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Button(
-                    onClick = {
-                        if (cal.cdaReliable) dragCoefficient = fmt(cal.cda / area, 3)
-                        bestSurface?.let { s ->
-                            val factor = runCatching { KarooSurface.valueOf(s.surface).factor }.getOrDefault(1.0)
-                            if (factor > 0.0) rollingResistanceCoefficient = fmt(s.crrEff!! / factor, 4)
-                        }
-                        simpleMode = false   // use the measured raw Crr/Cd, not the tyre-derived estimate
-                        scope.launch { clearCalibration(ctx) }   // consumed → don't re-offer a stale fit
-                    },
-                    enabled = canApply,
-                ) { Text(stringResource(R.string.calib_apply)) }
-            }
+            // (Field calibration is a DEV tuning aid written to the diagnostic log, not a UI feature.)
 
             if (!simpleMode) {
                 Text(stringResource(R.string.section_advanced), style = MaterialTheme.typography.titleSmall)

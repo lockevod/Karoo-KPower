@@ -1,18 +1,15 @@
 package com.enderthor.kpower.ant
 
 import android.content.Context
-import com.dsi.ant.plugins.antplus.pcc.MultiDeviceSearch
-import com.dsi.ant.plugins.antplus.pcc.defines.DeviceType
-import com.dsi.ant.plugins.antplus.pcc.defines.RequestAccessResult
-import com.dsi.ant.plugins.antplus.pccbase.MultiDeviceSearch.MultiDeviceSearchResult
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import timber.log.Timber
-import java.util.EnumSet
 
 /** Owns the ANT+ power-meter scan and the connected per-device readers. */
 class AntPowerManager(private val context: Context) {
@@ -20,7 +17,12 @@ class AntPowerManager(private val context: Context) {
     private val _detectedDevices = MutableStateFlow<List<AntDeviceInfo>>(emptyList())
     val detectedDevices: StateFlow<List<AntDeviceInfo>> = _detectedDevices.asStateFlow()
 
-    private var search: MultiDeviceSearch? = null
+    // True while the wildcard background-scan channel is open (persistent until stopScan, like the Karoo).
+    private val _scanning = MutableStateFlow(false)
+    val scanning: StateFlow<Boolean> = _scanning.asStateFlow()
+
+    @Volatile private var scanChannel: RawAntScanChannel? = null
+    private val detectedLock = Any()
     private val meters = LinkedHashMap<Int, RawAntPowerMeter>()
 
     private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
@@ -104,46 +106,54 @@ class AntPowerManager(private val context: Context) {
     @Synchronized
     fun startScan() {
         stopScan()
-        _detectedDevices.value = emptyList()
-        // Diagnostic: the scan uses antpluginlib's MultiDeviceSearch, which needs the ANT+ Plugins
-        // Service (a different app than the ANT Radio Service the raw channel uses). If it's missing,
-        // the search returns nothing / USER_CANCELLED no matter what. Log its presence to disambiguate
-        // "meter asleep" from "plugins service missing".
-        val pluginsInstalled = runCatching {
-            context.packageManager.getPackageInfo("com.dsi.ant.plugins.antplus", 0); true
-        }.getOrDefault(false)
-        Timber.d("ANT startScan: searching BIKE_POWER (ANT+ Plugins Service installed=%b)", pluginsInstalled)
-        search = runCatching {
-            MultiDeviceSearch(
-                context,
-                EnumSet.of(DeviceType.BIKE_POWER),
-                object : MultiDeviceSearch.SearchCallbacks {
-                    override fun onSearchStarted(rssiSupport: MultiDeviceSearch.RssiSupport?) {
-                        Timber.d("ANT search started (rssi=%s)", rssiSupport)
-                    }
-                    override fun onDeviceFound(result: MultiDeviceSearchResult?) {
-                        result ?: return
-                        Timber.d("ANT device found: %s #%d", result.deviceDisplayName, result.antDeviceNumber)
-                        val info = AntDeviceInfo(
-                            name = result.deviceDisplayName ?: "Power #${result.antDeviceNumber}",
-                            deviceNumber = result.antDeviceNumber,
-                        )
-                        if (_detectedDevices.value.none { it.deviceNumber == info.deviceNumber }) {
-                            _detectedDevices.value = _detectedDevices.value + info
-                        }
-                    }
-                    override fun onSearchStopped(reason: RequestAccessResult?) {
-                        Timber.d("ANT scan stopped: %s", reason)
-                    }
-                },
-            )
-        }.onFailure { Timber.e(it, "ANT MultiDeviceSearch failed to start") }.getOrNull()
+        synchronized(detectedLock) { _detectedDevices.value = emptyList() }
+        Timber.d("ANT startScan: wildcard background scan (raw channel, BIKE_POWER)")
+        _scanning.value = true
+        // Copy the Karoo EXACTLY (verified by decompiling io.hammerhead.sensorservice): ONE persistent
+        // raw wildcard background-scan channel, devices demuxed from the extended channel-id, brand/model
+        // + battery parsed from the 0x50/0x52 common pages in the broadcast bytes. No MultiDeviceSearch,
+        // no per-device PCC → one channel, never ALL_CHANNELS_IN_USE. Released once on stopScan.
+        val sc = RawAntScanChannel(context) { dn, payload -> handleScanBroadcast(dn, payload) }
+        scanChannel = sc
+        sc.start()
     }
+
+    /** One BIKE_POWER broadcast from the wildcard scan: list the device, and parse the common pages for
+     *  name (0x50: mfr id LE 4-5, model LE 6-7) and battery (0x52: coarse status = byte 7 bits 4-6). */
+    private fun handleScanBroadcast(dn: Int, payload: ByteArray) {
+        synchronized(detectedLock) {
+            if (_detectedDevices.value.none { it.deviceNumber == dn }) {
+                _detectedDevices.value = _detectedDevices.value + AntDeviceInfo(name = "Power #$dn", deviceNumber = dn)
+            }
+        }
+        // Only the 0x50 manufacturer page is parsed during the scan (for the name). Battery isn't shown in
+        // the settings list (stale/low value); the live battery field + low/critical alert use batteryFlow
+        // from the recorded meter's channel during a ride.
+        if (payload.size < 8) return
+        if ((payload[0].toInt() and 0xFF) == 0x50) {
+            val mfg = (payload[4].toInt() and 0xFF) or ((payload[5].toInt() and 0xFF) shl 8)
+            val model = (payload[6].toInt() and 0xFF) or ((payload[7].toInt() and 0xFF) shl 8)
+            updateResolved(dn, antDeviceDisplayName(mfg, model))   // FULL "Garmin Rally 200"
+        }
+    }
+
+    private fun updateResolved(dn: Int, name: String?) {
+        synchronized(detectedLock) {
+            val cur = _detectedDevices.value.firstOrNull { it.deviceNumber == dn }
+            if (cur != null && cur.identifyTried && cur.resolvedName == name) return
+            Timber.d("ANT scan #%d identified: %s", dn, name)
+            _detectedDevices.value = _detectedDevices.value.map {
+                if (it.deviceNumber == dn) it.copy(resolvedName = name, identifyTried = true) else it
+            }
+        }
+    }
+
 
     @Synchronized
     fun stopScan() {
-        runCatching { search?.close() }
-        search = null
+        runCatching { scanChannel?.stop() }
+        scanChannel = null
+        _scanning.value = false
     }
 
     /**
