@@ -54,10 +54,15 @@ class DualValueDataType(
             // sunset on a long ride) must update the text colour, not stay stale until a page swap.
             val night = (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
                 Configuration.UI_MODE_NIGHT_YES
+            // config.textSize is sized for a full single-value cell, but our value renders in the smaller
+            // area UNDER the field-name header and must fit a 5-char "47/53" — at the raw size it overflows
+            // the width AND clips at the bottom (and short text like "--" sits low). Scale it down: by the
+            // character count (width) and a base factor that keeps even short text inside the value area.
+            val scale = (DUAL_REF_CHARS / maxOf(text.length.toFloat(), DUAL_REF_CHARS)).coerceAtMost(1f) * DUAL_HEIGHT_FACTOR
             val rv = RemoteViews(context.packageName, R.layout.field_dual).apply {
                 setTextViewText(R.id.dual_value, text)
                 setTextColor(R.id.dual_value, if (night) Color.WHITE else Color.BLACK)
-                setTextViewTextSize(R.id.dual_value, TypedValue.COMPLEX_UNIT_SP, config.textSize.toFloat())
+                setTextViewTextSize(R.id.dual_value, TypedValue.COMPLEX_UNIT_SP, config.textSize.toFloat() * scale)
             }
             emitter.updateView(rv)
         }
@@ -98,4 +103,13 @@ class DualValueDataType(
     /** Round a side to an integer; an absent side shows "–". */
     private fun fmt(v: Double?): String =
         if (v == null || v.isNaN()) "–" else v.roundToInt().toString()
+
+    private companion object {
+        // Width: the size at which ~4 chars fill the cell; longer text ("47/53", "100/100") scales down.
+        // Raise toward the char count of "47/53" (5) for bigger numbers, lower if a 5-char value overflows.
+        const val DUAL_REF_CHARS = 4.0f
+        // Height: leave room under the field-name header so text isn't clipped at the bottom. Raise for
+        // bigger numbers, lower if "--" / short values clip at the bottom again.
+        const val DUAL_HEIGHT_FACTOR = 0.80f
+    }
 }

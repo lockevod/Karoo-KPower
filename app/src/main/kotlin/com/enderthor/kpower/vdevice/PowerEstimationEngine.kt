@@ -52,6 +52,23 @@ private const val DEFAULT_USER_MASS_KG = 75.0
 /** Max time to hold the last grade across a stream dropout before falling back to flat (0%). */
 private const val GRADE_MAX_HOLD_MS = 60_000L
 
+/**
+ * Below this GPS speed (m/s ≈ 2.9 km/h) the rider isn't producing estimable cycling power, so the
+ * estimate is forced to 0. Without this, GPS speed NOISE while stationary (e.g. the Karoo sitting on a
+ * table indoors with no fix) drives the acceleration term and shows a phantom few watts that fluctuate
+ * 0–9 W. A real cyclist is never below this while pedalling, so it can't suppress a genuine effort.
+ */
+private const val MIN_SPEED_FOR_POWER_MS = 0.8
+
+/**
+ * Speed must stay above [MIN_SPEED_FOR_POWER_MS] for this many consecutive 1 Hz ticks before the rider
+ * counts as "moving". A single GPS speed spike (indoor noise) is one tick, so it never crosses this and
+ * can't produce a phantom watt; sustained real riding crosses it in ~2 s. Used BOTH as the estimate gate
+ * and — when there is NO cadence sensor — as the "is pedalling" proxy so the rider's "only calculate when
+ * pedalling" toggle is honoured (instead of forcing power on just because cadence is absent).
+ */
+private const val MIN_MOVING_TICKS = 2
+
 private data class EngineEnvAndConfig(
     val values: RealKarooValues,
     val configs: List<ConfigData>,
@@ -98,6 +115,9 @@ class PowerEstimationEngine(
     @Volatile private var lastGoodSlope = 0.0
     @Volatile private var lastGoodElevation = 0.0
     @Volatile private var lastSlopeMs = 0L   // for the staleness bound below
+    // Consecutive 1 Hz ticks with speed above MIN_SPEED_FOR_POWER_MS (debounces GPS speed spikes). Only
+    // touched on the single estimate-collect coroutine.
+    private var movingTicks = 0
 
     // Field calibration: derives Crr & CdA from the REAL meter vs the model, accumulated over a
     // comparison session. realPowerProvider is set by the extension (active meter's live power, NaN if none).
@@ -271,6 +291,15 @@ class PowerEstimationEngine(
                     val config = com.enderthor.kpower.data.resolveActiveConfig(configs, activeProfileIdFlow.value) ?: return@collect
                     val nowMs = System.currentTimeMillis()
                     val speedMs = bundle.values.speed.getValueOrDefault()
+                    // "Moving" = speed sustained above the gate for >= MIN_MOVING_TICKS ticks, so a 1-tick
+                    // GPS noise spike never counts. ONLY update on a FRESH speed sample: a stream dropout
+                    // (tunnel/GPS gap, where getValueOrDefault() returns 0.0) must HOLD the last state, not
+                    // flap moving→false mid-effort. `moving` is used ONLY as the no-cadence pedalling proxy
+                    // below (which still respects the force-power toggle) — it is NOT a hard output gate.
+                    if (bundle.values.speed is StreamState.Streaming) {
+                        if (speedMs >= MIN_SPEED_FOR_POWER_MS) { if (movingTicks < MIN_MOVING_TICKS) movingTicks++ } else movingTicks = 0
+                    }
+                    val moving = movingTicks >= MIN_MOVING_TICKS
                     val acceleration = accelerationTracker.update(speedMs, nowMs)
                     // HOLD the last good grade/elevation across stream dropouts instead of treating a
                     // missing stream as 0 — a momentary grade dropout would otherwise read as 0% (flat)
@@ -294,7 +323,7 @@ class PowerEstimationEngine(
                     val pressurePa: Double? = bundle.weatherPressureHpa?.times(100.0)
 
                     val est = calculatePowerBike(
-                        userMass, config, bundle.values, slopePercent, heldElevation, acceleration, tempC, pressurePa, userFtp
+                        userMass, config, bundle.values, slopePercent, heldElevation, acceleration, tempC, pressurePa, userFtp, moving
                     )
                     // calculateCyclingWattage returns the cap applied to the SIGNED total (so a big
                     // acceleration spike can't show an absurd instant value); we floor it to ≥0 here.
@@ -302,6 +331,10 @@ class PowerEstimationEngine(
                     // (and NP, which 4th-powers values) to be apples-to-apples the estimate must floor too.
                     // GPS-acceleration noise is handled by AccelerationTracker's EMA, not by allowing
                     // negative power (NP can't average signed samples — (−x)⁴ = (+x)⁴).
+                    // No output gate here: calculateCyclingWattage already returns 0 when (no force-power AND
+                    // not pedalling), where "pedalling" is the cadence sensor or — with no cadence — `moving`.
+                    // A previous `if (!moving) 0.0` here ALSO zeroed power on slow climbs / GPS dropouts and
+                    // overrode the force-power toggle; gating only inside the estimator fixes all three.
                     val rawSigned = est.calculateCyclingWattage()
                     val instantW = maxOf(0.0, rawSigned)
                     // Field calibration: while recording with a real meter present, accumulate the
@@ -368,16 +401,20 @@ class PowerEstimationEngine(
         temperatureC: Double?,
         pressurePa: Double?,
         userFtp: Int,
+        moving: Boolean,
     ): CyclingWattageEstimator {
         val speed = values.speed.getValueOrDefault()
         val finalHeadwind = values.headwind.getValueOrDefault()
 
-        var isPedaling = true
-        var isforcepower = config.isforcepower
-
-        if (values.cadence is StreamState.Streaming) {
-            isPedaling = cadenceGate.update(values.cadence.getValueOrDefault())
-        } else isforcepower = true
+        val isforcepower = config.isforcepower
+        // "Is pedalling": from the cadence sensor when present, else from sustained MOVEMENT. This is the
+        // fix for the rider's "only calculate when pedalling" toggle being ignored with no cadence sensor:
+        // we no longer force power on — without cadence, not-moving counts as not-pedalling, so the toggle
+        // (isforcepower=false) correctly yields 0 on a stationary unit. With the toggle OFF (isforcepower
+        // =true) power is computed regardless, exactly as before.
+        val isPedaling = if (values.cadence is StreamState.Streaming) {
+            cadenceGate.update(values.cadence.getValueOrDefault())
+        } else moving
 
         val ftp = if (config.useProfileFtp && userFtp > 0) userFtp.toDouble()
         else config.ftp.toDoubleLocale()

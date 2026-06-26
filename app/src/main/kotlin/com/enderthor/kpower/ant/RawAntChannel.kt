@@ -37,12 +37,39 @@ import java.util.concurrent.ConcurrentHashMap
  * period 8182) and delivers each broadcast payload to [onPayload]. Replaces antpluginlib for a
  * meter so we can also see Cycling Dynamics pages it does not expose. Proven on Karoo hardware
  * via AntChannelProbe (PredefinedNetwork.ANT_PLUS, 14 channels free).
+ *
+ * The channel is **BIDIRECTIONAL_SLAVE** (not receive-only) so it can TRANSMIT acknowledged
+ * host->device commands — exactly how the Karoo's own sensorservice works. On connect it requests
+ * the [identityPages] (manufacturer/product/battery) via a Request Data Page so brand+battery are
+ * known within ~1s instead of waiting ~30s for the meter's slow background rotation; once each page
+ * has been seen it stops asking (so there is no ongoing TX cost for the rest of the ride). Arbitrary
+ * acknowledged payloads (e.g. a calibration request) can be queued with [sendAcknowledged].
+ *
+ * [onFirstPage] (optional) fires once, on the first broadcast after each (re)open — used by the raw
+ * calibrator to send its request only once the channel is actually tracking the meter.
  */
 class RawAntChannel(
     private val context: Context,
     private val deviceNumber: Int,
     private val onPayload: (ByteArray) -> Unit,
+    private val identityPages: List<Int> = AntPlusRequests.IDENTITY_PAGES,
+    private val onFirstPage: (() -> Unit)? = null,
 ) {
+    // Host->device acknowledged TX queue (drained one item per received broadcast, on the channel's
+    // own callback thread). Mirrors the Karoo's per-channel send queue (rxantplus q8/g.java f4906g).
+    private val txQueue = java.util.concurrent.ConcurrentLinkedQueue<ByteArray>()
+    // Identity pages already observed (so we stop re-requesting them) + last-request time per page.
+    private val seenPages = java.util.Collections.synchronizedSet(HashSet<Int>())
+    private val lastIdentityReqMs = ConcurrentHashMap<Int, Long>()
+    // How many times we've requested each unseen identity page. Bounded: a meter that never sends a page
+    // (commonly the 0x52 battery page) must NOT be re-requested forever — that would be continuous TX to
+    // the meter for the whole ride (battery drain + RX contention). After the cap we give up on that page.
+    private val identityReqCount = ConcurrentHashMap<Int, Int>()
+    @Volatile private var firstPageFired = false
+    @Volatile private var lastTxAttemptMs = 0L
+
+    /** Queue an acknowledged host->device payload (must be 8 bytes); sent on the next broadcast slot. */
+    fun sendAcknowledged(payload: ByteArray) { txQueue.add(payload) }
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     @Volatile private var antService: AntService? = null
     @Volatile private var channel: AntChannel? = null
@@ -264,6 +291,7 @@ class RawAntChannel(
                 // channel using a stale lastPageMs left over from the previous (dead) one before it has
                 // had a chance to (re-)acquire the meter.
                 lastPageMs = 0L
+                firstPageFired = false   // re-fire onFirstPage after a reconnect (e.g. re-send calibration)
                 ch.setChannelEventHandler(object : IAntChannelEventHandler {
                     override fun onReceiveMessage(type: MessageFromAntType?, msg: AntMessageParcel?) {
                         if (msg == null) return
@@ -283,7 +311,14 @@ class RawAntChannel(
                                     // Diagnostic ANT page logging — gated so it costs ~nothing when off.
                                     if (com.enderthor.kpower.extension.FileLogTree.enabled) logPage(payload)
                                     onPayload(payload)
+                                    if (payload.isNotEmpty()) seenPages.add(payload[0].toInt() and 0xFF)
                                 }
+                                // First page after (re)open: the channel is now tracking the meter — let
+                                // the owner (e.g. the calibrator) act once it can actually be reached.
+                                if (!firstPageFired) { firstPageFired = true; runCatching { onFirstPage?.invoke() } }
+                                // Ask for any still-unseen identity page (manufacturer/product/battery),
+                                // like the Karoo, then send one queued acknowledged command per slot.
+                                pumpTx(ch)
                             }
                             MessageFromAntType.CHANNEL_EVENT -> {
                                 // The finite low-priority search window expired (meter asleep / out of
@@ -301,7 +336,10 @@ class RawAntChannel(
                     }
                     override fun onChannelDeath() { if (ch === channel) reopenAfterDeath() }
                 })
-                ch.assign(ChannelType.SLAVE_RECEIVE_ONLY); delay(50)
+                // BIDIRECTIONAL_SLAVE (not RECEIVE_ONLY) so we can TX the identity/calibration requests.
+                // It still receives every broadcast identically; with an empty TX queue it never transmits,
+                // so once identity is resolved there is no ongoing send cost. This is the Karoo's own model.
+                ch.assign(ChannelType.BIDIRECTIONAL_SLAVE); delay(50)
                 ch.setChannelId(ChannelId(deviceNumber, 11, 0)); delay(50)  // SPECIFIC device, type 11
                 ch.setRfFrequency(57); delay(50)
                 ch.setPeriod(8182); delay(50)
@@ -328,7 +366,16 @@ class RawAntChannel(
                 runCatching { dead?.close() }
                 runCatching { dead?.unassign() }
                 runCatching { dead?.release() }
-                if (e is ChannelNotAvailableException) {
+                if (e is kotlinx.coroutines.CancellationException) {
+                    // BENIGN: stop()/release() cancelled the scope mid-open — e.g. a scan-list identify
+                    // whose meter was ASLEEP (no broadcast within the identify window, so the cranks
+                    // weren't turning), or simply leaving the scan screen. NOT a failure: don't log an
+                    // error (it just scares the reader with a stacktrace) and don't reschedule — the
+                    // channel is going away. runCatching swallowed the cancellation; rethrow so the
+                    // coroutine actually finishes cancelled instead of completing normally.
+                    Timber.d("RawAntChannel #%d open cancelled (teardown — meter asleep or screen left)", deviceNumber)
+                    throw e
+                } else if (e is ChannelNotAvailableException) {
                     // All ANT channels busy (Karoo's own sensors + others). Don't burn the failure
                     // budget — providerReceiver retries open() when a channel frees up. Plus a long
                     // budget-exempt backstop in case that broadcast is missed/coalesced (so the meter
@@ -344,6 +391,37 @@ class RawAntChannel(
         } finally {
             opening.set(false)
         }
+    }
+
+    /**
+     * Drive host->device transmission, called from the channel's broadcast callback (so we TX in the
+     * channel's own slot). First (re)queues a Request Data Page for any identity page not yet seen
+     * — throttled per page — then sends ONE acknowledged payload from the queue, but at most once per
+     * [TX_MIN_INTERVAL_MS]. An acknowledged transfer takes longer than one broadcast period to complete
+     * (it retries until the master ACKs), so attempting a send every broadcast just floods the radio with
+     * TRANSFER_IN_PROGRESS failures; ~1 send/s is plenty for identity/calibration. Best-effort: a failed
+     * transfer is dropped (identity re-requests; the calibrator re-queues). Costs nothing once the queue
+     * is empty and every identity page has been seen.
+     */
+    private fun pumpTx(ch: AntChannel) {
+        if (ch !== channel) return
+        val now = System.currentTimeMillis()
+        for (page in identityPages) {
+            if (seenPages.contains(page)) continue
+            if ((identityReqCount[page] ?: 0) >= MAX_IDENTITY_REQUESTS) continue   // gave up (e.g. no 0x52)
+            val last = lastIdentityReqMs[page] ?: 0L
+            if (now - last < IDENTITY_REQUEST_INTERVAL_MS) continue
+            lastIdentityReqMs[page] = now
+            identityReqCount[page] = (identityReqCount[page] ?: 0) + 1
+            if (txQueue.size < MAX_TX_QUEUE) txQueue.add(AntPlusRequests.requestDataPage(page))
+        }
+        // Throttle the actual acknowledged send: a transfer in flight would fail any new send with
+        // TRANSFER_IN_PROGRESS, so don't attempt more than ~1/s.
+        if (now - lastTxAttemptMs < TX_MIN_INTERVAL_MS) return
+        val payload = txQueue.poll() ?: return
+        lastTxAttemptMs = now
+        runCatching { ch.startSendAcknowledgedData(payload) }
+            .onFailure { Timber.v("RawAntChannel #%d ack TX failed (will re-request): %s", deviceNumber, it.message) }
     }
 
     /**
@@ -426,6 +504,10 @@ class RawAntChannel(
         const val REBIND_DELAY_MS = 2000L  // wait before re-binding the ANT Radio Service
         const val NO_CHANNEL_RETRY_MS = 15000L  // backstop retry if the provider broadcast is missed
         const val HEARTBEAT_TIMEOUT_MS = 30000L // recycle a tracking channel that has gone silent this long
+        const val IDENTITY_REQUEST_INTERVAL_MS = 3000L // re-ask for an unseen identity page at most this often
+        const val MAX_IDENTITY_REQUESTS = 6     // give up requesting a page after this (≈18s) — e.g. a meter with no 0x52
+        const val MAX_TX_QUEUE = 6              // bound the acknowledged-TX queue (drop excess, re-request later)
+        const val TX_MIN_INTERVAL_MS = 1000L    // min gap between acknowledged-TX attempts (avoid TRANSFER_IN_PROGRESS flood)
 
         /** Pages we know how to decode (parser pages + ANT+ common pages); others are UNKNOWN. */
         const val MAX_UNKNOWN_VARIANTS = 40   // cap distinct payloads logged per unknown page

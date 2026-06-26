@@ -1,8 +1,18 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.jetbrains.kotlin.android)
     alias(libs.plugins.compose.compiler)
     kotlin("plugin.serialization") version "2.0.20"
+}
+
+// Diagnostic-log delivery credentials, read from local.properties (gitignored) at compile time so they
+// never appear in the repo or any settings screen. Absent keys → "" and LogReporter then skips sending.
+val localProps = Properties().apply {
+    val f = rootProject.file("local.properties")
+    if (f.exists()) FileInputStream(f).use { load(it) }
 }
 
 android {
@@ -15,6 +25,11 @@ android {
         targetSdk = 34
         versionCode = 202606131
         versionName = "3.0.0"
+
+        // Telegram bot for diagnostic-log delivery (only used when the rider enables diagnostic logging).
+        // From local.properties: calib.bot_token / calib.chat_id. Absent → "" → LogReporter is a no-op.
+        buildConfigField("String", "CALIB_BOT_TOKEN", "\"${localProps.getProperty("calib.bot_token", "")}\"")
+        buildConfigField("String", "CALIB_CHAT_ID", "\"${localProps.getProperty("calib.chat_id", "")}\"")
     }
 
     buildTypes {
@@ -45,7 +60,6 @@ android {
 dependencies {
     implementation(libs.hammerhead.karoo.ext)
     implementation(files("libs/android_antlib_4-16-0.aar"))
-    implementation(files("libs/antpluginlib_3-9-0.aar"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.bundles.androidx.lifeycle)
     implementation(libs.androidx.activity.compose)

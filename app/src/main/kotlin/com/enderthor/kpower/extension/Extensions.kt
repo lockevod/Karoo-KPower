@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 
 
@@ -134,6 +135,32 @@ suspend fun saveBatteryAlert(context: Context, enabled: Boolean) {
  *  (LOW) y otro si pasa a crítica (CRITICAL), como mucho uno por nivel y ride. */
 fun Context.batteryAlertFlow(): Flow<Boolean> =
     dataStore.data.map { it[batteryAlertKey] ?: false }.distinctUntilChanged()
+
+// ── Meter-management screen activity signal (cross-component, via DataStore) ──────────────────────
+// ComparisonScreen and the extension service hold SEPARATE AntPowerManager instances but share the one
+// physical ANT radio. The service keeps the meter channel open off-ride (so the meter shows live in the
+// Karoo's native Sensors screen), but that open channel would STARVE ComparisonScreen's raw scan when the
+// rider goes there to add a meter. ComparisonScreen marks itself active here while it's using the radio;
+// the service's connect gate releases the meter channel whenever this is recent, freeing the radio.
+//
+// Stored as a wall-clock millis stamp (not a bool) so a screen killed without onDispose AUTO-EXPIRES after
+// [METER_SCREEN_ACTIVE_BACKSTOP_MS] instead of wedging the meter disconnected forever. The gate recomputes
+// freshness against `now` on every emission (RideState re-emits on each host rebind, so it self-heals).
+// ComparisonScreen heartbeats the stamp (re-stamps every ~45 s while open) so this 2-min window can't
+// expire mid-session; the short window bounds the killed-without-onDispose wedge to ≤2 min.
+const val METER_SCREEN_ACTIVE_BACKSTOP_MS = 2 * 60_000L
+val meterScreenActiveKey = longPreferencesKey("meterScreenActiveAt")
+
+/** Mark KPower's meter-management screen active (using the ANT radio) or not. `active=true` stamps now;
+ *  `false` clears. Call true on screen enter AND on each scan start (refreshes the backstop window). */
+suspend fun saveMeterScreenActive(context: Context, active: Boolean) {
+    context.dataStore.edit { it[meterScreenActiveKey] = if (active) System.currentTimeMillis() else 0L }
+}
+
+/** Raw "last marked active" stamp (0 = inactive). The gate applies the [METER_SCREEN_ACTIVE_BACKSTOP_MS]
+ *  freshness check itself, against the current time, so an expired stamp doesn't need a flow re-emission. */
+fun Context.meterScreenActiveAtFlow(): Flow<Long> =
+    dataStore.data.map { it[meterScreenActiveKey] ?: 0L }.distinctUntilChanged()
 
 /**
  * Atomic read-modify-write of the saved meters: decode the current value, apply [transform], and
@@ -332,6 +359,36 @@ suspend fun KarooSystemService.makeOpenMeteoHttpRequest(gpsCoordinates: GpsCoord
             throw e
         }
     }.single()
+}
+
+/**
+ * Generic HTTP request through the Karoo's connectivity (phone tether / Wi-Fi), suspending until the
+ * response completes. Used by [LogReporter] to POST the diagnostic log to the developer's Telegram bot.
+ * Mirrors the karoo-ext request/response consumer pattern; trySend + CONFLATED keeps the binder callback
+ * non-blocking. Wrap the call in withTimeoutOrNull — this has no internal timeout.
+ */
+suspend fun KarooSystemService.httpRequest(
+    method: String,
+    url: String,
+    headers: Map<String, String> = emptyMap(),
+    body: ByteArray? = null,
+): HttpResponseState.Complete = callbackFlow {
+    val listenerId = addConsumer(
+        OnHttpResponse.MakeHttpRequest(method, url, headers = headers, body = body, waitForConnection = false),
+    ) { event: OnHttpResponse ->
+        (event.state as? HttpResponseState.Complete)?.let { trySend(it); close() }
+    }
+    awaitClose { removeConsumer(listenerId) }
+}.buffer(Channel.CONFLATED).first()
+
+/** Anonymous, stable per-install id (8 hex) so uploaded diagnostic logs can be correlated without any
+ *  personal data. Created once and persisted. */
+val installIdKey = stringPreferencesKey("installId")
+suspend fun Context.getOrCreateInstallId(): String {
+    dataStore.data.first()[installIdKey]?.let { return it }
+    val id = java.util.UUID.randomUUID().toString().replace("-", "").take(8)
+    runCatching { dataStore.edit { it[installIdKey] = id } }
+    return id
 }
 
 const val HEADWIND_PACKAGE = "de.timklge.karooheadwind"

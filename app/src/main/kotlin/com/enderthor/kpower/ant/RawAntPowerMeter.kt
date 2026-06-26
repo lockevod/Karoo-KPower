@@ -38,6 +38,10 @@ class RawAntPowerMeter(
     /** Brand name from the 0x50 manufacturer page; null until seen. Device identity — survives reset. */
     private val _manufacturerName = MutableStateFlow<String?>(null)
     val manufacturerName: StateFlow<String?> = _manufacturerName.asStateFlow()
+    /** SHORT name (model if known, else brand; null if unknown) for KPW's own paired-sensor label, kept
+     *  short so it fits the Karoo Sensors screen ("KPW Rally 200", not "KPW Garmin Rally 200"). */
+    private val _manufacturerShort = MutableStateFlow<String?>(null)
+    val manufacturerShort: StateFlow<String?> = _manufacturerShort.asStateFlow()
     /** Battery status code from common page 0x52 (1=New..5=Critical); null until seen. Survives reset. */
     private val _batteryStatus = MutableStateFlow<Int?>(null)
     val batteryStatus: StateFlow<Int?> = _batteryStatus.asStateFlow()
@@ -156,9 +160,10 @@ class RawAntPowerMeter(
                 // Device identity (brand). Not a "live" value, so it does NOT update lastEventMs and
                 // is not cleared by reset()/expireIfStale.
                 CyclingDynamicsParser.parseManufacturer(p)?.let {
-                    // FULL "Brand Model" (e.g. "Garmin Rally 200"); the KPOWER sensor name prefixes it
-                    // ("KPOWER Garmin Rally 200"). antDeviceDisplayName always returns at least the brand.
+                    // FULL "Brand Model" (e.g. "Garmin Rally 200") for the scan list; SHORT (model/brand)
+                    // for the compact "KPW <short>" virtual-sensor name that must fit the Sensors screen.
                     _manufacturerName.value = antDeviceDisplayName(it.manufacturerId, it.modelNumber)
+                    _manufacturerShort.value = antDeviceShortName(it.manufacturerId, it.modelNumber)
                 }
             }
             CyclingDynamicsParser.PAGE_BATTERY -> {

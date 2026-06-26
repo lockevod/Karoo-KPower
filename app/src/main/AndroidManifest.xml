@@ -8,12 +8,10 @@
     <!-- Para detectar si Headwind está instalado (Android 11+ oculta el resto de paquetes). -->
     <queries>
         <package android:name="de.timklge.karooheadwind" />
-        <!-- Android 11+ package visibility. The raw-ANT channel binds the ANT Radio Service; the
-             antpluginlib PCC (device identify + calibration) binds the SEPARATE ANT+ Plugins Service.
-             Without BOTH declared, requestAccess can't reach the Plugins Service and the PCC fails
-             (USER_CANCELLED / SEARCH_TIMEOUT) even though the raw channel works. -->
+        <!-- Android 11+ package visibility. The raw-ANT channel binds the ANT Radio Service. (The ANT+
+             Plugins Service / antpluginlib PCC is no longer used — discovery, identify and calibration
+             are all done on raw channels now, so com.dsi.ant.plugins.antplus is not queried.) -->
         <package android:name="com.dsi.ant.service" />
-        <package android:name="com.dsi.ant.plugins.antplus" />
     </queries>
     <application
         android:name=".KpowerApplication"

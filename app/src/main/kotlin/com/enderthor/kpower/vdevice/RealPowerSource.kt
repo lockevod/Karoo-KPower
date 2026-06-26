@@ -47,25 +47,37 @@ class RealPowerSource(
         activeScope?.cancel()
         val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         activeScope = scope
-        // NOTE: we do NOT acquire the raw ANT channel here. The channel's lifecycle is owned solely
-        // by the ride-state gate in KpowerExtension (open only while the meter is ENABLED and the ride
-        // is RECORDING). This source just reads the stable power/cadence sinks. Acquiring here would
-        // (a) keep the radio + a channel open off-ride (battery) and (b) survive a meter delete until
-        // the host unpairs, starving the ANT+ scan — both seen on hardware ("scan, add, delete, then
-        // scan finds nothing"). Off-ride the sinks are NaN, so this source reports SEARCHING.
+        // NOTE: we do NOT acquire the raw ANT channel here. The channel's lifecycle is owned solely by
+        // the gate in KpowerExtension: open whenever a saved meter is ENABLED and the meter-management
+        // screen isn't using the radio (NOT gated on ride state — like the Karoo, the meter is live in
+        // the native Sensors screen off-ride too). This source just reads the stable power/cadence sinks.
+        // Acquiring here (tying the channel to the Karoo's SUBSCRIPTION, the way the Karoo itself does)
+        // was tried and reverted: the host's subscription to our virtual device SURVIVES a meter delete,
+        // so the channel stayed open until the host unpaired, starving the ANT+ scan ("scan, add, delete,
+        // then scan finds nothing"). The enabled-gate closes the channel on disable/delete instead.
+        // Trade-off vs the Karoo: the channel can stay open off-ride with no subscriber (battery), bounded
+        // by the 25 s search-timeout duty-cycle in RawAntChannel.
 
         scope.launch {
             try {
+                // Start SEARCHING and STAY there until a REAL power sample arrives. Do NOT emit a
+                // premature CONNECTED here: with no meter (or one out of range) the channel never opens,
+                // powerFlow stays NaN, and the host rebinds often — an unconditional CONNECTED made the
+                // field flicker Searching→Connected for a meter that isn't there. The merged collector
+                // below flips to CONNECTED only on a non-NaN power value.
                 emitter.onNext(OnConnectionStatus(ConnectionStatus.SEARCHING))
-                delay(2000)
-                emitter.onNext(OnConnectionStatus(ConnectionStatus.CONNECTED))
                 delay(1000)
                 // Initial battery from the last-known 0x52 code (real value once the meter has sent
                 // one; GOOD until then). Live updates come through the merged collector below.
                 emitter.onNext(OnBatteryStatus(batteryStatusOf(antManager.batteryFlow(deviceNumber).value)))
                 delay(1000)
-                // manufacturer=Enderthor, serial=the ANT device id, model="KPOWER".
-                emitter.onNext(OnManufacturerInfo(ManufacturerInfo("Enderthor", deviceNumber.toString(), "KPOWER")))
+                // Product Information: manufacturer=Enderthor, serial=the ANT device id, and model=the
+                // real meter's FULL name (e.g. "KPOWER Garmin Rally 200") so the details screen shows what
+                // it actually mirrors — the sensor-LIST name stays the short "KPW Rally 200". Falls back to
+                // "KPOWER" until the 0x50 page has resolved the brand/model.
+                val full = antManager.manufacturerFlow(deviceNumber).value
+                val model = if (!full.isNullOrBlank()) "KPOWER $full" else "KPOWER"
+                emitter.onNext(OnManufacturerInfo(ManufacturerInfo("Enderthor", deviceNumber.toString(), model)))
 
                 // Power is the primary signal: it governs the CONNECTED/SEARCHING state.
                 // When the meter drops out the watchdog blanks the value to NaN; we must
@@ -75,7 +87,9 @@ class RealPowerSource(
                 // karoo-ext Emitter/AIDL handler is not guaranteed safe). Connection-status
                 // transitions are driven ONLY by power within this single collector (cadence
                 // never writes `connected`) so there is no shared-state race.
-                var connected = true
+                // Starts false (we emitted SEARCHING above): the first non-NaN power flips it to CONNECTED,
+                // a NaN/dropout flips it back — so status is driven purely by real data, never a timer.
+                var connected = false
                 var lastBattery: Int? = antManager.batteryFlow(deviceNumber).value
                 merge(
                     antManager.powerFlow(deviceNumber).map { Sample.Power(it) },

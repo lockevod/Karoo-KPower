@@ -4,6 +4,8 @@ import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
@@ -25,6 +27,16 @@ class AntPowerManager(private val context: Context) {
     private val detectedLock = Any()
     private val meters = LinkedHashMap<Int, RawAntPowerMeter>()
 
+    // Scan-list fast identify: like the Karoo, when the wildcard scan finds a device we open its OWN
+    // bidirectional channel (via the normal acquire/release lifecycle) so it actively requests the 0x50
+    // manufacturer page and the name resolves in ~1s instead of waiting ~30s for the passive rotation.
+    // The channel is held for the WHOLE scan session (not a short timeout): a meter may be ASLEEP now and
+    // wake when the rider pedals — keeping the request channel open means the name appears within ~1s of
+    // it waking, instead of staying "Identifying…" forever. Released as soon as the name resolves, or when
+    // the scan stops. Keyed by device number → its in-flight identify job (also the dedup).
+    private val identifyToken = Any()
+    private val identifyJobs = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.Job>()
+
     private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
     private val powerFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
     private val cadenceFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
@@ -34,6 +46,10 @@ class AntPowerManager(private val context: Context) {
     private val avgFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
     private val maxFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
     private val torqueFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
+    // Session aggregates of torque + L/R balance (parity with the Karoo's avg/max torque, avg balance).
+    private val avgTorqueFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
+    private val maxTorqueFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
+    private val avgBalanceFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
     // Stable dynamics sinks (survive reconnect; re-bound by bridges[dn] to each new meter).
     private val balanceFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
     private val tePsFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<TePsData?>>()
@@ -41,6 +57,8 @@ class AntPowerManager(private val context: Context) {
     private val forceRightFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<ForceAngleData?>>()
     // Brand name from the 0x50 page (device identity); persists across reconnect, never reset to null.
     private val manufacturerFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<String?>>()
+    // SHORT name (model/brand) for the compact "KPW <short>" virtual-sensor label; persists like the brand.
+    private val manufacturerShortFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<String?>>()
     // Battery status code (1=New..5=Critical) from the 0x52 page; persists like manufacturer.
     private val batteryFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Int?>>()
     private val bridges = HashMap<Int, kotlinx.coroutines.Job>()
@@ -88,6 +106,11 @@ class AntPowerManager(private val context: Context) {
     fun maxFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<Double> = maxFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
     fun torqueFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<Double> = torqueFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
 
+    /** Session avg/max torque and avg L/R balance (right %) for a device (survive reconnect, like avgFlow). */
+    fun avgTorqueFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<Double> = avgTorqueFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
+    fun maxTorqueFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<Double> = maxTorqueFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
+    fun avgBalanceFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<Double> = avgBalanceFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
+
     /** Stable dynamics flows for a device number (survive reconnect, like powerFlow). */
     fun balanceFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<Double> = balanceFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
     fun tePsFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<TePsData?> = tePsFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(null) }
@@ -96,6 +119,9 @@ class AntPowerManager(private val context: Context) {
 
     /** Detected brand name for a device (from the 0x50 page); null until seen. */
     fun manufacturerFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<String?> = manufacturerFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(null) }
+
+    /** Detected SHORT name (model/brand) for the compact "KPW <short>" sensor label; null until seen. */
+    fun manufacturerShortFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<String?> = manufacturerShortFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(null) }
 
     /** Battery status code for a device (from the 0x52 page, 1=New..5=Critical); null until seen. */
     fun batteryFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<Int?> = batteryFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(null) }
@@ -121,20 +147,54 @@ class AntPowerManager(private val context: Context) {
     /** One BIKE_POWER broadcast from the wildcard scan: list the device, and parse the common pages for
      *  name (0x50: mfr id LE 4-5, model LE 6-7) and battery (0x52: coarse status = byte 7 bits 4-6). */
     private fun handleScanBroadcast(dn: Int, payload: ByteArray) {
-        synchronized(detectedLock) {
+        val isNew = synchronized(detectedLock) {
             if (_detectedDevices.value.none { it.deviceNumber == dn }) {
                 _detectedDevices.value = _detectedDevices.value + AntDeviceInfo(name = "Power #$dn", deviceNumber = dn)
-            }
+                true
+            } else false
         }
-        // Only the 0x50 manufacturer page is parsed during the scan (for the name). Battery isn't shown in
-        // the settings list (stale/low value); the live battery field + low/critical alert use batteryFlow
-        // from the recorded meter's channel during a ride.
+        // A newly-seen device: open its own channel briefly to ACTIVELY request the 0x50 page (fast name),
+        // exactly like the Karoo. The passive 0x50 parse below is kept as a free fallback.
+        if (isNew) startIdentify(dn)
+        // Passive fallback: if the 0x50 manufacturer page happens to come through the wildcard scan, use it.
         if (payload.size < 8) return
         if ((payload[0].toInt() and 0xFF) == 0x50) {
             val mfg = (payload[4].toInt() and 0xFF) or ((payload[5].toInt() and 0xFF) shl 8)
             val model = (payload[6].toInt() and 0xFF) or ((payload[7].toInt() and 0xFF) shl 8)
             updateResolved(dn, antDeviceDisplayName(mfg, model))   // FULL "Garmin Rally 200"
         }
+    }
+
+    /**
+     * Open device [dn]'s own bidirectional channel for a few seconds so it requests + reports its
+     * manufacturer page, then release it. Reuses the ref-counted acquire/release lifecycle (under the
+     * [identifyToken]) and the stable [manufacturerFlow], so it shares all the channel recovery logic.
+     * No-op if already identifying [dn] or the manager is closed.
+     */
+    private fun startIdentify(dn: Int) {
+        if (closed || identifyJobs.containsKey(dn)) return
+        // Already know this device's brand (cached from a prior identify / connection)? Just publish it,
+        // no need to open a channel.
+        manufacturerFlow(dn).value?.let { updateResolved(dn, it); return }
+        // Cap concurrent identify channels: each holds one bidirectional ANT channel for the whole scan
+        // (an asleep meter never resolves), so an environment with many meters could otherwise exhaust the
+        // ~14-channel pool and starve recording / the scan itself. The passive 0x50 parse stays the fallback.
+        if (identifyJobs.size >= MAX_CONCURRENT_IDENTIFY) return
+        val job = scope.launch {
+            try {
+                // acquire INSIDE the coroutine: if the job is cancelled before its body runs (stopScan
+                // racing the launch), the channel hold is never taken, so it can't leak. The channel is
+                // held until the name resolves or stopScan cancels this job (finally releases either way).
+                acquire(dn, identifyToken)
+                val name = manufacturerFlow(dn).filterNotNull().first()
+                updateResolved(dn, name)
+                Timber.d("ANT identify #%d resolved: %s", dn, name)
+            } finally {
+                release(dn, identifyToken)
+                identifyJobs.remove(dn)
+            }
+        }
+        identifyJobs[dn] = job
     }
 
     private fun updateResolved(dn: Int, name: String?) {
@@ -154,6 +214,16 @@ class AntPowerManager(private val context: Context) {
         runCatching { scanChannel?.stop() }
         scanChannel = null
         _scanning.value = false
+        // Cancel in-flight identify jobs; each job's finally releases its channel hold so no identify
+        // channel lingers (and its manufacturerFlow.first() suspension can't leak) after the scan stops.
+        // Clear the map too: a job cancelled BEFORE its body started never runs its finally, so it would
+        // otherwise leave a stale entry that blocks re-identifying that device on the next scan.
+        identifyJobs.values.toList().forEach { it.cancel() }
+        identifyJobs.clear()
+    }
+
+    private companion object {
+        const val MAX_CONCURRENT_IDENTIFY = 3   // cap identify channels so they can't exhaust the ANT pool
     }
 
     /**
@@ -174,11 +244,15 @@ class AntPowerManager(private val context: Context) {
         val avgSink = avgFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
         val maxSink = maxFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
         val torqueSink = torqueFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
+        val avgTorqueSink = avgTorqueFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
+        val maxTorqueSink = maxTorqueFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
+        val avgBalanceSink = avgBalanceFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
         val balanceSink = balanceFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
         val tePsSink = tePsFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(null) }
         val forceLeftSink = forceLeftFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(null) }
         val forceRightSink = forceRightFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(null) }
         val mfgSink = manufacturerFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(null) }
+        val mfgShortSink = manufacturerShortFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(null) }
         val batterySink = batteryFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(null) }
         bridges[dn] = scope.launch {
             // mirror power into the stable sink
@@ -193,6 +267,7 @@ class AntPowerManager(private val context: Context) {
             launch { m.forceAngleRight.collect { forceRightSink.value = it } }
             // Brand + battery (identity-ish): mirror once known; never push null back.
             launch { m.manufacturerName.collect { if (it != null) mfgSink.value = it } }
+            launch { m.manufacturerShort.collect { if (it != null) mfgShortSink.value = it } }
             launch { m.batteryStatus.collect { if (it != null) batterySink.value = it } }
             // watchdog: expire stale values (no event for >5s) so the FIT records a
             // gap, not frozen watts. Both child launches live under this one
@@ -204,6 +279,9 @@ class AntPowerManager(private val context: Context) {
                 m.expireIfStale(System.currentTimeMillis())
                 if (m.consumePendingReset()) m.metrics.reset()
                 m.metrics.tick(m.power.value, recording)
+                // Session aggregates for torque + L/R balance (parity with the Karoo's avg/max torque +
+                // avg power balance). Accumulated only while recording; NaN samples (coasting) skipped.
+                m.metrics.tickDynamics(m.torque.value, m.balanceRightPct.value, recording)
                 // 3s is a live rolling average: blank it when power is stale (NaN) so the
                 // field goes `---` on a dropout instead of freezing. NP/avg are session
                 // aggregates and hold their last accumulated value.
@@ -212,6 +290,9 @@ class AntPowerManager(private val context: Context) {
                 npSink.value = m.metrics.npW.value
                 avgSink.value = m.metrics.avgW.value
                 maxSink.value = m.metrics.maxW.value
+                avgTorqueSink.value = m.metrics.avgTorqueNm.value
+                maxTorqueSink.value = m.metrics.maxTorqueNm.value
+                avgBalanceSink.value = m.metrics.avgBalanceRightPct.value
             }
         }
     }
@@ -226,6 +307,9 @@ class AntPowerManager(private val context: Context) {
         avgFlows[dn]?.value = Double.NaN
         maxFlows[dn]?.value = Double.NaN
         torqueFlows[dn]?.value = Double.NaN
+        avgTorqueFlows[dn]?.value = Double.NaN
+        maxTorqueFlows[dn]?.value = Double.NaN
+        avgBalanceFlows[dn]?.value = Double.NaN
         balanceFlows[dn]?.value = Double.NaN
         tePsFlows[dn]?.value = null
         forceLeftFlows[dn]?.value = null

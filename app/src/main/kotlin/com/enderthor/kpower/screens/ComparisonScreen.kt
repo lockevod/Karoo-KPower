@@ -38,7 +38,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 
+import android.content.Context
 import io.hammerhead.karooext.KarooSystemService
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -47,10 +50,13 @@ import com.enderthor.kpower.R
 import com.enderthor.kpower.ant.AntPowerManager
 import com.enderthor.kpower.ant.CalibrationResult
 import com.enderthor.kpower.ant.SavedMeter
-import com.enderthor.kpower.ant.calibrateMeterViaPcc
+import com.enderthor.kpower.ant.calibrateMeterRaw
 import com.enderthor.kpower.ant.isAutoMeterLabel
+import com.enderthor.kpower.BuildConfig
 import com.enderthor.kpower.extension.karooNameForAnt
 import com.enderthor.kpower.extension.savedDevicesFlow
+import com.enderthor.kpower.extension.getOrCreateInstallId
+import com.enderthor.kpower.extension.LogReporter
 import timber.log.Timber
 import com.enderthor.kpower.extension.FileLogTree
 import com.enderthor.kpower.extension.antMetersFlow
@@ -61,7 +67,12 @@ import com.enderthor.kpower.extension.updateAntMeters
 import com.enderthor.kpower.extension.saveBatteryAlert
 import com.enderthor.kpower.extension.saveComparisonMode
 import com.enderthor.kpower.extension.saveDiagnosticLog
+import com.enderthor.kpower.extension.saveMeterScreenActive
 
+
+// Re-stamp the meter-screen "radio active" signal this often WHILE ACTIVELY SCANNING. Must be
+// ≤ METER_SCREEN_ACTIVE_BACKSTOP_MS / 2 so a single missed beat can't expire the window mid-scan.
+private const val METER_SCREEN_HEARTBEAT_MS = 45_000L
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -74,16 +85,27 @@ fun ComparisonScreen() {
     val karooSystem = remember { KarooSystemService(ctx) }
     DisposableEffect(Unit) {
         karooSystem.connect {}
-        onDispose { antManager.close(); karooSystem.disconnect() }
+        // Stamp ONCE on enter: frees the service's off-ride meter channel with lead time before the first
+        // scan (no churn — a single write). Refreshed on each scan tap (onToggleScan) and kept alive by the
+        // scanning heartbeat below; goes stale within the backstop if you just browse without scanning.
+        scope.launch { saveMeterScreenActive(ctx, true) }
+        onDispose {
+            antManager.close(); karooSystem.disconnect()
+            // Clear on a scope that OUTLIVES this composable (rememberCoroutineScope is cancelled by now),
+            // so the service re-opens the meter channel once we leave. Best-effort: the stamp also
+            // auto-expires via the backstop if this write never lands (e.g. process kill).
+            CoroutineScope(Dispatchers.IO).launch { saveMeterScreenActive(ctx, false) }
+        }
     }
     // The Karoo's paired sensors — used to show the REAL name in the scan list (the Karoo already knows
     // it), instead of MultiDeviceSearch's generic "Device: <number>". Remembered so it isn't re-subscribed
     // on every recomposition.
     val karooDevicesFlow = remember { karooSystem.savedDevicesFlow().map { it.devices } }
     val karooDevices by karooDevicesFlow.collectAsState(initial = emptyList())
-    // Names + battery are now resolved INSIDE AntPowerManager's scan duty-cycle (search → pause →
-    // PCC-identify with the radio free), exposed on each AntDeviceInfo (resolvedName / identifyTried /
-    // battery). The UI just reads them — no concurrent PCC here (that fought the search → USER_CANCELLED).
+    // Names resolve fast the way the Karoo does it: when the wildcard scan finds a device, AntPowerManager
+    // briefly opens that device's OWN bidirectional channel and ACTIVELY requests the 0x50 manufacturer page
+    // (Request Data Page), exposing it on AntDeviceInfo.resolvedName. All raw — no antpluginlib/PCC, so no
+    // cross-stack radio contention (that was the old USER_CANCELLED). The UI just reads resolvedName.
 
     // Collect all state here (Composable context) so antScanItems (LazyListScope, not
     // @Composable) can receive plain values — no nested @Composable calls inside the
@@ -97,6 +119,32 @@ fun ComparisonScreen() {
     // so the button must follow the manager, not a local toggle.
     val scanning by antManager.scanning.collectAsState()
 
+    // Heartbeat ONLY while actively scanning: refreshes the "radio active" stamp every ~45 s so a scan that
+    // runs longer than the backstop can't expire the window mid-scan (which would let the service re-grab
+    // the radio). Gated on `scanning` so merely browsing the saved list writes NOTHING — a write re-emits
+    // the whole DataStore (incl. a meters JSON decode in the extension) for nothing. When scanning stops the
+    // loop ends → the stamp goes stale within the backstop and the meter reconnects. Interval ≤ backstop/2
+    // so one missed beat can't expire the window. (The Karoo's own sensorservice doesn't release channels to
+    // scan at all — it relies on search-priority preemption + retry; this is our belt-and-suspenders.)
+    LaunchedEffect(scanning) {
+        if (scanning) {
+            while (true) {
+                saveMeterScreenActive(ctx, true)
+                delay(METER_SCREEN_HEARTBEAT_MS)
+            }
+        }
+    }
+
+    // Byte offset into the diagnostic log captured at scan-start, so the scan-stop upload sends only
+    // what this pairing session added (not the whole file).
+    var scanLogOffset by remember { mutableStateOf(0L) }
+
+    // Mirror the diagnostic-log toggle onto the file logger from the settings side too: ANT scan/pair/
+    // calibration activity must be captured even when no ride is recording (so a rider's pairing problem
+    // can be diagnosed). The extension service drives the same flag; this is an idempotent safety net for
+    // when the user is in settings. Never turns it OFF here (the service owns flush-and-close on turn-off).
+    LaunchedEffect(diagnosticLog) { if (diagnosticLog) FileLogTree.enabled = true }
+
     // Meter currently being renamed (null = no dialog).
     var renaming by remember { mutableStateOf<SavedMeter?>(null) }
     // Calibration dialog: the meter being calibrated, whether it's in progress, and the last result.
@@ -109,12 +157,18 @@ fun ComparisonScreen() {
     // updateAntMeters reads the CURRENT persisted list internally, so keying on `saved` would just
     // self-restart the effect on every meter toggle/edit.
     LaunchedEffect(detected) {
-        val byDn = detected.associateBy { it.deviceNumber }
-        // One transaction for all meters; updateAntMeters skips the commit when nothing changed.
+        // Keyed on `detected` (it changes when an identify resolves); the short name is read live from the
+        // manager. One transaction for all meters; updateAntMeters skips the commit when nothing changed.
         updateAntMeters(ctx) { meters ->
             meters.map { m ->
-                val name = byDn[m.deviceNumber]?.resolvedName ?: return@map m
-                if (m.userNamed || !isAutoMeterLabel(m.label, m.deviceNumber)) m else m.copy(label = name)
+                // SHORT name (model/brand) so the "KPW <label>" sensor name fits the Karoo Sensors screen.
+                // Fall back to the FULL name if the short mirror hasn't populated yet (the two flows are
+                // updated by separate bridge collectors, so the short one can briefly lag the `detected`
+                // change that triggers this effect) — a real name beats staying stuck on the "#id" placeholder.
+                val short = antManager.manufacturerShortFlow(m.deviceNumber).value
+                    ?: antManager.manufacturerFlow(m.deviceNumber).value
+                    ?: return@map m
+                if (m.userNamed || !isAutoMeterLabel(m.label, m.deviceNumber)) m else m.copy(label = short)
             }
         }
     }
@@ -143,13 +197,30 @@ fun ComparisonScreen() {
                             ?: if (d?.identifyTried == true) "#$dn" else null
                     },
                     onToggleScan = {
-                        if (scanning) antManager.stopScan() else antManager.startScan()
+                        if (scanning) {
+                            antManager.stopScan()
+                            Timber.i("===== ANT SCAN STOP =====")
+                            // Off-ride pairing diagnostics: upload the scan-session log so a rider's
+                            // pairing problem can be diagnosed even with no ride recording. No-op when
+                            // diagnostic logging is off or no Telegram credentials are compiled in.
+                            uploadPairingLog(ctx, karooSystem, diagnosticLog, "scan", scanLogOffset)
+                        } else {
+                            // The radio-active stamp is written by LaunchedEffect(scanning)'s first pass (it
+                            // fires the moment scanning flips true), so don't ALSO write it here — that was two
+                            // full DataStore writes (+ two meters-JSON decodes in the service) per scan tap.
+                            scanLogOffset = pairingLogOffset()   // upload only what this scan session adds
+                            Timber.i("===== ANT SCAN START =====")
+                            antManager.startScan()
+                        }
                     },
                     onAdd = { dev ->
                         // Adding one meter stops the scan: the raw channel (for live battery/brand) and
                         // MultiDeviceSearch can't coexist, and you normally add one then look at it.
                         // Scan again to add another.
+                        // Adding also stops the scan, so upload the scan session here too (else it's lost).
+                        val wasScanning = scanning
                         antManager.stopScan()
+                        if (wasScanning) uploadPairingLog(ctx, karooSystem, diagnosticLog, "scan", scanLogOffset)
                         // Atomic transform off the CURRENT persisted list (not the stale `saved`
                         // snapshot), so a concurrent write can't be clobbered.
                         scope.launch {
@@ -159,7 +230,14 @@ fun ComparisonScreen() {
                                 // meter is enabled ONLY if no meter is currently active, so adding to the
                                 // garage never silently creates a second active meter.
                                 if (current.size >= MAX_METERS || current.any { it.deviceNumber == dev.deviceNumber }) current
-                                else current + SavedMeter(dev.deviceNumber, dev.name, slot = 0, enabled = current.none { it.enabled })
+                                // Save the REAL name if we already have it (Karoo paired name → resolved
+                                // 0x50 name), not the bare "Power #<id>" placeholder. If none yet, the
+                                // placeholder stays an auto label and the brand auto-detect fills it later.
+                                else {
+                                    val best = karooDevices.karooNameForAnt(dev.deviceNumber)
+                                        ?: dev.resolvedName ?: dev.name
+                                    current + SavedMeter(dev.deviceNumber, best, slot = 0, enabled = current.none { it.enabled })
+                                }
                             }
                         }
                         // The wildcard background scan resolves name+battery live (parsed from the 0x50/0x52
@@ -189,25 +267,32 @@ fun ComparisonScreen() {
                     },
                     onRename = { renaming = it },
                     onCalibrate = { m ->
-                        // Calibration opens a BikePower PCC on the ANT+ Plugins Service. Stop the scan
-                        // first: the raw background-scan channel and a PCC both contend for the radio's
-                        // channels, so releasing the scan channel frees the radio. The delay(800) below
-                        // lets that release settle before requesting PCC access.
+                        // Calibration is done on OUR OWN raw bidirectional channel (page 0x01), the same
+                        // way the Karoo does it — no antpluginlib/PCC, so no cross-stack radio contention
+                        // (that was why it used to work only sometimes). Stop the scan first to free a
+                        // channel; a brief settle lets the scan channel finish releasing.
+                        // If a scan was running, upload ITS session too — calibrating stops the scan, so
+                        // without this the scan log (incl. the meter's identify) would never be sent.
+                        val wasScanning = scanning
                         antManager.stopScan()
+                        if (wasScanning) uploadPairingLog(ctx, karooSystem, diagnosticLog, "scan", scanLogOffset)
                         calibrating = m
                         calibrationResult = null
                         calibrationRunning = true
+                        val logFrom = pairingLogOffset()   // capture pairing log from here (if logging on)
+                        Timber.i("===== CALIBRATION START #%d (%s) =====", m.deviceNumber, m.label)
                         scope.launch {
                             // finally guarantees the dialog never gets stuck on the spinner (Close
                             // disabled + dismiss blocked) if calibration throws.
                             try {
-                                // Brief settle so an identify PCC that was mid-connect is fully released
-                                // (the effect cancellation that frees it is async) before we request access.
                                 delay(800)
-                                calibrationResult = calibrateMeterViaPcc(ctx, m.deviceNumber)
-                                    .also { Timber.d("PCC calibrate #%d result=%s", m.deviceNumber, it) }
+                                calibrationResult = calibrateMeterRaw(ctx, m.deviceNumber)
+                                    .also { Timber.i("raw calibrate #%d result=%s", m.deviceNumber, it) }
                             } finally {
                                 calibrationRunning = false
+                                // Off-ride pairing diagnostics: upload the calibration log so problems can
+                                // be diagnosed even though no ride is recording. No-op unless logging is on.
+                                uploadPairingLog(ctx, karooSystem, diagnosticLog, "calibration", logFrom)
                             }
                         }
                     },
@@ -395,4 +480,56 @@ fun ComparisonScreen() {
             }
         }
     )
+}
+
+/** Current byte length of the diagnostic log file (0 if none) — the start offset for a session upload. */
+private fun pairingLogOffset(): Long =
+    FileLogTree.currentLogFile()?.let { runCatching { it.length() }.getOrDefault(0L) } ?: 0L
+
+/**
+ * Off-ride pairing/calibration diagnostics: upload the part of the diagnostic log added since
+ * [fromByte] to the developer's Telegram, so a rider's pairing problem can be diagnosed even though no
+ * ride is recording (the in-ride uploader only runs while recording). Fire-and-forget on its own IO
+ * scope (it must outlive the click handler / the composable). No-op when diagnostic logging is off or
+ * no Telegram credentials are compiled into this build. GPS/identity are stripped by [LogReporter].
+ */
+private fun uploadPairingLog(
+    ctx: Context,
+    karooSystem: KarooSystemService,
+    enabled: Boolean,
+    prefix: String,
+    fromByte: Long,
+) {
+    if (!enabled || !LogReporter.configured) return
+    CoroutineScope(Dispatchers.IO).launch {
+        FileLogTree.flushNow()   // SUSPEND until the whole buffer is on disk, then read a complete tail
+        val file = FileLogTree.currentLogFile() ?: return@launch
+        var fileLen = 0L
+        val text = runCatching {
+            java.io.RandomAccessFile(file, "r").use { raf ->
+                val len = raf.length(); fileLen = len
+                // If the log ROTATED (5 MB cap) or a ride swapped the file since scan-start, the captured
+                // start offset can exceed the new (shorter) file → reading from it would give nothing. In
+                // that case read the whole current file from 0 (it's small just after a rotation).
+                val from = if (fromByte in 0L..len) fromByte else 0L
+                if (len <= from) return@use ""
+                raf.seek(from)
+                val buf = ByteArray((len - from).toInt())
+                raf.readFully(buf)
+                String(buf, Charsets.UTF_8)
+            }
+        }.getOrNull()
+        Timber.i("pairing log %s: from=%d fileLen=%d bytes=%d lines=%d", prefix,
+            fromByte, fileLen, text?.toByteArray(Charsets.UTF_8)?.size ?: 0, text?.count { it == '\n' } ?: 0)
+        if (text.isNullOrBlank()) return@launch
+        val id = runCatching { ctx.getOrCreateInstallId() }.getOrNull() ?: "anon"
+        val ver = BuildConfig.VERSION_NAME
+        val res = LogReporter.sendTextChunked(
+            text = text,
+            fileNamePrefix = "kpower_${prefix}_v${ver}_$id",
+            captionPrefix = "KPower $prefix log\nAnon tag: $id | v$ver",
+            karooSystem = karooSystem,
+        )
+        Timber.i("pairing log upload (%s): %s", prefix, res.message)
+    }
 }

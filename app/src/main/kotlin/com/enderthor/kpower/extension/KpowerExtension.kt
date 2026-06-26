@@ -38,6 +38,7 @@ import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
 
 import com.enderthor.kpower.BuildConfig
@@ -63,12 +64,14 @@ private data class FitTick(
     val comparisonMode: Boolean,
 )
 
-/** Holder for the 3-way combine driving the ride-state connect gate. Carries only the ENABLED device
- *  numbers (not the full meter list) so battery/label persistence writes can't flap the channel. */
+/** Holder for the combine driving the ride-state connect gate. Carries only the ENABLED device numbers
+ *  (not the full meter list) so battery/label persistence writes can't flap the channel. [meterScreenAt]
+ *  is the meter-management screen's "active" stamp (freshness is checked in the collector against now). */
 private data class RideGate(
     val state: RideState,
     val mode: Boolean,
     val enabledDns: List<Int>,
+    val meterScreenAt: Long,
 )
 
 /** One battery-alert event. flatMapLatest only SELECTS the flow that produces these (pure); the arm/
@@ -80,6 +83,13 @@ private data class BatEvent(
     val enabled: Boolean,
     val code: Int?,
 )
+
+// Diagnostic-log Telegram upload cadence (KGhost pattern).
+private const val LOG_SEND_INTERVAL_MS = 20 * 60_000L   // periodic upload while recording
+private const val LOG_CHUNK_CHARS = 60_000             // target chars/chunk (then byte-capped below)
+private const val MAX_CHUNK_BYTES = 90_000            // hard UTF-8 byte cap (host MakeHttpRequest limit ~100 KB)
+private const val LOG_PERIODIC_MAX_CHUNKS = 6           // cap per periodic tick
+private const val RIDE_END_MAX_CHUNKS = 200             // drain the remaining tail at ride end
 
 class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
 {
@@ -105,6 +115,21 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
     // Cached ride-recording flag, updated by the RideState observer in onCreate. Gates the
     // weather loop so it skips the expensive GPS/stats/HTTP work when not recording.
     @Volatile private var isRecording = false
+
+    // Diagnostic-log Telegram upload state (KGhost pattern). Uploads only when the rider has diagnostic
+    // logging on AND the build carries Telegram credentials. sentLogBytes is a BYTE offset into the
+    // current log file: each send seeks there and reads only the not-yet-sent tail (not the whole file),
+    // so the ride-end drain doesn't re-read multi-MB of already-sent log and starve the Karoo's own
+    // activity save. Advances per SUCCESSFUL chunk so a failure retries from the same point; reset on
+    // each new ride. logSendInFlight stops the periodic and ride-end drains overlapping.
+    @Volatile private var sentLogBytes = 0L
+    @Volatile private var logChunkSeq = 0
+    // The file sentLogBytes indexes into — so a mid-ride size-rotation (logFile -> *-p1.log) resets the
+    // offset to the new file instead of silently skipping the rest of the log.
+    @Volatile private var lastSentLogFile: java.io.File? = null
+    private val logSendInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
+    @Volatile private var installId: String? = null
+    private var logSendJob: kotlinx.coroutines.Job? = null
 
     // Latest saved-meters snapshot, kept current by a collector in onCreate. connectDevice() runs on
     // a host (binder) thread and isn't suspend, so it can't read DataStore inline — it reads this to
@@ -146,6 +171,8 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
             RealPowerDataType(extension, realFieldTypeId(0, "10s"),     { sharedActiveDn }) { dn -> antManager.power10sFlow(dn) },
             RealPowerDataType(extension, realFieldTypeId(0, "cadence"), { sharedActiveDn }) { dn -> antManager.cadenceFlow(dn) },
             RealPowerDataType(extension, realFieldTypeId(0, "torque"),  { sharedActiveDn }) { dn -> antManager.torqueFlow(dn) },
+            RealPowerDataType(extension, realFieldTypeId(0, "avgtorque"), { sharedActiveDn }) { dn -> antManager.avgTorqueFlow(dn) },
+            RealPowerDataType(extension, realFieldTypeId(0, "maxtorque"), { sharedActiveDn }) { dn -> antManager.maxTorqueFlow(dn) },
             // Live cycling-dynamics fields driven by the SAME single active-meter flow. Each metricFlowFor
             // maps a STABLE manager-level dynamics sink to a Double (null -> NaN -> `---`). These sinks
             // survive meter reconnect: the bridges[dn] coroutine re-mirrors each new RawAntPowerMeter into
@@ -153,12 +180,26 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
             // Two-sided dynamics shown as graphical "L/R" (e.g. "47/53"): balance, torque effectiveness,
             // pedal smoothness. Left value first (left pedal), right second.
             DualValueDataType(extension, dynFieldTypeId("balance"), { sharedActiveDn }) { dn -> antManager.balanceFlow(dn).map { r -> if (r.isNaN()) null to null else (100.0 - r) to r } },
+            DualValueDataType(extension, dynFieldTypeId("avgbalance"), { sharedActiveDn }) { dn -> antManager.avgBalanceFlow(dn).map { r -> if (r.isNaN()) null to null else (100.0 - r) to r } },
             DualValueDataType(extension, dynFieldTypeId("te"), { sharedActiveDn }) { dn -> antManager.tePsFlow(dn).map { it?.teLeftPct to it?.teRightPct } },
             DualValueDataType(extension, dynFieldTypeId("ps"), { sharedActiveDn }) { dn -> antManager.tePsFlow(dn).map { it?.psLeftPct to it?.psRightPct } },
             DynamicsDataType(extension, dynFieldTypeId("pp-left"), { sharedActiveDn }) { dn -> antManager.forceLeftFlow(dn).map { it?.startAngleDeg ?: Double.NaN } },
             DynamicsDataType(extension, dynFieldTypeId("pp-right"), { sharedActiveDn }) { dn -> antManager.forceRightFlow(dn).map { it?.startAngleDeg ?: Double.NaN } },
             DynamicsDataType(extension, dynFieldTypeId("peakpp-left"), { sharedActiveDn }) { dn -> antManager.forceLeftFlow(dn).map { it?.startPeakDeg ?: Double.NaN } },
             DynamicsDataType(extension, dynFieldTypeId("peakpp-right"), { sharedActiveDn }) { dn -> antManager.forceRightFlow(dn).map { it?.startPeakDeg ?: Double.NaN } },
+            // Power phase + peak power phase ALSO as graphical "L/R" duals (consistency with balance/te/ps).
+            DualValueDataType(extension, dynFieldTypeId("pp"), { sharedActiveDn }) { dn -> kotlinx.coroutines.flow.combine(antManager.forceLeftFlow(dn), antManager.forceRightFlow(dn)) { l, r -> l?.startAngleDeg to r?.startAngleDeg } },
+            DualValueDataType(extension, dynFieldTypeId("peakpp"), { sharedActiveDn }) { dn -> kotlinx.coroutines.flow.combine(antManager.forceLeftFlow(dn), antManager.forceRightFlow(dn)) { l, r -> l?.startPeakDeg to r?.startPeakDeg } },
+            // Single L/R streamable fields for balance/TE/PS/avg-balance (the duals above are graphical only;
+            // these singles let KDouble — and any other extension / the FIT — consume each side on its own).
+            DynamicsDataType(extension, dynFieldTypeId("balance-left"), { sharedActiveDn }) { dn -> antManager.balanceFlow(dn).map { if (it.isNaN()) Double.NaN else 100.0 - it } },
+            DynamicsDataType(extension, dynFieldTypeId("balance-right"), { sharedActiveDn }) { dn -> antManager.balanceFlow(dn) },
+            DynamicsDataType(extension, dynFieldTypeId("te-left"), { sharedActiveDn }) { dn -> antManager.tePsFlow(dn).map { it?.teLeftPct ?: Double.NaN } },
+            DynamicsDataType(extension, dynFieldTypeId("te-right"), { sharedActiveDn }) { dn -> antManager.tePsFlow(dn).map { it?.teRightPct ?: Double.NaN } },
+            DynamicsDataType(extension, dynFieldTypeId("ps-left"), { sharedActiveDn }) { dn -> antManager.tePsFlow(dn).map { it?.psLeftPct ?: Double.NaN } },
+            DynamicsDataType(extension, dynFieldTypeId("ps-right"), { sharedActiveDn }) { dn -> antManager.tePsFlow(dn).map { it?.psRightPct ?: Double.NaN } },
+            DynamicsDataType(extension, dynFieldTypeId("avgbalance-left"), { sharedActiveDn }) { dn -> antManager.avgBalanceFlow(dn).map { if (it.isNaN()) Double.NaN else 100.0 - it } },
+            DynamicsDataType(extension, dynFieldTypeId("avgbalance-right"), { sharedActiveDn }) { dn -> antManager.avgBalanceFlow(dn) },
         )
     }
 
@@ -227,6 +268,15 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
             }
         }
 
+        // Clear any stale meter-screen "radio active" stamp left by a PREVIOUS process (e.g. the settings
+        // screen was killed without onDispose). A fresh service process means no ComparisonScreen scan is
+        // in flight (same process — a kill takes both down), so this can't stomp an active scan. Without it,
+        // a recent-but-orphaned stamp would suppress the meter channel for up to the backstop window — even
+        // during a ride started in that window.
+        serviceScope.launch { runCatching { saveMeterScreenActive(applicationContext, false) } }
+
+        startLogSendLoop()
+
         // Drive the diagnostic file logger from the rider's toggle (off by default). On turn-OFF,
         // flush the tail and close the writer so the last seconds aren't lost and the fd isn't leaked.
         serviceScope.launch {
@@ -252,13 +302,14 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
         // so it can't clobber a concurrent rename/toggle.
         serviceScope.launch {
             sharedActiveDn
-                .flatMapLatest { dn -> if (dn == null) emptyFlow() else antManager.manufacturerFlow(dn).map { dn to it } }
-                .collect { (dn, brand) ->
-                    if (brand.isNullOrBlank()) return@collect
+                .flatMapLatest { dn -> if (dn == null) emptyFlow() else antManager.manufacturerShortFlow(dn).map { dn to it } }
+                .collect { (dn, short) ->
+                    if (short.isNullOrBlank()) return@collect
                     updateAntMeters(applicationContext) { meters ->
                         meters.map {
+                            // Store the SHORT name (model/brand) so the "KPW <label>" sensor name stays short.
                             if (it.deviceNumber == dn && !it.userNamed && isAutoMeterLabel(it.label, dn))
-                                it.copy(label = brand) else it
+                                it.copy(label = short) else it
                         }
                     }
                 }
@@ -373,9 +424,11 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
         // resetear NP/media en Idle->Recording y congelar en pausa.
         serviceScope.launch {
             var acquiredForComparison = false
-            // Tracks the previous recording state so FileLogTree.newRide fires exactly once on the
-            // Idle/Paused -> Recording transition (not on every emission of this combine).
-            var wasRecording = false
+            // Tracks whether we were IN A RIDE (Recording OR Paused) so newRide fires once on entry and
+            // the ride-end actions fire once on exit. Using "in ride" (not Recording-only) is essential:
+            // an autopause flips Recording->Paused, which must NOT look like a ride end (that would rotate
+            // the log file + spam the ride-end upload on every traffic light).
+            var wasInRide = false
             kotlinx.coroutines.flow.combine(
                 karooSystem.consumerFlow<RideState>(),
                 applicationContext.comparisonModeFlow(),
@@ -383,50 +436,64 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                 // reorder) that doesn't change the enabled SET won't re-trigger this gate — so no channel
                 // close/reopen flap mid-ride. (sorted() makes distinctUntilChanged order-insensitive.)
                 sharedMeters.map { ms -> ms.filter { it.enabled }.map { it.deviceNumber }.sorted() }.distinctUntilChanged(),
-            ) { state, mode, dns -> RideGate(state, mode, dns) }
+                // Meter-management screen activity: while it's recent the gate releases the channel so the
+                // screen's ANT scan isn't starved by our off-ride channel.
+                applicationContext.meterScreenActiveAtFlow(),
+            ) { state, mode, dns, meterScreenAt -> RideGate(state, mode, dns, meterScreenAt) }
                 // Dedup is safe: RideState.Recording/Idle are payload-free objects, so
                 // collapsing identical emissions never drops a real transition. And
                 // engine.onRideState(state) is intentionally called before the comparison
                 // shouldRun gate below, so NP/avg reset + pause-freeze work even when
                 // comparison mode is OFF.
                 .distinctUntilChanged()
-                .collect { (state, mode, enabledDns) ->
+                .collect { (state, mode, enabledDns, meterScreenAt) ->
                     engine.onRideState(state)
                     antManager.onRideState(state)
                     isRecording = state is RideState.Recording
-                    // New per-ride diagnostic log on the transition INTO Recording (no-op when the
-                    // toggle is off). Fires once per ride start, not on every emission.
-                    if (isRecording && !wasRecording) {
+                    val inRide = state is RideState.Recording || state is RideState.Paused
+                    // New per-ride diagnostic log once on ENTERING a ride (Idle -> Recording/Paused),
+                    // NOT on autopause resume. No-op when the diagnostic toggle is off.
+                    if (inRide && !wasInRide) {
                         FileLogTree.newRide(System.currentTimeMillis())
+                        sentLogBytes = 0L; logChunkSeq = 0; lastSentLogFile = null   // upload the new file from start
                     }
-                    // Ride ended: log the final calibration fit the 30 s loop may not have captured
-                    // (the FieldCalibrator keeps its data until the next ride start, so the fit is valid).
-                    if (wasRecording && !isRecording && FileLogTree.enabled) {
+                    // Ride ended (genuine in-ride -> Idle, NOT a startup/rebind Idle and NOT an autopause):
+                    // log the final calibration fit + upload the remaining diagnostic log tail. Gating on
+                    // wasInRide is essential — RideState.Idle re-emits on every host rebind/reconnect, so an
+                    // unguarded send would spam uploads without any ride (the KGhost ride-end bug).
+                    if (wasInRide && !inRide && FileLogTree.enabled) {
                         serviceScope.launch { engine.calibrationFit()?.let { logCalibration(it) } }
+                        serviceScope.launch { runCatching { sendLogTail("ride-end", RIDE_END_MAX_CHUNKS) } }
                     }
-                    wasRecording = isRecording
+                    wasInRide = inRide
                     // Estimate engine acquire/release stays tied to COMPARISON mode only;
                     // dynamics recording does not need the estimate engine running.
                     val shouldRunComparison = mode && state is RideState.Recording
-                    // Raw ANT meters connect when at least one saved meter is ENABLED AND we are in an
-                    // ACTIVE ride session — Recording OR Paused. We include Paused (not just Recording)
-                    // so the rider can see live real power on the ride screen during a stop/autopause
-                    // without the channel flapping closed-open every traffic light. We deliberately do
-                    // NOT include Idle: Idle covers BOTH "ride screen, not yet recording" AND "in the
-                    // settings/scan screen", and keeping the channel open in Idle starves the ANT+ scan
-                    // (MultiDeviceSearch) and drains the radio off-ride. So real power appears once the
-                    // ride is started; before that the field shows `---`.
-                    // Comparison mode no longer drives the meter connection — it only drives the
-                    // estimate engine, acquired separately via shouldRunComparison above.
-                    val inActiveRide = state is RideState.Recording || state is RideState.Paused
-                    val shouldConnect = enabledDns.isNotEmpty() && inActiveRide
+                    // Raw ANT meters connect whenever at least one saved meter is ENABLED AND KPower's
+                    // meter-management screen isn't using the radio. Ride state NO LONGER gates this — the
+                    // channel stays open off-ride too, so the meter reports live power/battery in the
+                    // Karoo's native Sensors screen, not just during a ride. The only thing that must free
+                    // the radio is ComparisonScreen's raw scan (add-meter): it runs on a SEPARATE
+                    // AntPowerManager instance, so we can't see its `scanning` flag — instead it marks
+                    // itself active via DataStore (meterScreenActiveAt), and we release while that's recent.
+                    // Disable/delete a meter -> enabledDns shrinks -> connectMeters drops that channel.
+                    // Comparison mode no longer drives the meter connection — it only drives the estimate
+                    // engine, acquired separately via shouldRunComparison above.
+                    // age in [0, backstop): a stamp "in the future" (clock moved back) reads as NOT active,
+                    // so the meter still connects rather than staying suppressed on a negative age.
+                    val meterScreenAge = System.currentTimeMillis() - meterScreenAt
+                    val meterScreenActive = meterScreenAt != 0L &&
+                        meterScreenAge in 0 until METER_SCREEN_ACTIVE_BACKSTOP_MS
+                    val shouldConnect = enabledDns.isNotEmpty() && !meterScreenActive
                     if (shouldRunComparison && !acquiredForComparison) {
                         engine.acquire(comparisonToken); acquiredForComparison = true
                     } else if (!shouldRunComparison && acquiredForComparison) {
                         engine.release(comparisonToken); acquiredForComparison = false
                     }
-                    if (shouldConnect) antManager.connectMeters(enabledDns)
-                    else antManager.disconnectAll()
+                    // Always go through connectMeters (never disconnectAll() here): connectMeters(emptyList())
+                    // releases all toggle-held channels WITHOUT stopScan(), so the gate can never kill an
+                    // in-flight scan. disconnectAll() (which also stopScan()s) is reserved for close().
+                    antManager.connectMeters(if (shouldConnect) enabledDns else emptyList())
                 }
         }
     }
@@ -585,9 +652,12 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
      *  lifetime, else the bare number ("KPOWER #<deviceNumber>") — never just a number when we know it. */
     private fun meterDisplayName(deviceNumber: Int, label: String?): String {
         val clean = label?.trim().orEmpty()
-        if (!isAutoMeterLabel(clean, deviceNumber)) return "KPOWER $clean"
-        val name = antManager.manufacturerFlow(deviceNumber).value
-        return if (!name.isNullOrBlank()) "KPOWER $name" else "KPOWER #$deviceNumber"
+        // SHORT name so it fits the Karoo Sensors screen: "KPW Rally 200" (model) / "KPW Garmin" (brand) /
+        // "KPW #6593" (unknown). The rider's own name (or the already-short auto-detected one) is used as-is;
+        // a placeholder label falls back to the live short brand/model, else the bare device number.
+        if (!isAutoMeterLabel(clean, deviceNumber)) return "KPW $clean"
+        val short = antManager.manufacturerShortFlow(deviceNumber).value
+        return if (!short.isNullOrBlank()) "KPW $short" else "KPW #$deviceNumber"
     }
 
     /** Write the field-calibration fit to the diagnostic log (dev tuning aid). Includes the active bike id
@@ -603,6 +673,95 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                 "${s.surface}:${s.crrEff?.let { "%.4f".format(it) } ?: "—"}±${s.crrSe?.let { "%.4f".format(it) } ?: "—"}(${s.samples}${if (s.reliable) "" else "?"})"
             },
         )
+    }
+
+    /**
+     * Periodically upload the current ride's diagnostic log to the developer's Telegram (KGhost pattern),
+     * so a ride that crashes/ends before the ride-end send still gets most of its log off the device
+     * (the OS kills the extension process at ride end). Dormant unless diagnostic logging is on AND the
+     * build carries Telegram credentials; only runs during an active recording.
+     */
+    private fun startLogSendLoop() {
+        if (!LogReporter.configured) return
+        if (logSendJob?.isActive == true) return
+        logSendJob = serviceScope.launch {
+            while (isActive) {
+                delay(LOG_SEND_INTERVAL_MS)
+                if (!FileLogTree.enabled || !isRecording) continue
+                runCatching { sendLogTail("periodic", LOG_PERIODIC_MAX_CHUNKS) }
+            }
+        }
+    }
+
+    /**
+     * Upload the part of the current ride's log not yet sent (from byte offset [sentLogBytes]) to
+     * Telegram via [LogReporter] (GPS redacted), in chunks of [LOG_CHUNK_CHARS] — each httpRequest body
+     * must stay under the host Binder limit (~80 KB) or the POST fails. At most [maxChunks] per call.
+     * Seeks to [sentLogBytes] and reads ONLY the remaining tail (never the whole file) + builds multipart
+     * on IO (never Main). Advances [sentLogBytes] only per SUCCESSFUL chunk.
+     */
+    private suspend fun sendLogTail(prefix: String, maxChunks: Int) = withContext(Dispatchers.IO) {
+        if (!FileLogTree.enabled || !LogReporter.configured) return@withContext
+        // CAS so the periodic loop and the ride-end send can't both pass the guard and double-advance.
+        if (!logSendInFlight.compareAndSet(false, true)) return@withContext
+        try {
+            val file = FileLogTree.currentLogFile() ?: return@withContext
+            // A mid-ride size rotation swaps currentLogFile to *-pN.log; restart the offset for the new
+            // file (else sentLogBytes indexes a different, shorter file and the rest is silently skipped).
+            if (file != lastSentLogFile) { sentLogBytes = 0L; lastSentLogFile = file }
+            FileLogTree.requestFlush()            // get the last buffered second onto disk first
+            delay(400)
+            // Read ONLY the not-yet-sent tail (seek sentLogBytes -> EOF), not the whole file. At ride end
+            // the file can be several MB but the periodic uploads already drained the bulk; re-reading +
+            // re-scanning the already-sent prefix on every send was the CPU/IO spike that competed with
+            // the Karoo's own activity save at finish. RandomAccessFile reads a consistent snapshot up to
+            // length(); appends after that are picked up on the next call. sentLogBytes always lands on a
+            // char boundary (it only ever advances by whole-char chunk byte-lengths), so the seek never
+            // splits a UTF-8 sequence.
+            val tail = runCatching {
+                java.io.RandomAccessFile(file, "r").use { raf ->
+                    val len = raf.length()
+                    if (len <= sentLogBytes) return@use null
+                    raf.seek(sentLogBytes)
+                    val buf = ByteArray((len - sentLogBytes).toInt())
+                    raf.readFully(buf)
+                    String(buf, Charsets.UTF_8)
+                }
+            }.getOrNull() ?: return@withContext
+            if (tail.isEmpty()) return@withContext
+            val id = installId ?: runCatching { applicationContext.getOrCreateInstallId() }.getOrNull()?.also { installId = it }
+                ?: return@withContext
+            val sid = FileLogTree.sessionId
+            val ver = BuildConfig.VERSION_NAME
+            var pos = 0                           // char offset within `tail` (contiguous from sentLogBytes)
+            var sent = 0
+            while (pos < tail.length && sent < maxChunks) {
+                val hardEnd = minOf(pos + LOG_CHUNK_CHARS, tail.length)
+                val nl = tail.lastIndexOf('\n', hardEnd - 1)   // cut on a line boundary when possible
+                var end = if (nl > pos) nl + 1 else hardEnd
+                var chunk = tail.substring(pos, end)
+                var bytes = chunk.toByteArray(Charsets.UTF_8)
+                // Keep the multipart body under the host's binder cap: the chunk's UTF-8 size (multi-byte
+                // chars expand) must stay well under 100 KB. Shrink by halving until it fits.
+                while (end > pos + 1 && bytes.size > MAX_CHUNK_BYTES) {
+                    end = pos + (end - pos) / 2
+                    chunk = tail.substring(pos, end)
+                    bytes = chunk.toByteArray(Charsets.UTF_8)
+                }
+                if (chunk.isBlank()) break
+                val lines = chunk.count { it == '\n' }
+                val fileName = "kpower_v${ver}_${id}_${sid}_p${"%03d".format(logChunkSeq)}.log"
+                val caption = "KPower log ($prefix)\nAnon tag: $id\nSession: $sid | v$ver | $lines lines"
+                val res = LogReporter.sendLogFile(chunk, fileName, caption, karooSystem)
+                // Advance the file byte offset by the chunk's UTF-8 size (chunks are contiguous from pos),
+                // so the next send seeks right past what we just delivered.
+                if (res.ok) { pos = end; sentLogBytes += bytes.size; logChunkSeq += 1; sent++ }
+                else { Timber.w("KPower log upload (%s) chunk failed: %s", prefix, res.message); break }
+            }
+            if (sent > 0) Timber.i("KPower log upload (%s) ✓ — %d chunk(s), through byte %d", prefix, sent, sentLogBytes)
+        } finally {
+            logSendInFlight.set(false)
+        }
     }
 
     /** Fire the battery in-ride alert, naming the meter. Colours/icon are @ColorRes/@DrawableRes (the

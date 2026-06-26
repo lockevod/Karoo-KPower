@@ -54,6 +54,29 @@ object FileLogTree : Timber.Tree() {
     @Volatile
     var enabled: Boolean = false
 
+    /** Short id of the current ride's log, to group uploaded chunks of the same ride in Telegram. */
+    @Volatile
+    var sessionId: String = "000000"
+        private set
+
+    /** The current log file (or null if not started), for the diagnostic-log uploader. */
+    fun currentLogFile(): File? = logFile
+
+    /** Wake the flush loop now so buffered lines hit disk before the uploader reads the file. */
+    fun requestFlush() { flushSignal.trySend(null) }
+
+    /**
+     * Force a flush and SUSPEND until it has actually completed (the whole buffer is drained to disk),
+     * so an off-ride uploader reads a complete file — not whatever happened to be flushed. Robust
+     * regardless of the periodic flush cadence: the single flush this triggers drains ALL buffered lines.
+     */
+    suspend fun flushNow() {
+        if (!started) return
+        val done = kotlinx.coroutines.CompletableDeferred<Unit>()
+        flushSignal.trySend(done)
+        kotlinx.coroutines.withTimeoutOrNull(2_000) { done.await() }
+    }
+
     private const val MAX_BUFFER = 4000
     private const val FLUSH_INTERVAL_MS = 1_000L   // 1 s: data on disk fast, visible mid-ride
     private const val IDLE_POLL_MS = 60_000L       // 60 s: slow poll while logging is OFF
@@ -67,9 +90,10 @@ object FileLogTree : Timber.Tree() {
     // Millis in the ride stamp so two rides started in the same second can't collide on one filename.
     private val rideFmt = DateTimeFormatter.ofPattern("yyyy-MM-dd-HHmmss-SSS").withZone(ZoneId.systemDefault())
 
-    // Signals the flush loop to wake up immediately (e.g. on newRide / flushAndClose).
-    // CONFLATED: multiple signals before the loop wakes collapse to one flush.
-    private val flushSignal = Channel<Unit>(Channel.CONFLATED)
+    // Signals the flush loop to flush now. Payload is an optional CompletableDeferred the loop completes
+    // AFTER the flush, so flushNow() can await actual completion. UNLIMITED so a queued deferred is never
+    // dropped (CONFLATED would discard it and flushNow would always time out).
+    private val flushSignal = Channel<kotlinx.coroutines.CompletableDeferred<Unit>?>(Channel.UNLIMITED)
 
     @Volatile private var logDir: File? = null
     // Current file = "<baseName>.log" (part 0) or "<baseName>-p<part>.log" after a size rotation.
@@ -110,15 +134,20 @@ object FileLogTree : Timber.Tree() {
         logFile = currentFile()
         scope.launch {
             while (true) {
-                // Wait for either a flush signal (immediate) or the periodic interval.
-                val signaled = runCatching {
-                    flushSignal.tryReceive().isSuccess
-                }.getOrDefault(false)
-                if (!signaled) {
-                    delay(if (enabled) FLUSH_INTERVAL_MS else IDLE_POLL_MS)
-                }
+                // Wait for a flush signal OR the periodic interval, whichever comes first. Using a
+                // SUSPENDING receive (not tryReceive + delay) means requestFlush()/newRide()/flushAndClose()
+                // wake the loop within milliseconds — the off-ride pairing-log uploader relies on this to
+                // read a COMPLETE tail (the old tryReceive-then-delay could sleep up to a full interval
+                // after a signal, so the last ~1s of lines, incl. "SCAN STOP", weren't on disk yet).
+                val pending = runCatching {
+                    kotlinx.coroutines.withTimeoutOrNull(if (enabled) FLUSH_INTERVAL_MS else IDLE_POLL_MS) {
+                        flushSignal.receive()
+                    }
+                }.getOrNull()
                 flush()
                 if (closeRequested) { closeWriter(); closeRequested = false }
+                // Signal flushNow() callers that their flush is done (buffer drained to disk).
+                pending?.complete(Unit)
             }
         }
     }
@@ -136,6 +165,7 @@ object FileLogTree : Timber.Tree() {
         val stamp = rideFmt.format(Instant.ofEpochMilli(epochMs))
         // Swap the file AND enqueue the banner under the same lock the flush drain uses, so the
         // banner can't be drained into the previous ride's file.
+        sessionId = "%06x".format((epochMs xor (epochMs ushr 16)) and 0xFFFFFFL)
         synchronized(buffer) {
             baseName = "kpower-$stamp"
             part = 0
@@ -143,7 +173,7 @@ object FileLogTree : Timber.Tree() {
             if (buffer.size >= MAX_BUFFER) buffer.removeFirst()
             buffer.addLast("${ts.format(Instant.now())} I/kpower: ===== RIDE START ($stamp) =====")
         }
-        flushSignal.trySend(Unit)
+        flushSignal.trySend(null)
         scope.launch { purgeOldLogs(dir) }
     }
 
@@ -165,7 +195,7 @@ object FileLogTree : Timber.Tree() {
     /** Drain the tail and close the writer (called when logging is turned OFF). */
     fun flushAndClose() {
         closeRequested = true
-        flushSignal.trySend(Unit)
+        flushSignal.trySend(null)
     }
 
     /**
