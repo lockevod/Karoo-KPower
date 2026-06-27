@@ -170,23 +170,13 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
             // real-avg/max/10s removed (on-screen): derivable post-ride from the per-second pm{n}_power
             // developer field in the FIT (line ~842); avg adds little live.
             RealPowerDataType(extension, realFieldTypeId(0, "cadence"), { sharedActiveDn }) { dn -> antManager.cadenceFlow(dn) },
-            RealPowerDataType(extension, realFieldTypeId(0, "torque"),  { sharedActiveDn }) { dn -> antManager.torqueFlow(dn) },
-            RealPowerDataType(extension, realFieldTypeId(0, "avgtorque"), { sharedActiveDn }) { dn -> antManager.avgTorqueFlow(dn) },
-            RealPowerDataType(extension, realFieldTypeId(0, "maxtorque"), { sharedActiveDn }) { dn -> antManager.maxTorqueFlow(dn) },
-            // Live cycling-dynamics fields driven by the SAME single active-meter flow. Each metricFlowFor
-            // maps a STABLE manager-level dynamics sink to a Double (null -> NaN -> `---`). These sinks
-            // survive meter reconnect: the bridges[dn] coroutine re-mirrors each new RawAntPowerMeter into
-            // the same MutableStateFlow, so the field never freezes.
-            // Two-sided dynamics shown as graphical "L/R" (e.g. "47/53"): torque effectiveness and pedal
-            // smoothness ONLY — these the Karoo cannot decode, so they're KPower's unique value.
-            // BALANCE is intentionally NOT a field: the Karoo shows pedal balance natively
-            // (PEDAL_POWER_BALANCE / AVERAGE_PEDAL_POWER_BALANCE) and KPower still writes it to the FIT
-            // (standard left_right_balance, in startFit). Power-phase fields were likewise removed (FIT only).
-            DualValueDataType(extension, dynFieldTypeId("te"), { sharedActiveDn }) { dn -> antManager.tePsFlow(dn).map { it?.teLeftPct to it?.teRightPct } },
-            DualValueDataType(extension, dynFieldTypeId("ps"), { sharedActiveDn }) { dn -> antManager.tePsFlow(dn).map { it?.psLeftPct to it?.psRightPct } },
-            // Per-side single streamable fields (balance/avgbalance/te/ps -left/-right) removed: nothing
-            // consumed them — KDouble takes balance from the native PEDAL_POWER_BALANCE, and the te/ps
-            // singles were never used. Re-add a single (graphical=false) DataType if an extension needs one.
+            // On-screen dynamics + torque fields REMOVED: the Karoo shows ALL of these natively for a
+            // natively-paired meter (DataType.Type TORQUE_EFFECTIVENESS / PEDAL_SMOOTHNESS / TORQUE /
+            // AVERAGE_TORQUE / MAX_TORQUE / PEDAL_POWER_BALANCE), so KPower's versions only duplicated them.
+            // Everything still goes to the FIT from startFit — and torque is UNIQUE there (FIT has no standard
+            // torque record field, so the Karoo can't record it; KPower writes pm_torque + dyn_torque_l/r).
+            // balance/TE/PS go to the FIT as dev fields (for the KPW-virtual case). KPower's on-screen value
+            // is now the estimate + the real power/cadence of a SECOND meter (S3) / a KPW-virtual source.
         )
     }
 

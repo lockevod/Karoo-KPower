@@ -16,16 +16,6 @@
     <string name="real1_np_desc">Potencia normalizada real grabada del potenciómetro (requiere un medidor grabado)</string>
     <string name="real1_cad_name">Cadencia real</string>
     <string name="real1_cad_desc">Cadencia real grabada del potenciómetro, rpm (requiere un medidor grabado)</string>
-    <string name="real1_torque_name">Par real</string>
-    <string name="real1_torque_desc">Par real grabado del potenciómetro, Nm (requiere un medidor grabado)</string>
-    <string name="real1_avgtorque_name">Par medio real</string>
-    <string name="real1_avgtorque_desc">Par medio real grabado del potenciómetro, Nm (requiere un medidor grabado)</string>
-    <string name="real1_maxtorque_name">Par máx real</string>
-    <string name="real1_maxtorque_desc">Par máximo real grabado del potenciómetro, Nm (requiere un medidor grabado)</string>
-    <string name="dyn_te_name">Eficacia del par</string>
-    <string name="dyn_te_desc">Eficacia del par, en porcentaje (medidor ANT+ real)</string>
-    <string name="dyn_ps_name">Suavidad del pedaleo</string>
-    <string name="dyn_ps_desc">Suavidad del pedaleo, en porcentaje (medidor ANT+ real)</string>
     <string name="meter_double_pair_warning">Consejo: para enviar este potenciómetro al Karoo, empareja el sensor llamado “KPOWER …” (el nombre de tu potenciómetro con el prefijo KPOWER) en tu perfil de ruta — no emparejes además el potenciómetro de forma nativa, o la potencia se grabará dos veces.</string>
     <string name="diagnostic_log_label">Registro de diagnóstico</string>
     <string name="diagnostic_log_desc">Graba un archivo de registro detallado en cada salida (cada página ANT+ incluidas las desconocidas, valores interpretados y eventos de conexión) para poder analizarlo después. Off por defecto — consume algo más de batería y almacenamiento.</string>

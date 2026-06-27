@@ -42,14 +42,9 @@ class AntPowerManager(private val context: Context) {
     private val cadenceFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
     private val power3sFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
     private val npFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
-    private val torqueFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
-    // Session aggregates of torque (parity with the Karoo's avg/max torque).
-    private val avgTorqueFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
-    private val maxTorqueFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
-    // Stable dynamics sink (survives reconnect; re-bound by bridges[dn] to each new meter). Only TE/PS
-    // remain consumable — balance is shown natively by the Karoo and power phase is FIT-only, so their
-    // per-side flows were removed (they go straight to the FIT from the live reader, not via a flow).
-    private val tePsFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<TePsData?>>()
+    // NOTE: torque / avg-torque / max-torque / TE-PS flows were removed — the Karoo shows all of those
+    // natively (DataType.Type), so KPower has no on-screen field for them; they reach the FIT straight
+    // from the live reader (reader.torque / reader.tePs), not via a manager flow.
     // Brand name from the 0x50 page (device identity); persists across reconnect, never reset to null.
     private val manufacturerFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<String?>>()
     // SHORT name (model/brand) for the compact "KPW <short>" virtual-sensor label; persists like the brand.
@@ -93,17 +88,9 @@ class AntPowerManager(private val context: Context) {
     fun cadenceFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<Double> =
         cadenceFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
 
-    /** Stable 3s/NP/torque flows for a device number (survive reconnect, like powerFlow). */
+    /** Stable 3s / NP power flows for a device number (survive reconnect, like powerFlow). */
     fun power3sFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<Double> = power3sFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
     fun npFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<Double> = npFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
-    fun torqueFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<Double> = torqueFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
-
-    /** Session avg/max torque for a device (survive reconnect, like powerFlow). */
-    fun avgTorqueFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<Double> = avgTorqueFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
-    fun maxTorqueFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<Double> = maxTorqueFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
-
-    /** Live TE/PS (the only consumable dynamics; survives reconnect, like powerFlow). */
-    fun tePsFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<TePsData?> = tePsFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(null) }
 
     /** Detected brand name for a device (from the 0x50 page); null until seen. */
     fun manufacturerFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<String?> = manufacturerFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(null) }
@@ -228,22 +215,15 @@ class AntPowerManager(private val context: Context) {
         val cadenceSink = cadenceFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
         val p3sSink = power3sFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
         val npSink = npFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
-        val torqueSink = torqueFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
-        val avgTorqueSink = avgTorqueFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
-        val maxTorqueSink = maxTorqueFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
-        val tePsSink = tePsFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(null) }
         val mfgSink = manufacturerFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(null) }
         val mfgShortSink = manufacturerShortFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(null) }
         val batterySink = batteryFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(null) }
         bridges[dn] = scope.launch {
-            // mirror power into the stable sink
+            // mirror power + cadence into the stable sinks (re-binds the NEW meter on reconnect)
             launch { m.power.collect { sink.value = it } }
-            // mirror cadence + torque into the stable sinks (re-binds the NEW meter on reconnect)
             launch { m.cadence.collect { cadenceSink.value = it } }
-            launch { m.torque.collect { torqueSink.value = it } }
-            // mirror TE/PS into the stable sink (re-binds the NEW meter on reconnect). Balance and
-            // power-phase are NOT mirrored to flows — they go to the FIT straight from the live reader.
-            launch { m.tePs.collect { tePsSink.value = it } }
+            // torque / TE-PS / balance / power-phase are NOT mirrored to flows (no on-screen field — the
+            // Karoo shows them natively); they reach the FIT straight from the live reader in startFit.
             // Brand + battery (identity-ish): mirror once known; never push null back.
             launch { m.manufacturerName.collect { if (it != null) mfgSink.value = it } }
             launch { m.manufacturerShort.collect { if (it != null) mfgShortSink.value = it } }
@@ -258,16 +238,11 @@ class AntPowerManager(private val context: Context) {
                 m.expireIfStale(System.currentTimeMillis())
                 if (m.consumePendingReset()) m.metrics.reset()
                 m.metrics.tick(m.power.value, recording)
-                // Session torque aggregates (parity with the Karoo's avg/max torque). Accumulated only
-                // while recording; NaN samples (coasting) skipped.
-                m.metrics.tickDynamics(m.torque.value, recording)
                 // 3s is a live rolling average: blank it when power is stale (NaN) so the
                 // field goes `---` on a dropout instead of freezing. NP is a session aggregate
                 // and holds its last accumulated value.
                 p3sSink.value = if (m.power.value.isNaN()) Double.NaN else m.metrics.power3sW.value
                 npSink.value = m.metrics.npW.value
-                avgTorqueSink.value = m.metrics.avgTorqueNm.value
-                maxTorqueSink.value = m.metrics.maxTorqueNm.value
             }
         }
     }
@@ -278,10 +253,6 @@ class AntPowerManager(private val context: Context) {
         cadenceFlows[dn]?.value = Double.NaN
         power3sFlows[dn]?.value = Double.NaN
         npFlows[dn]?.value = Double.NaN
-        torqueFlows[dn]?.value = Double.NaN
-        avgTorqueFlows[dn]?.value = Double.NaN
-        maxTorqueFlows[dn]?.value = Double.NaN
-        tePsFlows[dn]?.value = null
     }
 
     /**

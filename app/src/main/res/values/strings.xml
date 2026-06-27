@@ -16,16 +16,6 @@
     <string name="real1_np_desc">Recorded real meter normalized power (requires a recorded meter)</string>
     <string name="real1_cad_name">Real Cadence</string>
     <string name="real1_cad_desc">Recorded real meter cadence, rpm (requires a recorded meter)</string>
-    <string name="real1_torque_name">Real Torque</string>
-    <string name="real1_torque_desc">Recorded real meter torque, Nm (requires a recorded meter)</string>
-    <string name="real1_avgtorque_name">Real Avg Torque</string>
-    <string name="real1_avgtorque_desc">Recorded real meter average torque, Nm (requires a recorded meter)</string>
-    <string name="real1_maxtorque_name">Real Max Torque</string>
-    <string name="real1_maxtorque_desc">Recorded real meter max torque, Nm (requires a recorded meter)</string>
-    <string name="dyn_te_name">Torque Effectiveness</string>
-    <string name="dyn_te_desc">Torque effectiveness, percent (real ANT+ meter)</string>
-    <string name="dyn_ps_name">Pedal Smoothness</string>
-    <string name="dyn_ps_desc">Pedal smoothness, percent (real ANT+ meter)</string>
     <string name="meter_double_pair_warning">Tip: to feed this meter to the Karoo, pair the sensor named “KPOWER …” (your meter\'s name with a KPOWER prefix) in your ride profile — don\'t also pair the meter natively, or power will be recorded twice.</string>
     <string name="diagnostic_log_label">Diagnostic logging</string>
     <string name="diagnostic_log_desc">Records a detailed log file for each ride (every ANT+ page including unknown ones, parsed values, and connection events) so it can be analysed later. Off by default — it uses some extra battery and storage.</string>

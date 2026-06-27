@@ -22,12 +22,4 @@ class PowerSourceMetricsTest {
     @Test fun `NaN sample ignored`() {
         val m = PowerSourceMetrics(); m.tick(Double.NaN, true); assertTrue(m.power3sW.value.isNaN())
     }
-
-    @Test fun `torque aggregates while recording`() {
-        val m = PowerSourceMetrics()
-        repeat(10) { m.tickDynamics(20.0, recording = true) }
-        assertEquals(20.0, m.avgTorqueNm.value, 1e-6)      // avg torque accumulates
-        assertEquals(20.0, m.maxTorqueNm.value, 1e-6)      // max torque tracked
-        m.reset(); assertTrue(m.avgTorqueNm.value.isNaN()) // reset clears torque too
-    }
 }

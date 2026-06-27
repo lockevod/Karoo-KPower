@@ -73,7 +73,6 @@ dependencies {
     implementation(libs.timber)
     implementation(libs.androidx.foundation.android)
     implementation(libs.androidx.foundation.layout.android)
-    implementation(libs.androidx.glance.appwidget)
     implementation(libs.mapsforge.map.reader)
     testImplementation(libs.junit)
 }
