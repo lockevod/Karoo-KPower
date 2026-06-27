@@ -65,6 +65,27 @@ fields they'd double-write/conflict (balance even uses a different bit7 conventi
 in their own columns, so they coexist — present for the KPW-virtual case, a harmless duplicate when
 native.
 
+## What ends up in the FIT — by setup
+
+Two rules decide it: **dynamics** (`pm_*`, `dyn_*`, PCO) are written whenever a **meter is enabled and
+recording** — independent of the estimate. The **estimate** dev fields (`est_*`) are written only when
+**“Log estimated power (FIT)” is ON _and_ the estimate is NOT the bound power source** (i.e. you're
+comparing it against a real meter); if the estimate IS the source it's already the standard `power`, so
+it isn't duplicated.
+
+| Your setup | Standard `power` in the FIT | Estimate `est_*` dev fields | Dynamics (`dyn_*` / `pm_torque` / PCO) |
+|---|---|---|---|
+| **Estimator only** — pair *KPW Estimated* | the **estimate** (Karoo records it natively, with NP/avg/zones) | no (it's already the standard power) | no meter → none |
+| **Real meter, dynamics only** — pair the meter **natively**, “Log estimate” **OFF**, no Est. fields | the **real meter** (native) | no (estimator doesn't even run) | **yes** — native balance/TE/PS + KPower's torque / power phase / PCO / barycenter |
+| **Real + estimate (compare)** — meter native, “Log estimate” **ON** | the **real meter** (native) | **yes** (`est_power/3s/np/avg`) | yes |
+
+Notes:
+- “Estimator only” gives you the estimate **as the standard power field** — no developer fields needed,
+  works in every analysis tool.
+- “Dynamics only” writes **no estimator data at all**, and the estimation engine stays off (zero cost).
+- `pm1_power` / `pm1_cad` are the **real meter's** data (developer duplicates of the native power/cadence,
+  handy for overlays) — they are not estimator data.
+
 ## Compare estimate vs real
 
 1. Enable your real meter, turn on **“Log estimated power (FIT)”** (*Real meter* tab), and ride.

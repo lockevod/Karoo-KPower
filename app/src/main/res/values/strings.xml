@@ -14,8 +14,6 @@
     <string name="real1_3s_desc">Recorded real meter 3s power (requires a recorded meter)</string>
     <string name="real1_np_name">Real NP</string>
     <string name="real1_np_desc">Recorded real meter normalized power (requires a recorded meter)</string>
-    <string name="real1_cad_name">Real Cadence</string>
-    <string name="real1_cad_desc">Recorded real meter cadence, rpm (requires a recorded meter)</string>
     <string name="meter_double_pair_warning">Tip: to feed this meter to the Karoo, pair the sensor named “KPOWER …” (your meter\'s name with a KPOWER prefix) in your ride profile — don\'t also pair the meter natively, or power will be recorded twice.</string>
     <string name="diagnostic_log_label">Diagnostic logging</string>
     <string name="diagnostic_log_desc">Records a detailed log file for each ride (every ANT+ page including unknown ones, parsed values, and connection events) so it can be analysed later. Off by default — it uses some extra battery and storage.</string>

@@ -1,25 +1,32 @@
-# Karoo Power Extension (KPower)
+# ⚡ KPower — Karoo Power Extension
 
-A power meter for **Hammerhead Karoo 2 / 3** that works **without a power meter**: it *estimates* your
-power from a physics model (slope + rolling resistance + aero with real air density + acceleration,
-minus drivetrain losses). With the right setup it gets close to a real meter — and if you *do* have a
-real ANT+ meter, KPower can run alongside it and enrich the recorded FIT.
+### Power *without* a power meter — and advanced pedalling dynamics *with* one.
 
-Compatible with Karoo OS ≥ 1.524.2003 (tested on Karoo 3).
+KPower turns your **Hammerhead Karoo 2 / 3** into a power meter by **estimating your watts from physics**
+(slope, rolling resistance, real-air-density aero and acceleration, minus drivetrain losses). And if you
+own a real ANT+ meter, it unlocks the **advanced cycling dynamics the Karoo can't record on its own** —
+written straight into your ride FIT.
 
-🇪🇸 **En español:** [docs/guia-rapida.md](docs/guia-rapida.md)
+🇪🇸 **Guía rápida en español:** [docs/guia-rapida.md](docs/guia-rapida.md) · Karoo OS ≥ 1.524.2003 (tested on Karoo 3).
 
-> Power is an **estimation**, not a measurement. The parameters matter — see
-> **[docs/configuration.md](docs/configuration.md)**.
+## Two tools in one
 
-## What it gives you
+**1 · Estimated power — no sensor needed**
+- Pair **“KPW Estimated”** and the Karoo records power, NP, TSS and zones **natively**, just like a real meter.
+- Physics model with **real temperature/pressure/wind** (Open-Meteo, or [Headwind](https://github.com/timklge/karoo-headwind) if installed), tyre/surface rolling resistance, height-based aero and an acceleration term.
+- **Multiple bikes**, auto-selected per Karoo ride profile.
+- On-screen fields: **Est. Power / 3s / NP**.
 
-- **Estimated power** as a pairable sensor (**“KPW Estimated”**) → the Karoo records power, NP, TSS and
-  zones natively, exactly like a real meter. Plus three on-screen fields: **Est. Power / 3s / NP**.
-- **Multiple bikes** linked to your Karoo ride profiles (auto-selected when you switch profile).
-- **Optional real ANT+ meter support**: read your meter over raw ANT+ to **enrich the FIT** with data
-  the Karoo can't record itself (torque, power phase, PCO…), auto-name it, and show a battery alert.
-  Details: **[docs/real-meter-and-fit.md](docs/real-meter-and-fit.md)**.
+**2 · Advanced cycling dynamics — with a real ANT+ meter**
+KPower reads your meter's raw ANT+ broadcast and records the dynamics the Karoo can't, into the ride FIT (view them in [intervals.icu](https://intervals.icu)):
+- **Torque** (overall + per leg)
+- **Power phase** & **peak power phase** (left/right)
+- **Platform centre offset (PCO)** + rider position + **torque barycenter**
+- **L/R balance**, **torque effectiveness**, **pedal smoothness**
+
+Plus **auto-naming** (brand + model), **battery level & low-battery alert**, and optional **estimate-vs-real logging** to compare both in the FIT. Details: **[docs/real-meter-and-fit.md](docs/real-meter-and-fit.md)**.
+
+> Power is an **estimation**, not a measurement — the parameters matter. Setup: **[docs/configuration.md](docs/configuration.md)**.
 
 ## Quick start — which setup is mine?
 
@@ -27,7 +34,7 @@ Compatible with Karoo OS ≥ 1.524.2003 (tested on Karoo 3).
 |---|---|---|
 | **No power meter** | **KPW Estimated** | none needed (Karoo shows power/NP natively); optional Est. Power / 3s / NP |
 | **Real meter, want the estimate too (compare)** | the real meter (native) | Est. Power / 3s / NP |
-| **Two meters at once** | meter A (native) | Real Power / 3s / NP / Cadence (shows the 2nd meter) |
+| **Two meters at once** | meter A (native) | Real Power / 3s / NP (shows the 2nd meter) |
 | **Real meter, want the FIT extras** | the real meter (native) | none — the Karoo shows the dynamics; KPower just enriches the FIT |
 
 Steps:

@@ -167,9 +167,9 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
             RealPowerDataType(extension, realFieldTypeId(0, "power"),   { sharedActiveDn }) { dn -> antManager.powerFlow(dn) },
             RealPowerDataType(extension, realFieldTypeId(0, "3s"),      { sharedActiveDn }) { dn -> antManager.power3sFlow(dn) },
             RealPowerDataType(extension, realFieldTypeId(0, "np"),      { sharedActiveDn }) { dn -> antManager.npFlow(dn) },
-            // real-avg/max/10s removed (on-screen): derivable post-ride from the per-second pm{n}_power
-            // developer field in the FIT (line ~842); avg adds little live.
-            RealPowerDataType(extension, realFieldTypeId(0, "cadence"), { sharedActiveDn }) { dn -> antManager.cadenceFlow(dn) },
+            // real-avg/max/10s/cadence removed (on-screen): the Karoo shows cadence natively, and
+            // avg/max are derivable post-ride from the per-second pm{n}_power in the FIT. (cadenceFlow
+            // itself stays — the KPW virtual sensor uses it to broadcast cadence to the Karoo.)
             // On-screen dynamics + torque fields REMOVED: the Karoo shows ALL of these natively for a
             // natively-paired meter (DataType.Type TORQUE_EFFECTIVENESS / PEDAL_SMOOTHNESS / TORQUE /
             // AVERAGE_TORQUE / MAX_TORQUE / PEDAL_POWER_BALANCE), so KPower's versions only duplicated them.

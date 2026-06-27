@@ -34,7 +34,6 @@
     <DataType typeId="real-power-0" displayName="@string/real1_name" description="@string/real1_desc" graphical="false" icon="@drawable/ic_power_hr" />
     <DataType typeId="real-3s-0" displayName="@string/real1_3s_name" description="@string/real1_3s_desc" graphical="false" icon="@drawable/ic_power_hr" />
     <DataType typeId="real-np-0" displayName="@string/real1_np_name" description="@string/real1_np_desc" graphical="false" icon="@drawable/ic_power_hr" />
-    <DataType typeId="real-cadence-0" displayName="@string/real1_cad_name" description="@string/real1_cad_desc" graphical="false" icon="@drawable/ic_power_hr" />
     <!-- On-screen dynamics + torque fields removed: the Karoo shows TE / pedal smoothness / balance /
          torque / avg-torque / max-torque natively for a natively-paired meter. Everything still goes to the
          FIT (torque is UNIQUE there — no standard torque record field; balance/TE/PS as dev fields; power
