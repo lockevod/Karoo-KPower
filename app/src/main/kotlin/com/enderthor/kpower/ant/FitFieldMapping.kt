@@ -34,23 +34,21 @@ object DynField {
     const val RIDER_POSITION = DYN_FIELD_BASE + 15 // 47 enum 0..3
     const val TORQUE_LEFT = DYN_FIELD_BASE + 16 // 48 Nm
     const val TORQUE_RIGHT = DYN_FIELD_BASE + 17// 49 Nm
+    const val BALANCE_LEFT = DYN_FIELD_BASE + 18  // 50 % (left power balance)
+    const val BALANCE_RIGHT = DYN_FIELD_BASE + 19 // 51 % (right power balance)
 }
 
 /**
- * STANDARD FIT `record` (global mesg 20) field numbers for cycling dynamics, exactly as a Garmin head
- * unit writes them — so intervals.icu / Garmin Connect recognise KPower's recorded dynamics natively
- * (the Karoo never writes these for a non-bound sensor; KPower writes the FIT directly). Encodings per
- * the FIT global profile; the host's FIT encoder applies each field's scale, so we pass DISPLAY units
- * (%, degrees, mm) — except left_right_balance which is a raw uint8 (bit7 = right indicator).
+ * STANDARD FIT `record` (global mesg 20) field numbers for cycling dynamics. We ONLY use the ones the
+ * Karoo does NOT write natively for the bound sensor — currently just PCO. Balance / torque-effectiveness
+ * / pedal-smoothness ARE written natively by the Karoo when the meter is paired natively (verified in a
+ * Karoo-recorded FIT), so writing the standard fields too would double-write/conflict (and with a
+ * different balance convention). KPower therefore writes balance/TE/PS as DEVELOPER fields instead (see
+ * [DynField]) — no collision with the Karoo's native standard fields, present for the KPW-virtual case,
+ * and a harmless duplicate-in-a-separate-column for the native case. power_phase (69-72) are FIT ARRAY
+ * fields that karoo-ext's scalar FieldValue can't address, so those are developer fields too.
  */
 object FitRecordField {
-    const val LEFT_RIGHT_BALANCE = 30          // uint8: bit7=right, bits0-6 = right %
-    const val LEFT_TORQUE_EFFECTIVENESS = 43   // % (profile scale 2)
-    const val RIGHT_TORQUE_EFFECTIVENESS = 44  // %
-    const val LEFT_PEDAL_SMOOTHNESS = 45       // % (profile scale 2)
-    const val RIGHT_PEDAL_SMOOTHNESS = 46      // %
-    const val LEFT_PCO = 67                    // mm (sint8)
+    const val LEFT_PCO = 67                    // mm (sint8) — Karoo does NOT record PCO natively
     const val RIGHT_PCO = 68                   // mm
-    // NOTE: power_phase (69-72) are FIT ARRAY fields. karoo-ext's FieldValue is a single scalar with no
-    // array index, so we can't write them as standard fields — power phase stays in developer fields.
 }

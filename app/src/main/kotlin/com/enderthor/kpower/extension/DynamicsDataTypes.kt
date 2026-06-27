@@ -20,7 +20,7 @@ import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.launch
 import kotlin.time.Duration.Companion.seconds
 
-fun dynFieldTypeId(metric: String) = "dyn-$metric-0"   // e.g. dyn-balance-0, dyn-te-0, dyn-pp-left-0
+fun dynFieldTypeId(metric: String) = "dyn-$metric-0"   // e.g. dyn-te-0, dyn-ps-0
 
 /**
  * Live cycling-dynamics metric of a real ANT+ meter slot; shows `---` when the gate is off

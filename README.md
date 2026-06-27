@@ -15,8 +15,8 @@ Compatible with Karoo 2 and Karoo 3 devices running Karoo OS version 1.524.2003 
 - **Headwind integration.** If the Headwind extension is installed, KPower reuses its temperature, pressure and wind instead of doing its own weather lookups (with automatic fallback, and a switch to opt out).
 - **Literature-calibrated coefficients** (Bassett frontal-area model, Crr from tyre/surface, drivetrain losses).
 - **Multiple bikes, linked to your Karoo profiles.** Create one estimator bike per real bike (each with its own weight, tyres, aero) and link it to a Karoo **ride profile**. When you switch profile on the Karoo, KPower automatically uses the matching bike — no manual changes. See *Multiple bikes & Karoo profiles* below.
-- **Estimated power as data fields, always available.** Four estimated fields — **Est. Power** (instant), **Est. Power 3s**, **Est. NP**, **Est. Avg Power** — can be placed on any page at any time (the estimator runs only while a field is shown, so there's no cost if you don't use them). The estimated power source is shown as **“KPW Estimated”** when pairing.
-- **Record a real ANT+ power meter + its cycling dynamics (optional).** Save **one or more** real ANT+ power meters under the *Real meter* tab (only **one active** at a time). The active meter is recorded to the ride FIT and exposed both as live data fields and as a pairable **“KPW &lt;name&gt;”** power/cadence sensor. KPower **auto-names** the meter with its brand and model (e.g. *Garmin Rally 200*), shows its **battery level** (per meter, as a coloured icon), and can pop a **low/critical battery alert** during the ride (opt-in, at most twice per ride). It also reads and records **Cycling Dynamics** the Karoo can't record natively — L/R balance, torque effectiveness, pedal smoothness, power phase and peak power phase — by reading the meter's raw ANT+ broadcast (works with Garmin Rally/Vector and similar; needs pedalling under load). See *Real meter & cycling dynamics* below.
+- **Estimated power as data fields, always available.** Three estimated fields — **Est. Power** (instant), **Est. Power 3s**, **Est. NP** — can be placed on any page at any time (the estimator runs only while a field is shown, so there's no cost if you don't use them). The estimated power source is shown as **“KPW Estimated”** when pairing.
+- **Record a real ANT+ power meter + its cycling dynamics (optional).** Save **one or more** real ANT+ power meters under the *Real meter* tab (only **one active** at a time). The active meter is recorded to the ride FIT and exposed both as live data fields and as a pairable **“KPW &lt;name&gt;”** power/cadence sensor. KPower **auto-names** the meter with its brand and model (e.g. *Garmin Rally 200*), shows its **battery level** (per meter, as a coloured icon), and can pop a **low/critical battery alert** during the ride (opt-in, at most twice per ride). It also reads **Cycling Dynamics** the Karoo can't show natively — **torque effectiveness** and **pedal smoothness** as live L/R fields — and writes **L/R balance** and **power phase** to the FIT (balance the Karoo also shows natively; power phase is post-ride only). See *Real meter & cycling dynamics* below.
 - **Auto-saving bike editor + per-bike colour.** Editing an estimator bike now **saves automatically** — there are no Save/Cancel buttons. The “+” creates a bike straight away and opens it; the back arrow returns; the red **Delete** button discards one. Each bike also gets a **colour dot** you can pick in its editor, to tell bikes apart at a glance in the list.
 - **Export / import your bikes.** From the *Estimator* tab’s **⋮ menu** you can **export** all your estimator bikes to a file and **import** them back — handy for backups or moving your setup to another Karoo. See *Export / import* below.
 - **Optional: log the estimate to the FIT for comparison** (off by default). A single toggle writes the estimate into the ride's FIT as developer fields so you can overlay it against a real meter in intervals.icu.
@@ -52,36 +52,69 @@ KPower has two independent things that both end up as “power”, and people mi
 - **Estimator bike** = the *physics estimate* (no sensor). Shows up when pairing as **“KPW Estimated”** Lives under the **Estimator** tab.
 - **Real meter** = a *real ANT+ power meter* KPower records directly. Shows up when pairing as **“KPW &lt;brand model&gt;”** (e.g. *KPW Garmin Rally 200*). Lives under the **Real meter** tab.
 
-#### A) I just want estimated power (no power meter)
+Find your scenario in the table, then read its steps below.
 
+| Scenario | Pair as Karoo power | KPower *active* meter | Useful KPower fields |
+|---|---|---|---|
+| **1 — No power meter** | KPW Estimated | — | None needed (Karoo shows power/NP/avg natively). Optional: Est. Power / 3s / NP |
+| **2 — Real meter + estimate (compare)** | the real meter | the meter | Est. Power / 3s / NP **+** Torque Effectiveness, Pedal Smoothness **+** Real Torque |
+| **3 — Two meters at once** | meter **A** (native) | meter **B** | Real Power / 3s / NP / Cadence (= meter B) **+** TE / PS / Torque |
+| **4 — Real meter + dynamics only** | the real meter | the meter | Torque Effectiveness, Pedal Smoothness **+** Real Torque |
+
+> **Balance and power phase are FIT-only** (no on-screen field): the Karoo already shows **L/R balance** natively, and power phase has no real-time use. Both are still written to the ride FIT — open it in [intervals.icu](https://intervals.icu) to see them.
+
+#### 1) No power meter — estimate only
 1. *Estimator* tab → **+** → fill in the bike (Simple mode: preset, height, tyre, bike weight). FTP comes from your Karoo profile.
-2. On the Karoo: **ride profile → sensors → pair “KPW Estimated”** as the power source.
-3. Ride. Power fields, NP, TSS, etc. all work as if it were a real meter. (You can also just drop the **Est. Power / 3s / NP / Avg** data fields on a page without pairing anything.)
+2. Karoo → **ride profile → sensors → pair “KPW Estimated”** as the power source.
+3. Ride. Power, NP, TSS, zones all work natively — **no KPower fields needed**. (You can still drop **Est. Power / 3s / NP** if you want extra readouts.)
 
-#### B) I only want my real power meter (and its cycling dynamics)
+#### 2) Real meter + estimate (compare them)
+1. *Real meter* tab → **Scan** → **Add** your meter → **Enable** (auto-names, shows battery).
+2. Pair the meter as the Karoo power: either pair it **natively**, or pair KPower's **“KPW &lt;brand model&gt;”** — pick **one** only (pairing both records power twice).
+3. On a page, add **Est. Power / 3s / NP** (the estimate) next to your native power, plus **Torque Effectiveness / Pedal Smoothness** and **Real Torque**.
+4. Turn on **“Log estimated power (FIT)”** to overlay estimate vs real later in [intervals.icu](https://intervals.icu) (`est_power` vs `pm1_power`).
 
-You have a real ANT+ meter and don't care about the estimate. Use KPower (instead of pairing the meter natively) because it **records the cycling dynamics the Karoo can't** — L/R balance, torque effectiveness, pedal smoothness, power phase — plus auto-name and battery alert.
+#### 3) Two power meters at once (A vs B)
+The Karoo records **one** power source, so:
+1. Pair **meter A natively** in the Karoo (→ native power, zones, NP).
+2. Add **meter B** in KPower and **Enable** it (B becomes KPower's *active* meter).
+3. Add the **Real Power / Real 3s / Real NP / Cadence** fields — they show **meter B**. Now meter A (native fields) and meter B (Real fields) are on the same page.
+> Dynamics (TE/PS) and the FIT extras come from the **active** meter only (B); meter A's dynamics aren't available at the same time. This is a niche setup — for two bikes you'd normally use one meter at a time (see *Multiple bikes*).
 
-1. *Real meter* tab → **Scan** → **Add** your meter → toggle **Enable**. It auto-names (e.g. *Garmin Rally 200*) and shows battery.
-2. On the Karoo: **ride profile → sensors → pair “KPW &lt;brand model&gt;”** (e.g. *KPW Garmin Rally 200*) as the power source. **Don't also pair the meter natively**, or power is recorded twice.
-3. Ride. Power/cadence record as normal **and** the cycling dynamics go into the FIT automatically (open it in [intervals.icu](https://intervals.icu) to see them). You don't need any Estimator bike, the Est. fields, or the “Log estimated power” toggle for this.
+#### 4) Real meter, just the cycling dynamics (most common)
+You have a meter and only want what the Karoo can't show.
+1. *Real meter* tab → **Scan** → **Add** → **Enable**.
+2. Pair the meter as the Karoo power (native **or** “KPW &lt;brand model&gt;” — one only).
+3. Add **Torque Effectiveness** + **Pedal Smoothness** (and **Real Torque**). That's it — **L/R balance** and **power phase** go to the FIT automatically (balance the Karoo also shows natively). No Estimator bike, no Est. fields, no “Log estimate” toggle needed.
 
-> Don't enable an Estimator power source at the same time as the real one — pair only **one** “KPW …” sensor as the Karoo's power. (You can still drop Est. fields on a page to glance at the estimate without pairing it.)
+---
 
-#### C) I have a real meter AND I want the estimate too (e.g. to compare)
+### Guía rápida — ¿cuál es mi caso? (español)
 
-You can run **both at once** — one real, one estimated:
+KPower tiene dos cosas que acaban siendo “potencia”, más campos extra de ANT+:
+- **Bici del estimador** = estimación física (sin sensor) → al emparejar aparece como **“KPW Estimated”**.
+- **Medidor real** = tu potenciómetro ANT+, leído por KPower → aparece como **“KPW &lt;marca modelo&gt;”** y añade las dinámicas que el Karoo no muestra.
 
-1. **Set up the estimator bike** as in (A).
-2. **Add the real meter:** *Real meter* tab → **Scan** → **Add** your meter → toggle **Enable** (only one real meter active at a time). It auto-names itself (e.g. *Garmin Rally 200*) and shows battery.
-3. **Pick which one the Karoo records as its main `power`** by choosing which sensor you pair in the **Karoo ride profile → sensors**:
-   - Pair **“KPW &lt;brand model&gt;”** → the **real** meter is your main power (recommended when you have a meter).
-   - Pair **“KPW Estimated”** → the **estimate** is your main power.
-   - **Pair only ONE of them** as the power source — pairing both records power twice. (Don't pair the meter *natively* either; let KPower feed it as “KPW …”.)
-4. **See both side by side (optional):** the **Real Power / Real 3s / Real NP / Real Avg** fields show the meter, and the **Est. Power / 3s / NP / Avg** fields show the estimate — put them on the same page to watch live. The real meter's **cycling dynamics** (L/R balance, TE, PS, power phase) are recorded to the FIT automatically too.
-5. **Log both to the FIT for later:** turn on **“Log estimated power (FIT)”** (*Real meter* tab). The real meter is recorded as `pm1_power`; the estimate as `est_power`/`est_np`. Open the FIT in [intervals.icu](https://intervals.icu) to overlay them.
+| Escenario | Emparejar como potencia | Medidor *activo* en KPower | Campos KPower útiles |
+|---|---|---|---|
+| **1 — Sin potenciómetro** | KPW Estimated | — | Ninguno (el Karoo da potencia/NP/media nativas). Opcional: Pot. est. / 3s / NP |
+| **2 — Medidor real + estimado (comparar)** | el medidor real | el medidor | Pot. est. / 3s / NP **+** Eficacia del par, Suavidad **+** Par real |
+| **3 — Dos medidores a la vez** | medidor **A** (nativo) | medidor **B** | Pot. real / 3s / NP / Cadencia (= medidor B) **+** TE / Suavidad / Par |
+| **4 — Medidor real + solo dinámicas** | el medidor real | el medidor | Eficacia del par, Suavidad **+** Par real |
 
-> In short: the *real meter* and the *estimate* always coexist as separate data fields; the only either/or choice is **which single “KPOWER …” sensor you pair** as the Karoo's recorded power source.
+> **El equilibrio (balance) y la power phase son SOLO FIT** (sin campo en pantalla): el Karoo ya muestra el **balance** nativo, y la power phase no aporta en tiempo real. Ambos se siguen escribiendo al FIT — ábrelo en [intervals.icu](https://intervals.icu).
+
+**1) Sin potenciómetro — solo estimación**
+1. Pestaña *Estimador* → **+** → rellena la bici. 2. Karoo → sensores → empareja **“KPW Estimated”**. 3. Rueda: potencia/NP/TSS/zonas nativas, **sin campos KPower**.
+
+**2) Medidor real + estimado (comparar)**
+1. *Medidor real* → **Escanear** → **Añadir** → **Activar**. 2. Empareja el medidor como potencia (nativo **o** “KPW &lt;marca modelo&gt;”, **solo uno**). 3. Pon **Pot. est. / 3s / NP** junto a la potencia nativa, más **Eficacia del par / Suavidad** y **Par real**. 4. Activa **“Grabar estimada (FIT)”** para comparar luego en intervals.icu.
+
+**3) Dos medidores a la vez (A vs B)**
+El Karoo graba **una** fuente de potencia: 1. Empareja **el medidor A nativo** (potencia del Karoo). 2. Añade y **activa el medidor B** en KPower. 3. Pon los campos **Pot. real / 3s / NP / Cadencia** → muestran **B**. Así ves A (nativo) y B (Pot. real) a la vez. *Las dinámicas salen solo del activo (B).* Caso raro; para dos bicis normalmente usas una a la vez (ver *Multiple bikes*).
+
+**4) Medidor real, solo las dinámicas (el más común)**
+1. *Medidor real* → **Escanear** → **Añadir** → **Activar**. 2. Empareja el medidor como potencia (nativo **o** “KPW …”, solo uno). 3. Añade **Eficacia del par** + **Suavidad del pedaleo** (y **Par real**). El **balance** y la **power phase** van al FIT solos (el balance lo muestra también el Karoo). Sin bici del estimador ni campos Est.
 
 ### Simple mode (recommended for most users)
 
@@ -212,9 +245,12 @@ Turn on **“Notify on low/critical battery”** (a toggle on the *Real meter* t
 ### What gets recorded
 
 While a meter is **enabled** and you are in an **active ride (recording or paused)**:
-- **Power / cadence** stream as data fields — **Real Power**, **3s**, **10s**, **NP**, **Avg Power**, **Max Power**, **Cadence** — and to the FIT (`pm1_power`, `pm1_cad`).
+- **Power / cadence** as data fields — **Real Power**, **3s**, **NP**, **Cadence** — and to the FIT (`pm1_power`, `pm1_cad`). (Average and max are derivable post-ride from the per-second `pm1_power` in the FIT, so there are no live Avg/Max/10s fields.)
 - **Torque** data fields — **Real Torque**, **Avg Torque**, **Max Torque** (Nm) — matching the Karoo's own torque fields.
-- **Cycling dynamics** are written to the FIT automatically — **the Karoo can't record these natively** — and are live data fields too: **L/R Balance** and **Avg L/R Balance**, **Torque Effectiveness**, **Pedal Smoothness**, **Power Phase L/R**, **Peak Power Phase L/R** (plus PCO and torque barycenter in the FIT). The two-sided ones come **both** as a compact graphical “L/R” field (e.g. *47/53*) **and** as separate **left / right** number fields, so other extensions (e.g. KDouble) can consume each side on its own. Dynamics only appear while pedalling under real load; a meter that doesn't send a given page just leaves that field empty.
+- **Cycling dynamics:**
+  - **Live L/R fields:** **Torque Effectiveness** and **Pedal Smoothness**, shown as a compact graphical “L/R” field (e.g. *47/53*). These the Karoo can't show — they're KPower's unique value.
+  - **FIT only (no on-screen field):** **L/R balance** and **power phase / peak power phase**, plus PCO and torque barycenter. These go to the FIT as **developer fields** (`dyn_balance_l/r`, `dyn_pp_*`, etc.) — NOT the standard FIT fields, because when the meter is paired **natively** the Karoo already records `left_right_balance` / torque-effectiveness / pedal-smoothness itself; writing the standard fields too would double-write/conflict. So KPower never touches those standard fields (PCO excepted — the Karoo doesn't record it). Open the FIT in [intervals.icu](https://intervals.icu) to see the `dyn_*` fields.
+  - Dynamics only appear while pedalling under real load; a meter that doesn't send a given page just leaves that field empty.
 
 > Live real-meter values appear once the ride is **recording or paused** (not on the pre-ride screen). This is deliberate — keeping the raw ANT channel open while idle would drain the radio and block the next scan. A field shows **“searching”** when a meter is configured but not yet streaming, and **“no device”** only when no meter is enabled.
 
@@ -224,7 +260,7 @@ KPower reads the power the meter has **already computed**, so calibration (zero-
 
 ### Optionally log the estimate to the FIT (for comparison)
 
-The four **Est. Power / 3s / NP / Avg** fields are **always** available on your screens (the estimator runs only while a field is placed). Writing the estimate **into the FIT** is a separate, **off-by-default** choice: switch on **“Log estimated power (FIT)”** at the bottom of the *Real meter* tab. It then writes `est_power` / `est_power_3s` (per second) and `est_np` / `est_avg` (ride summary). De-duplication is automatic: if KPower's estimate is the bound power source for the ride, it's already in the normal `power` field and isn't written twice (there is no “primary source” setting to configure anymore).
+The three **Est. Power / 3s / NP** fields are **always** available on your screens (the estimator runs only while a field is placed). Writing the estimate **into the FIT** is a separate, **off-by-default** choice: switch on **“Log estimated power (FIT)”** at the bottom of the *Real meter* tab. It then writes `est_power` / `est_power_3s` (per second) and `est_np` / `est_avg` (ride summary; average stays in the FIT for comparison even though there's no live Avg field). De-duplication is automatic: if KPower's estimate is the bound power source for the ride, it's already in the normal `power` field and isn't written twice (there is no “primary source” setting to configure anymore).
 
 ### How to compare afterwards
 
@@ -264,8 +300,8 @@ New in this release:
 - **3-second power smoothing**: the displayed power is time-smoothed like real power meters' "3s power", and the slope input is filtered too — GPS/barometer noise no longer produces watt spikes. Power still drops to 0 instantly when you stop pedalling.
 - **Cadence gate with hysteresis**: coasting detection switches off below 20 rpm and back on above 25 rpm, so power no longer flickers between 0 and full value when cadence hovers around the cutoff.
 - **Tailwind fix**: a tailwind stronger than your speed now correctly *reduces* the aero term instead of adding drag.
-- **Estimated power data fields, always available**: Est. Power / Est. Power 3s / Est. NP / Est. Avg Power can be placed any time (estimator runs only while shown). Optionally **log the estimate to the FIT** (`est_power`, `est_power_3s` per second; `est_np`, `est_avg` summary) via an off-by-default toggle, with automatic de-duplication when the estimate is the bound power source.
-- **Record real ANT+ power meters + cycling dynamics** (optional): save one or more under the *Real meter* tab, **one active** at a time (Enable switch, brand/model auto-name, battery icon). The active meter is recorded to the FIT as `pm1_power`/`pm1_cad` plus cycling-dynamics fields the Karoo can't record natively (L/R balance, torque effectiveness, pedal smoothness, power phase, peak power phase, PCO, torque barycenter), and exposed as live data fields and a pairable **“KPW &lt;brand model&gt;”** power/cadence sensor. Reads the raw ANT+ broadcast, so torque-based meters (Garmin Rally/Vector) work.
+- **Estimated power data fields, always available**: Est. Power / Est. Power 3s / Est. NP can be placed any time (estimator runs only while shown). Optionally **log the estimate to the FIT** (`est_power`, `est_power_3s` per second; `est_np`, `est_avg` summary) via an off-by-default toggle, with automatic de-duplication when the estimate is the bound power source.
+- **Record real ANT+ power meters + cycling dynamics** (optional): save one or more under the *Real meter* tab, **one active** at a time (Enable switch, brand/model auto-name, battery icon). The active meter is recorded to the FIT as `pm1_power`/`pm1_cad`, with **Real Power / 3s / NP / Cadence / Torque** live data fields and a pairable **“KPW &lt;brand model&gt;”** power/cadence sensor. Cycling dynamics: **torque effectiveness** and **pedal smoothness** as live L/R fields; **L/R balance**, **power phase / peak / PCO / torque barycenter** to the FIT (as `dyn_*` **developer** fields, so they never clash with the Karoo's own native `left_right_balance`/TE/PS when a meter is paired natively). Reads the raw ANT+ broadcast, so torque-based meters (Garmin Rally/Vector) work.
 - **Battery status + low/critical alert**: each saved meter shows a coloured battery icon; an opt-in toggle pops a one-time in-ride alert when the active meter goes low, and again if critical (max two per ride).
 - **Auto-naming with brand + model** from the meter's ANT+ manufacturer page (e.g. *Garmin Rally 200*); manual names are never overwritten.
 - **Multiple bikes linked to Karoo ride profiles**: one estimator bike per real bike, auto-selected when you switch profile on the Karoo. Settings split into *Estimator* and *Real meter* tabs.

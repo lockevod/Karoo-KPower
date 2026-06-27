@@ -22,7 +22,8 @@ import kotlin.time.Duration.Companion.seconds
 const val TYPE_EST_INSTANT = "estimated-power-instant"
 const val TYPE_EST_3S = "estimated-power-3s"
 const val TYPE_EST_NP = "estimated-power-np"
-const val TYPE_EST_AVG = "estimated-power-avg"
+// estimated-power-avg field removed (Karoo shows avg natively when KPW Estimated is paired); the FIT
+// est_avg developer field is still written for post-ride comparison.
 
 /**
  * Campo numérico que refleja una métrica de potencia estimada del engine. SIEMPRE disponible para

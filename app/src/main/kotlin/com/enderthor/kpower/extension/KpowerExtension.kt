@@ -162,13 +162,13 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
             EstimatedPowerDataType(extension, TYPE_EST_INSTANT, engine) { it.instantW },
             EstimatedPowerDataType(extension, TYPE_EST_3S, engine) { it.power3sW },
             EstimatedPowerDataType(extension, TYPE_EST_NP, engine) { it.npW },
-            EstimatedPowerDataType(extension, TYPE_EST_AVG, engine) { it.avgW },
+            // estimated-avg removed (on-screen): redundant — the Karoo shows avg natively when KPW Estimated
+            // is the paired sensor. The FIT est_avg developer field is kept for post-ride comparison.
             RealPowerDataType(extension, realFieldTypeId(0, "power"),   { sharedActiveDn }) { dn -> antManager.powerFlow(dn) },
             RealPowerDataType(extension, realFieldTypeId(0, "3s"),      { sharedActiveDn }) { dn -> antManager.power3sFlow(dn) },
             RealPowerDataType(extension, realFieldTypeId(0, "np"),      { sharedActiveDn }) { dn -> antManager.npFlow(dn) },
-            RealPowerDataType(extension, realFieldTypeId(0, "avg"),     { sharedActiveDn }) { dn -> antManager.avgFlow(dn) },
-            RealPowerDataType(extension, realFieldTypeId(0, "max"),     { sharedActiveDn }) { dn -> antManager.maxFlow(dn) },
-            RealPowerDataType(extension, realFieldTypeId(0, "10s"),     { sharedActiveDn }) { dn -> antManager.power10sFlow(dn) },
+            // real-avg/max/10s removed (on-screen): derivable post-ride from the per-second pm{n}_power
+            // developer field in the FIT (line ~842); avg adds little live.
             RealPowerDataType(extension, realFieldTypeId(0, "cadence"), { sharedActiveDn }) { dn -> antManager.cadenceFlow(dn) },
             RealPowerDataType(extension, realFieldTypeId(0, "torque"),  { sharedActiveDn }) { dn -> antManager.torqueFlow(dn) },
             RealPowerDataType(extension, realFieldTypeId(0, "avgtorque"), { sharedActiveDn }) { dn -> antManager.avgTorqueFlow(dn) },
@@ -177,29 +177,16 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
             // maps a STABLE manager-level dynamics sink to a Double (null -> NaN -> `---`). These sinks
             // survive meter reconnect: the bridges[dn] coroutine re-mirrors each new RawAntPowerMeter into
             // the same MutableStateFlow, so the field never freezes.
-            // Two-sided dynamics shown as graphical "L/R" (e.g. "47/53"): balance, torque effectiveness,
-            // pedal smoothness. Left value first (left pedal), right second.
-            DualValueDataType(extension, dynFieldTypeId("balance"), { sharedActiveDn }) { dn -> antManager.balanceFlow(dn).map { r -> if (r.isNaN()) null to null else (100.0 - r) to r } },
-            DualValueDataType(extension, dynFieldTypeId("avgbalance"), { sharedActiveDn }) { dn -> antManager.avgBalanceFlow(dn).map { r -> if (r.isNaN()) null to null else (100.0 - r) to r } },
+            // Two-sided dynamics shown as graphical "L/R" (e.g. "47/53"): torque effectiveness and pedal
+            // smoothness ONLY — these the Karoo cannot decode, so they're KPower's unique value.
+            // BALANCE is intentionally NOT a field: the Karoo shows pedal balance natively
+            // (PEDAL_POWER_BALANCE / AVERAGE_PEDAL_POWER_BALANCE) and KPower still writes it to the FIT
+            // (standard left_right_balance, in startFit). Power-phase fields were likewise removed (FIT only).
             DualValueDataType(extension, dynFieldTypeId("te"), { sharedActiveDn }) { dn -> antManager.tePsFlow(dn).map { it?.teLeftPct to it?.teRightPct } },
             DualValueDataType(extension, dynFieldTypeId("ps"), { sharedActiveDn }) { dn -> antManager.tePsFlow(dn).map { it?.psLeftPct to it?.psRightPct } },
-            DynamicsDataType(extension, dynFieldTypeId("pp-left"), { sharedActiveDn }) { dn -> antManager.forceLeftFlow(dn).map { it?.startAngleDeg ?: Double.NaN } },
-            DynamicsDataType(extension, dynFieldTypeId("pp-right"), { sharedActiveDn }) { dn -> antManager.forceRightFlow(dn).map { it?.startAngleDeg ?: Double.NaN } },
-            DynamicsDataType(extension, dynFieldTypeId("peakpp-left"), { sharedActiveDn }) { dn -> antManager.forceLeftFlow(dn).map { it?.startPeakDeg ?: Double.NaN } },
-            DynamicsDataType(extension, dynFieldTypeId("peakpp-right"), { sharedActiveDn }) { dn -> antManager.forceRightFlow(dn).map { it?.startPeakDeg ?: Double.NaN } },
-            // Power phase + peak power phase ALSO as graphical "L/R" duals (consistency with balance/te/ps).
-            DualValueDataType(extension, dynFieldTypeId("pp"), { sharedActiveDn }) { dn -> kotlinx.coroutines.flow.combine(antManager.forceLeftFlow(dn), antManager.forceRightFlow(dn)) { l, r -> l?.startAngleDeg to r?.startAngleDeg } },
-            DualValueDataType(extension, dynFieldTypeId("peakpp"), { sharedActiveDn }) { dn -> kotlinx.coroutines.flow.combine(antManager.forceLeftFlow(dn), antManager.forceRightFlow(dn)) { l, r -> l?.startPeakDeg to r?.startPeakDeg } },
-            // Single L/R streamable fields for balance/TE/PS/avg-balance (the duals above are graphical only;
-            // these singles let KDouble — and any other extension / the FIT — consume each side on its own).
-            DynamicsDataType(extension, dynFieldTypeId("balance-left"), { sharedActiveDn }) { dn -> antManager.balanceFlow(dn).map { if (it.isNaN()) Double.NaN else 100.0 - it } },
-            DynamicsDataType(extension, dynFieldTypeId("balance-right"), { sharedActiveDn }) { dn -> antManager.balanceFlow(dn) },
-            DynamicsDataType(extension, dynFieldTypeId("te-left"), { sharedActiveDn }) { dn -> antManager.tePsFlow(dn).map { it?.teLeftPct ?: Double.NaN } },
-            DynamicsDataType(extension, dynFieldTypeId("te-right"), { sharedActiveDn }) { dn -> antManager.tePsFlow(dn).map { it?.teRightPct ?: Double.NaN } },
-            DynamicsDataType(extension, dynFieldTypeId("ps-left"), { sharedActiveDn }) { dn -> antManager.tePsFlow(dn).map { it?.psLeftPct ?: Double.NaN } },
-            DynamicsDataType(extension, dynFieldTypeId("ps-right"), { sharedActiveDn }) { dn -> antManager.tePsFlow(dn).map { it?.psRightPct ?: Double.NaN } },
-            DynamicsDataType(extension, dynFieldTypeId("avgbalance-left"), { sharedActiveDn }) { dn -> antManager.avgBalanceFlow(dn).map { if (it.isNaN()) Double.NaN else 100.0 - it } },
-            DynamicsDataType(extension, dynFieldTypeId("avgbalance-right"), { sharedActiveDn }) { dn -> antManager.avgBalanceFlow(dn) },
+            // Per-side single streamable fields (balance/avgbalance/te/ps -left/-right) removed: nothing
+            // consumed them — KDouble takes balance from the native PEDAL_POWER_BALANCE, and the te/ps
+            // singles were never used. Re-add a single (graphical=false) DataType if an extension needs one.
         )
     }
 
@@ -839,14 +826,20 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                         val cad = reader?.cadence?.value ?: Double.NaN
                         val bal = reader?.balanceRightPct?.value ?: Double.NaN
                         val tq = reader?.torque?.value ?: Double.NaN
-                        // power/cadence/torque stay DEVELOPER fields: standard power(7)/cadence(4) may be
-                        // written by the Karoo for the bound sensor (don't clobber), and torque has no
-                        // standard record field. Balance goes to the STANDARD left_right_balance (30),
-                        // right-referenced like Garmin (bit7 set + right %), so tools show it natively.
+                        // ALL of power/cadence/torque/balance stay DEVELOPER fields. The Karoo writes the
+                        // STANDARD power(7)/cadence(4)/balance(30)/TE/PS for a NATIVELY-paired meter, so
+                        // writing those standard fields too would double-write/conflict (balance even with a
+                        // different convention — Karoo bit7=0 vs Garmin/our bit7=1). Developer fields never
+                        // collide: they carry the data for the KPW-virtual case and are a harmless separate
+                        // column in the native case. (bal = right %, so left = 100 − right.)
                         if (!pw.isNaN()) recordValues.add(FieldValue(meterField(m.slot, 0, "pm${m.slot + 1}_power", "W"), pw))
                         if (!cad.isNaN()) recordValues.add(FieldValue(meterField(m.slot, 1, "pm${m.slot + 1}_cad", "rpm"), cad))
-                        if (!bal.isNaN()) recordValues.add(FieldValue(com.enderthor.kpower.ant.FitRecordField.LEFT_RIGHT_BALANCE, ((bal.toInt().coerceIn(0, 100)) or 0x80).toDouble()))
                         if (!tq.isNaN()) recordValues.add(FieldValue(meterField(m.slot, 3, "pm${m.slot + 1}_torque", "Nm"), tq))
+                        if (!bal.isNaN()) {
+                            val r = bal.coerceIn(0.0, 100.0)
+                            recordValues.add(FieldValue(dynField(com.enderthor.kpower.ant.DynField.BALANCE_RIGHT, "dyn_balance_r", "%"), r))
+                            recordValues.add(FieldValue(dynField(com.enderthor.kpower.ant.DynField.BALANCE_LEFT, "dyn_balance_l", "%"), 100.0 - r))
+                        }
                     }
                     // Cycling-dynamics developer fields. Written for every recorded meter
                     // automatically — independent of the comparison-mode primary-source filter
@@ -857,12 +850,14 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                     metersSnapshot.firstOrNull { it.enabled }?.let { m ->
                         val reader = antManager.meter(m.deviceNumber) ?: return@let
                         val F = com.enderthor.kpower.ant.FitRecordField
-                        // TE / PS → STANDARD record fields (43-46), display % (host applies the profile scale).
+                        val DF = com.enderthor.kpower.ant.DynField
+                        // TE / PS → DEVELOPER fields (the Karoo writes the STANDARD 43-46 for a native meter;
+                        // see FitRecordField). Display % per side.
                         reader.tePs.value?.let { d ->
-                            d.teLeftPct?.let { recordValues.add(FieldValue(F.LEFT_TORQUE_EFFECTIVENESS, it)) }
-                            d.teRightPct?.let { recordValues.add(FieldValue(F.RIGHT_TORQUE_EFFECTIVENESS, it)) }
-                            d.psLeftPct?.let { recordValues.add(FieldValue(F.LEFT_PEDAL_SMOOTHNESS, it)) }
-                            d.psRightPct?.let { recordValues.add(FieldValue(F.RIGHT_PEDAL_SMOOTHNESS, it)) }
+                            d.teLeftPct?.let { recordValues.add(FieldValue(dynField(DF.TE_LEFT, "dyn_te_l", "%"), it)) }
+                            d.teRightPct?.let { recordValues.add(FieldValue(dynField(DF.TE_RIGHT, "dyn_te_r", "%"), it)) }
+                            d.psLeftPct?.let { recordValues.add(FieldValue(dynField(DF.PS_LEFT, "dyn_ps_l", "%"), it)) }
+                            d.psRightPct?.let { recordValues.add(FieldValue(dynField(DF.PS_RIGHT, "dyn_ps_r", "%"), it)) }
                         }
                         // Power phase / peak are FIT ARRAY fields [start, end]. karoo-ext's FieldValue is a
                         // single scalar (no array index) — two FieldValue with the same fieldNum collide
