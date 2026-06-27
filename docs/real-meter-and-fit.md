@@ -108,3 +108,19 @@ KPower can fit your effective **Crr per surface** and **CdA** from a real-meter 
 enabled, **“Log estimated power (FIT)”** on, and **diagnostic logging** on, the fitted values (each with
 a ± std error) go to the diagnostic log (`CALIB …`) for offline analysis. A small ± means the ride
 pinned the value down; a large ± means it didn't.
+
+## FAQ
+
+**I added a real meter but it gets no signal — does it write garbage to the FIT?**
+No. Every per-record write is guarded: power/torque/balance are skipped when the value is `NaN`, and the
+dynamics (`tePs`, force-angle…) are skipped when `null`. If nothing is valid, the record carries no
+KPower columns at all. Stale values also expire to `NaN`/`null` after ~5 s with no event, so a frozen
+last reading is never recorded. Enabling a meter writes nothing by itself — only data that actually
+arrives is recorded.
+
+**Is the estimator always running (even if I only want dynamics)?**
+No. The estimation engine is **reference-counted** — it starts on the first consumer and **stops when
+there are none**. It only runs while one of these is true: an **Est.** field is on a page, the **KPW
+Estimated** sensor is paired, or **“Log estimated power (FIT)”** is on. So for a dynamics-only setup
+(real meter native, no Est. fields, no KPW Estimated, logging off) the engine is **completely stopped**
+— zero CPU/battery — and no estimator data is written.
