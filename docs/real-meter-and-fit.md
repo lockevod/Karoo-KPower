@@ -68,14 +68,16 @@ native.
 ## What ends up in the FIT — by setup
 
 Two rules decide it: **dynamics** (`pm_*`, `dyn_*`, PCO) are written whenever a **meter is enabled and
-recording** — independent of the estimate. The **estimate** dev fields (`est_*`) are written only when
-**“Log estimated power (FIT)” is ON _and_ the estimate is NOT the bound power source** (i.e. you're
-comparing it against a real meter); if the estimate IS the source it's already the standard `power`, so
-it isn't duplicated.
+recording** — independent of the estimate. The **estimate** dev fields (`est_*`) are written whenever
+**“Log estimated power (FIT)” (comparison mode) is ON** — that is the only condition. It does NOT depend
+on whether *KPW Estimated* is paired/connected: if the estimate also happens to be the bound power
+source, `est_*` simply duplicate the standard `power` (a harmless extra column) — far better than the
+old behaviour, which suppressed `est_*` whenever the virtual sensor was connected and could silently
+drop the estimate when a real meter was the recorded power.
 
 | Your setup | Standard `power` in the FIT | Estimate `est_*` dev fields | Dynamics (`dyn_*` / `pm_torque` / PCO) |
 |---|---|---|---|
-| **Estimator only** — pair *KPW Estimated* | the **estimate** (Karoo records it natively, with NP/avg/zones) | no (it's already the standard power) | no meter → none |
+| **Estimator only** — pair *KPW Estimated* | the **estimate** (Karoo records it natively, with NP/avg/zones) | only if “Log estimate” **ON** — then duplicates the standard `power` (harmless) | no meter → none |
 | **Real meter, dynamics only** — pair the meter **natively**, “Log estimate” **OFF**, no Est. fields | the **real meter** (native) | no (estimator doesn't even run) | **yes** — native balance/TE/PS + KPower's torque / power phase / PCO / barycenter |
 | **Real + estimate (compare)** — meter native, “Log estimate” **ON** | the **real meter** (native) | **yes** (`est_power/3s/np/avg`) | yes |
 
@@ -92,8 +94,10 @@ Notes:
 2. Optionally add the **Est. Power / 3s / NP** fields to a page to watch live next to native power.
 3. Open the FIT in intervals.icu and overlay `est_power` vs `pm1_power`.
 
-De-duplication is automatic: if the estimate is the bound power source, it's already in the standard
-`power` field and isn't written twice.
+`est_*` are written whenever “Log estimated power (FIT)” is ON, regardless of what the Karoo's bound
+power source is. If the estimate happens to be that source, `est_power` will equal the standard `power`
+(a harmless duplicate column); when you're comparing against a real meter — the normal case — `est_*`
+and `pm1_power` are the two series you overlay.
 
 ## Calibration & crank length
 

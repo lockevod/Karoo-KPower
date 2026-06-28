@@ -774,6 +774,7 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
             // churnar un Binder round-trip + allocation cada segundo.
             var lastSesNp = Double.NaN
             var lastSesAvg = Double.NaN
+            var lastEstGateLogMs = 0L
             kotlinx.coroutines.flow.combine(
                 // Subscribe to ELAPSED_TIME (1Hz while recording) when the comparison-mode toggle is
                 // ON OR there is a saved meter (its dynamics are recorded automatically);
@@ -789,19 +790,26 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                 .collect { (elapsed, metersSnapshot, comparisonMode) ->
                     if (elapsed !is StreamState.Streaming) return@collect
 
-                    // Dedup is automatic: if the KPower virtual device is the Karoo's bound power
-                    // source, the estimate is already in the standard `power` stream, so we omit the
-                    // est_* developer fields to avoid duplicating it.
                     val estPrimary = engine.estimateIsPrimary.value
-
                     val instant = engine.instantW.value
                     val p3s = engine.power3sW.value
+                    // Diagnostic (throttled, only when the rider enabled file logging): records the exact
+                    // gate inputs the FIT writer sees, so a "comparison ride wrote no est_*" report can be
+                    // settled from the log instead of guessing whether the toggle was actually on.
+                    if (FileLogTree.enabled) {
+                        val now = System.currentTimeMillis()
+                        if (now - lastEstGateLogMs >= 5_000L) {
+                            lastEstGateLogMs = now
+                            Timber.d("FIT-est gate: comparison=%b estPrimary=%b instant=%.0f", comparisonMode, estPrimary, instant)
+                        }
+                    }
                     val recordValues = mutableListOf<FieldValue>().apply {
                         // Estimate FIT fields are opt-in: only logged when "Log estimated power (FIT)"
-                        // is ON. The estimator may be running anyway (a placed data field acquires
-                        // it), but recording it to the FIT is a separate, explicit choice for
-                        // comparison rides. writeEstimateFields dedups against the bound primary.
-                        if (comparisonMode && writeEstimateFields(estPrimary)) {
+                        // (comparison mode) is ON. The estimator may be running anyway (a placed data
+                        // field acquires it), but recording it to the FIT is a separate, explicit
+                        // choice for comparison rides. Gated ONLY on comparison mode — never on whether
+                        // the virtual device is connected (see shouldWriteEstimateToFit).
+                        if (shouldWriteEstimateToFit(comparisonMode, estPrimary)) {
                             if (!instant.isNaN()) add(FieldValue(fieldEstPower, instant))
                             if (!p3s.isNaN()) add(FieldValue(fieldEstPower3s, p3s))
                         }
@@ -881,7 +889,7 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                     }
                     if (recordValues.isNotEmpty()) emitter.onNext(WriteToRecordMesg(recordValues))
 
-                    if (comparisonMode && writeEstimateFields(estPrimary)) {
+                    if (shouldWriteEstimateToFit(comparisonMode, estPrimary)) {
                         val np = engine.npW.value
                         val avg = engine.avgW.value
                         if (np != lastSesNp || avg != lastSesAvg) {
