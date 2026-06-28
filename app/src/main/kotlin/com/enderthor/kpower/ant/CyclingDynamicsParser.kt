@@ -72,7 +72,9 @@ object CyclingDynamicsParser {
             isLeft = isLeft, eventCount = p.u(1),
             startAngleDeg = start, endAngleDeg = end,
             startPeakDeg = startPeak, endPeakDeg = endPeak,
-            torqueNm = tq / 32.0,
+            // 0xFFFF is the ANT+ "invalid" sentinel; without this guard 0xFFFF/32 = 2047.97 ≈ 2048 Nm
+            // leaked into dyn_torque_l/r (same 0xFFFF→null pattern as powerW above).
+            torqueNm = if (tq == 0xFFFF) null else tq / 32.0,
         )
     }
 

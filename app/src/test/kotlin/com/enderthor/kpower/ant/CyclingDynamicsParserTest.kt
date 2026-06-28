@@ -81,6 +81,15 @@ class CyclingDynamicsParserTest {
         assertEquals(180.0, d.arcDeg!!, 0.01)    // (270-90)
     }
 
+    @Test fun forceAngle_torque_0xFFFF_invalid_isNull() {
+        // Crank/combined torque (bytes 6-7) = 0xFFFF is the ANT+ "invalid" sentinel. Unguarded,
+        // 0xFFFF/32 = 2047.97 ≈ 2048 Nm leaked into dyn_torque_l/r in the FIT. It must be null.
+        val d = CyclingDynamicsParser.parseForceAngle(bytes(0xE0, 0x10, 64, 192.toInt() and 0xFF, 0, 128, 0xFF, 0xFF), isLeft = false)!!
+        assertNull(d.torqueNm)
+        // The angles in the same frame are still valid.
+        assertEquals(90.0, d.startAngleDeg!!, 0.01)
+    }
+
     @Test fun forceAngle_0xC0_invalid_sentinel() {
         // start=0xC0 & end=0xC0 -> both invalid (per spec pairing)
         val d = CyclingDynamicsParser.parseForceAngle(bytes(0xE1, 0x10, 0xC0, 0xC0, 0xC0, 0xC0, 0x00, 0x00), isLeft = true)!!
