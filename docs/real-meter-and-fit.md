@@ -65,6 +65,22 @@ fields they'd double-write/conflict (balance even uses a different bit7 conventi
 in their own columns, so they coexist — present for the KPW-virtual case, a harmless duplicate when
 native.
 
+## Where to see it after the ride
+
+| Tool | What you get |
+|---|---|
+| **[intervals.icu](https://intervals.icu)** (recommended) | Every KPower developer field shows up automatically as a selectable chart/stream, with its name and units — torque, power phase, peak phase, PCO, barycenter, balance/TE/PS, all of it. No setup needed. |
+| **Garmin Connect** | Torque effectiveness, pedal smoothness and balance appear **natively** when the meter was **natively paired** (the Karoo wrote those as standard FIT fields). KPower's own `dyn_*` developer fields (power phase, peak phase, torque, barycenter, rider position) also come through, but only as extra **developer-data charts at the bottom of the activity** — not inside Garmin's native "Cycling Dynamics" section, and the circular power-phase arc graphic will **not** render. |
+| **Strava** | Ignores developer fields entirely — none of KPower's FIT extras show up. |
+
+Why the arc never renders on Garmin Connect: that graphic needs the native FIT array fields
+(`left/right_power_phase`, etc.), and the karoo-ext SDK can only write **scalar** developer fields — a
+platform limitation, not a KPower bug.
+
+Coverage matches what Garmin Connect's own Cycling Dynamics shows, **except** the session aggregates
+Garmin computes on its side (time standing/seated, stand count, avg power seated vs standing) — KPower
+writes per-record data, not those ride-level rollups.
+
 ## What ends up in the FIT — by setup
 
 Two rules decide it: **dynamics** (`pm_*`, `dyn_*`, PCO) are written whenever a **meter is enabled and

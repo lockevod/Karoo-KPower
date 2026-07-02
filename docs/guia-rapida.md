@@ -47,6 +47,12 @@ emparejado nativo, así que KPower **no** los duplica como campos en pantalla. C
 aporta KPower está en el **FIT**: par, power phase, PCO, barycenter (el Karoo no los graba). Detalle:
 **[real-meter-and-fit.md](real-meter-and-fit.md)** (en inglés).
 
+**¿Y dónde se ve luego?** Lo mejor: **intervals.icu**, ahí aparecen todos los campos solos. En **Garmin
+Connect** verás la eficacia de par / fluidez de pedaleo / balance nativos (si emparejaste el medidor
+nativo), pero lo propio de KPower (par, fase de potencia, desplazamiento del centro de la plataforma,
+barycenter) sale como gráficos "developer" aparte, no dentro de su sección "Cycling Dynamics" — sin el
+arco de fase de potencia (limitación del SDK, no un bug). **Strava** ignora los developer fields.
+
 ## Instalación
 
 **Karoo 3 (v ≥ 1.527):** abre en el móvil el [APK más reciente](https://github.com/lockevod/Karoo-KPower/releases/latest/download/kpower.apk)

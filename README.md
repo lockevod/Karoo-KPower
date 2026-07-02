@@ -24,6 +24,11 @@ KPower reads your meter's raw ANT+ broadcast and records the dynamics the Karoo 
 - **Platform centre offset (PCO)** + rider position + **torque barycenter**
 - **L/R balance**, **torque effectiveness**, **pedal smoothness**
 
+> **Where to look:** intervals.icu shows every field automatically. Garmin Connect shows native TE/PS/
+> balance, but keeps KPower's own fields (torque, power phase, PCO, barycenter) as separate
+> developer-data charts, not inside its "Cycling Dynamics" section — no arc graphic there (SDK
+> limitation, not a bug). Strava ignores developer fields. Details: **[docs/real-meter-and-fit.md](docs/real-meter-and-fit.md#where-to-see-it-after-the-ride)**.
+
 Plus **auto-naming** (brand + model), **battery level & low-battery alert**, and optional **estimate-vs-real logging** to compare both in the FIT. Details: **[docs/real-meter-and-fit.md](docs/real-meter-and-fit.md)**.
 
 > Power is an **estimation**, not a measurement — the parameters matter. Setup: **[docs/configuration.md](docs/configuration.md)**.
