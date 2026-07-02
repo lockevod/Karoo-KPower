@@ -42,7 +42,15 @@ class EstimatedPowerSource(
                 // Readable identity in the Karoo pairing screen (was a meaningless "1234 / POWER-EXT-1").
                 emitter.onNext(OnManufacturerInfo(ManufacturerInfo("Enderthor", "Estimate", "KPOWER")))
 
-                engine.powerEmaW
+                // INSTANT power, like a real meter: an ANT+ meter broadcasts instantaneous samples and
+                // the Karoo applies its own field smoothing (3s/10s/… per the rider's field choice).
+                // Broadcasting a pre-smoothed EMA here (the old powerEmaW, τ=3s) meant DOUBLE smoothing
+                // — the estimate read seconds late and never reached the peaks of a variable effort.
+                // Trade-off accepted: the upstream EMAs (acceleration, grade) only partially damp
+                // sensor noise, so an UNSMOOTHED Karoo power field will visibly swing more than the
+                // old EMA did — same as a real meter's instant watts; riders wanting a steady readout
+                // pick a smoothed field (3s), exactly as they would with a real meter.
+                engine.instantW
                     .filter { !it.isNaN() }
                     .collect { powerValue ->
                         emitter.onNext(

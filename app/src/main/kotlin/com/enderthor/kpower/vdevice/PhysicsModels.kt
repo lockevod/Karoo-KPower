@@ -125,40 +125,10 @@ class AccelerationTracker(
     }
 }
 
-/**
- * Suavizado temporal de la potencia final (EMA con constante de tiempo [tauMs]),
- * equivalente al "3s power" que muestran los medidores reales.
- * - alpha depende del dt real entre muestras: 1 − e^(−dt/τ).
- * - Potencia 0 (parado, rueda libre, GPS stale) → snap a 0 y reset: el campo debe
- *   marcar 0 al instante, no decaer durante segundos.
- * - dt no positivo o mayor que [maxDtMs] (pausa) → re-siembra con el valor crudo.
- * No usa reloj propio: el llamante pasa [nowMs] (testeable).
- */
-class PowerSmoother(
-    private val tauMs: Double = 3_000.0,
-    private val maxDtMs: Long = 5_000L,
-) {
-    private var ema = 0.0
-    private var prevTs = 0L
-
-    fun update(powerW: Double, nowMs: Long): Double {
-        if (powerW <= 0.0) {
-            ema = 0.0
-            prevTs = nowMs
-            return 0.0
-        }
-        val dtMs = nowMs - prevTs
-        if (prevTs == 0L || dtMs <= 0L || dtMs > maxDtMs) {
-            ema = powerW
-            prevTs = nowMs
-            return powerW
-        }
-        val alpha = 1.0 - exp(-dtMs / tauMs)
-        ema += alpha * (powerW - ema)
-        prevTs = nowMs
-        return ema
-    }
-}
+// NOTE: no hay suavizado propio de la potencia final. El sensor virtual emite la potencia
+// INSTANTÁNEA (como un medidor real, cuyo broadcast ANT+ es instantáneo) y el Karoo aplica su
+// propio suavizado de campo (3s/10s/…). Un EMA aquí (el antiguo PowerSmoother, τ=3s) suavizaba
+// DOS veces: la estimación llegaba segundos tarde y nunca alcanzaba los picos.
 
 /**
  * Suavizado de la pendiente (EMA, τ corto). El término de gravedad domina el modelo

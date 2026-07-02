@@ -84,14 +84,12 @@ class PowerEstimationEngine(
     private val activeProfileIdFlow: kotlinx.coroutines.flow.StateFlow<String?>,
 ) {
     private val _instantW = MutableStateFlow(Double.NaN)
-    private val _powerEmaW = MutableStateFlow(Double.NaN)
     private val _power3sW = MutableStateFlow(Double.NaN)
     private val _npW = MutableStateFlow(Double.NaN)
     private val _avgW = MutableStateFlow(Double.NaN)
     private val _hasSample = MutableStateFlow(false)
 
     val instantW: StateFlow<Double> = _instantW.asStateFlow()
-    val powerEmaW: StateFlow<Double> = _powerEmaW.asStateFlow()
     val power3sW: StateFlow<Double> = _power3sW.asStateFlow()
     val npW: StateFlow<Double> = _npW.asStateFlow()
     val avgW: StateFlow<Double> = _avgW.asStateFlow()
@@ -129,7 +127,6 @@ class PowerEstimationEngine(
 
     /** Discard accumulated calibration samples (e.g. the active bike changed mid-ride). */
     fun resetCalibration() = fieldCalibrator.reset()
-    private val powerSmoother = PowerSmoother()
     private val cadenceGate = CadenceGate()
     private val surfaceReader by lazy { SurfaceConditionReader(context) }
 
@@ -349,11 +346,8 @@ class PowerEstimationEngine(
                             fieldCalibrator.add(y, x1, x2, resolveSurfaceForCalc(config))
                         }
                     }
-                    val ema = powerSmoother.update(instantW, nowMs)
-
                     latestInstantW = instantW                  // floored → metrics (incl. NP) match a real meter
                     _instantW.value = instantW                 // instant field: non-negative display
-                    _powerEmaW.value = ema                     // already >= 0 (floored input)
                     if (!_hasSample.value) _hasSample.value = true
                 }
         }
@@ -389,9 +383,8 @@ class PowerEstimationEngine(
         engineJob?.cancel(); engineJob = null; pipelineJob = null; metricJob = null
         _hasSample.value = false
         latestInstantW = Double.NaN
-        _powerEmaW.value = Double.NaN
         _instantW.value = Double.NaN
-        // _power3sW is a LIVE rolling value like instant/EMA (fed every metric tick regardless of
+        // _power3sW is a LIVE rolling value like instant (fed every metric tick regardless of
         // `recording`), so it must not survive a pipeline stop either — otherwise a re-acquire can
         // publish a stale pre-pause 3s value while est_power is still NaN. _npW/_avgW are SESSION
         // aggregates (gated on `recording`, reset via RideResetGate on Idle->Recording) and are left
