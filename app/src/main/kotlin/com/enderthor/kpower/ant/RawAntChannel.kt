@@ -96,6 +96,31 @@ class RawAntChannel(
      *  the check-and-set is atomic — a plain volatile read-then-write let two callers both pass. */
     private val opening = java.util.concurrent.atomic.AtomicBoolean(false)
 
+    /** Guards [releaseChannel] so a handle is torn down (close/unassign/release) at most once, even
+     *  when open()'s own configure-time bailouts race stop() on the SAME channel (different IO
+     *  threads) — a concurrent double-release can corrupt the ANT provider's free-channel accounting
+     *  (vendor SDK opaque), leaking a channel for the rest of the session. */
+    private val teardownLock = Any()
+    private val releasedChannels = HashSet<AntChannel>()
+
+    /**
+     * Idempotent teardown: close/unassign/release [ch] exactly once. No-op for null or an
+     * already-released channel. Never call while holding [teardownLock] across a suspend point —
+     * the lock only guards the released-set check, the actual IPC calls run outside it.
+     */
+    private fun releaseChannel(ch: AntChannel?) {
+        if (ch == null) return
+        synchronized(teardownLock) {
+            if (!releasedChannels.add(ch)) return
+            // Bound the set: a long ride reopens the channel many times. A released handle is never
+            // reused, so forgetting old entries is safe — this just caps memory, not correctness.
+            if (releasedChannels.size > 32) { releasedChannels.clear(); releasedChannels.add(ch) }
+        }
+        runCatching { ch.close() }
+        runCatching { ch.unassign() }
+        runCatching { ch.release() }
+    }
+
     // ── Diagnostic ANT page logging (purely additive; only touched when FileLogTree.enabled) ─────
     /** Lifetime count of every page seen, keyed by page number, for the periodic SUMMARY line. */
     private val pageCounts = ConcurrentHashMap<Int, Long>()
@@ -282,8 +307,7 @@ class RawAntChannel(
                 val ch = provider.acquireChannel(context, PredefinedNetwork.ANT_PLUS)
                 // stop() may have raced the async bind/acquire: if so, give the slot straight back.
                 if (stopped) {
-                    runCatching { ch.close() }
-                    runCatching { ch.release() }
+                    releaseChannel(ch)
                     return
                 }
                 channel = ch
@@ -339,20 +363,28 @@ class RawAntChannel(
                 // BIDIRECTIONAL_SLAVE (not RECEIVE_ONLY) so we can TX the identity/calibration requests.
                 // It still receives every broadcast identically; with an empty TX queue it never transmits,
                 // so once identity is resolved there is no ongoing send cost. This is the Karoo's own model.
+                // Re-checked after EACH delay (not just once at the end): stop() runs on a different IO
+                // thread and can land mid-sequence — bailing out promptly shrinks the window where its
+                // teardown could race one of the calls below on the same handle.
                 ch.assign(ChannelType.BIDIRECTIONAL_SLAVE); delay(50)
+                if (stopped) { channel = null; releaseChannel(ch); return }
                 ch.setChannelId(ChannelId(deviceNumber, 11, 0)); delay(50)  // SPECIFIC device, type 11
+                if (stopped) { channel = null; releaseChannel(ch); return }
                 ch.setRfFrequency(57); delay(50)
+                if (stopped) { channel = null; releaseChannel(ch); return }
                 ch.setPeriod(8182); delay(50)
+                if (stopped) { channel = null; releaseChannel(ch); return }
                 // Bound the low-priority search: when it expires (meter asleep / out of range) the
                 // channel reports RX_SEARCH_TIMEOUT and reopenAfterSearchTimeout duty-cycles it, instead
                 // of the radio searching nonstop. Search priority is left at the default (lowest) so this
                 // additive read-only channel yields to the Karoo's own paired sensors.
                 runCatching { ch.setSearchTimeout(LowPrioritySearchTimeout.TWENTY_FIVE_SECONDS, HighPrioritySearchTimeout.DISABLED) }; delay(50)
-                // Re-check right before open(): a stop() during the configure delays must win.
+                // Re-check right before open(): a stop() during the configure delays must win. All
+                // bailouts null the field BEFORE releasing so no late IPC callback can pass the
+                // `ch === channel` identity check against an already-torn-down handle.
                 if (stopped) {
-                    runCatching { ch.close() }
-                    runCatching { ch.unassign() }
-                    runCatching { ch.release() }
+                    channel = null
+                    releaseChannel(ch)
                     return
                 }
                 ch.open()
@@ -363,9 +395,7 @@ class RawAntChannel(
                 // Drop any half-acquired channel first.
                 val dead = channel
                 channel = null
-                runCatching { dead?.close() }
-                runCatching { dead?.unassign() }
-                runCatching { dead?.release() }
+                releaseChannel(dead)
                 if (e is kotlinx.coroutines.CancellationException) {
                     // BENIGN: stop()/release() cancelled the scope mid-open — e.g. a scan-list identify
                     // whose meter was ASLEEP (no broadcast within the identify window, so the cranks
@@ -440,9 +470,7 @@ class RawAntChannel(
         if (stopped || (channel == null && opening.get())) return
         val dead = channel
         channel = null
-        runCatching { dead?.close() }
-        runCatching { dead?.unassign() }
-        runCatching { dead?.release() }
+        releaseChannel(dead)
         Timber.i("RawAntChannel #%d search idle (%s) — retry in %dms", deviceNumber, reason, SEARCH_REST_MS)
         scope.launch { delay(SEARCH_REST_MS); if (!stopped) open() }
     }
@@ -453,9 +481,7 @@ class RawAntChannel(
         // Forget the dead channel so open() acquires a brand-new one instead of reusing it.
         val dead = channel
         channel = null
-        runCatching { dead?.close() }
-        runCatching { dead?.unassign() }
-        runCatching { dead?.release() }
+        releaseChannel(dead)
         scheduleReopen("channel death")
     }
 
@@ -484,9 +510,7 @@ class RawAntChannel(
         scope.launch {
             val ch = channel
             channel = null
-            runCatching { ch?.close() }
-            runCatching { ch?.unassign() }
-            runCatching { ch?.release() }
+            releaseChannel(ch)
             runCatching { context.unbindService(conn) }
         }.invokeOnCompletion {
             // Cancel the scope only AFTER cleanup runs, so the channel teardown + unbind complete.

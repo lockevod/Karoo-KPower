@@ -64,20 +64,22 @@ class AntPowerManager(private val context: Context) {
     // `pendingReset` requests are pushed to each meter (consumed on its single-threaded loop).
     @Volatile private var recording = false
 
+    // Encapsulates "reset only on a genuine new ride (Idle->Recording), freeze during pause" — see
+    // RideResetGate. Only touched under the @Synchronized onRideState() below.
+    private val resetGate = com.enderthor.kpower.vdevice.RideResetGate()
+
     /**
      * Mirror the Karoo RideState so each meter's metrics track NP/avg only while recording and
-     * reset on the Idle->Recording transition. Reset is requested per-meter (requestMetricsReset)
-     * and consumed on the per-meter 1Hz loop, so metrics.reset()/tick() stay on one thread.
+     * reset on the Idle->Recording transition — NOT on Paused->Recording (autopause must not wipe
+     * a meter's NP/avg). Reset is requested per-meter (requestMetricsReset) and consumed on the
+     * per-meter 1Hz loop, so metrics.reset()/tick() stay on one thread.
      */
     @Synchronized
     fun onRideState(state: io.hammerhead.karooext.models.RideState) {
-        when (state) {
-            is io.hammerhead.karooext.models.RideState.Recording -> {
-                if (!recording) synchronized(meters) { meters.values.forEach { it.requestMetricsReset() } }
-                recording = true
-            }
-            else -> recording = false
+        if (resetGate.onRideState(state)) {
+            synchronized(meters) { meters.values.forEach { it.requestMetricsReset() } }
         }
+        recording = resetGate.recording
     }
 
     /** Stable power flow for a device number (survives connect/disconnect; NaN when not streaming). */
@@ -144,10 +146,17 @@ class AntPowerManager(private val context: Context) {
      * Open device [dn]'s own bidirectional channel for a few seconds so it requests + reports its
      * manufacturer page, then release it. Reuses the ref-counted acquire/release lifecycle (under the
      * [identifyToken]) and the stable [manufacturerFlow], so it shares all the channel recovery logic.
-     * No-op if already identifying [dn] or the manager is closed.
+     * No-op if already identifying [dn], the scan is not running, or the manager is closed.
+     *
+     * @Synchronized (same monitor as [stopScan]): startIdentify runs on the scan channel's callback
+     * thread, so without it a stopScan racing this method could snapshot+clear [identifyJobs] just
+     * before the insertion below — the new job would then be neither cancelled nor tracked, leaking
+     * its identify channel (a sleeping meter never resolves) past the scan session. Serialized, this
+     * either runs before stopScan (job gets cancelled+cleared) or after (bails on scanChannel==null).
      */
+    @Synchronized
     private fun startIdentify(dn: Int) {
-        if (closed || identifyJobs.containsKey(dn)) return
+        if (closed || scanChannel == null || identifyJobs.containsKey(dn)) return
         // Already know this device's brand (cached from a prior identify / connection)? Just publish it,
         // no need to open a channel.
         manufacturerFlow(dn).value?.let { updateResolved(dn, it); return }
@@ -155,7 +164,11 @@ class AntPowerManager(private val context: Context) {
         // (an asleep meter never resolves), so an environment with many meters could otherwise exhaust the
         // ~14-channel pool and starve recording / the scan itself. The passive 0x50 parse stays the fallback.
         if (identifyJobs.size >= MAX_CONCURRENT_IDENTIFY) return
-        val job = scope.launch {
+        // LAZY + put in the map BEFORE starting: if launched eagerly, the coroutine can run to completion
+        // (its finally removing a not-yet-present map entry, a no-op) before this thread even reaches the
+        // map assignment — leaving a stale completed Job that blocks re-identifying dn until stopScan.
+        // Starting only after the map entry exists guarantees the finally's remove() always finds it.
+        val job = scope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
             try {
                 // acquire INSIDE the coroutine: if the job is cancelled before its body runs (stopScan
                 // racing the launch), the channel hold is never taken, so it can't leak. The channel is
@@ -170,6 +183,7 @@ class AntPowerManager(private val context: Context) {
             }
         }
         identifyJobs[dn] = job
+        job.start()
     }
 
     private fun updateResolved(dn: Int, name: String?) {

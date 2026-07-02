@@ -44,6 +44,7 @@ import io.hammerhead.karooext.models.StreamState
 
 
 
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.awaitClose
@@ -62,6 +63,7 @@ import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 
 
@@ -144,8 +146,11 @@ fun Context.batteryAlertFlow(): Flow<Boolean> =
 // the service's connect gate releases the meter channel whenever this is recent, freeing the radio.
 //
 // Stored as a wall-clock millis stamp (not a bool) so a screen killed without onDispose AUTO-EXPIRES after
-// [METER_SCREEN_ACTIVE_BACKSTOP_MS] instead of wedging the meter disconnected forever. The gate recomputes
-// freshness against `now` on every emission (RideState re-emits on each host rebind, so it self-heals).
+// [METER_SCREEN_ACTIVE_BACKSTOP_MS] instead of wedging the meter disconnected forever. Auto-expiry is
+// driven by [meterScreenActiveFlow] itself (a delay()+emit(false) armed on every new stamp), NOT by
+// recomputing freshness only when some unrelated upstream re-emits — with distinctUntilChanged on the
+// ride-gate combine, a stale stamp with no other change would otherwise leave connectMeters(emptyList())
+// standing for the rest of the ride.
 // ComparisonScreen heartbeats the stamp (re-stamps every ~45 s while open) so this 2-min window can't
 // expire mid-session; the short window bounds the killed-without-onDispose wedge to ≤2 min.
 const val METER_SCREEN_ACTIVE_BACKSTOP_MS = 2 * 60_000L
@@ -157,10 +162,36 @@ suspend fun saveMeterScreenActive(context: Context, active: Boolean) {
     context.dataStore.edit { it[meterScreenActiveKey] = if (active) System.currentTimeMillis() else 0L }
 }
 
-/** Raw "last marked active" stamp (0 = inactive). The gate applies the [METER_SCREEN_ACTIVE_BACKSTOP_MS]
- *  freshness check itself, against the current time, so an expired stamp doesn't need a flow re-emission. */
+/** Raw "last marked active" stamp (0 = inactive), with no freshness/expiry logic of its own — building
+ *  block for [meterScreenActiveFlow], which is what callers should collect. */
 fun Context.meterScreenActiveAtFlow(): Flow<Long> =
     dataStore.data.map { it[meterScreenActiveKey] ?: 0L }.distinctUntilChanged()
+
+/** Self-expiring "is the meter-management screen active" signal. `flatMapLatest` re-arms on every new
+ *  stamp (including a heartbeat re-stamp): a cleared (0L) or stale/future stamp emits `false`
+ *  immediately; a fresh stamp emits `true`, then `delay()`s the remaining backstop window and emits
+ *  `false` on its own — no further stamp write or upstream re-emission needed. This is what makes a
+ *  screen killed without onDispose (Activity stopped, not destroyed) release the meter channel again
+ *  once [METER_SCREEN_ACTIVE_BACKSTOP_MS] lapses, instead of wedging connectMeters(emptyList()) for
+ *  the rest of the ride. */
+@OptIn(ExperimentalCoroutinesApi::class)
+fun Context.meterScreenActiveFlow(): Flow<Boolean> =
+    meterScreenActiveAtFlow()
+        .flatMapLatest { stamp ->
+            flow {
+                val age = System.currentTimeMillis() - stamp
+                // age in [0, backstop): a stamp "in the future" (clock moved back) reads as NOT
+                // active, so the meter still connects rather than staying suppressed on a negative age.
+                if (stamp != 0L && age in 0 until METER_SCREEN_ACTIVE_BACKSTOP_MS) {
+                    emit(true)
+                    delay(METER_SCREEN_ACTIVE_BACKSTOP_MS - age)
+                    emit(false)
+                } else {
+                    emit(false)
+                }
+            }
+        }
+        .distinctUntilChanged()
 
 /**
  * Atomic read-modify-write of the saved meters: decode the current value, apply [transform], and

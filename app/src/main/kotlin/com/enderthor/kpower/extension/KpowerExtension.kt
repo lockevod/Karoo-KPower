@@ -65,13 +65,14 @@ private data class FitTick(
 )
 
 /** Holder for the combine driving the ride-state connect gate. Carries only the ENABLED device numbers
- *  (not the full meter list) so battery/label persistence writes can't flap the channel. [meterScreenAt]
- *  is the meter-management screen's "active" stamp (freshness is checked in the collector against now). */
+ *  (not the full meter list) so battery/label persistence writes can't flap the channel.
+ *  [meterScreenActive] is already the debounced/self-expiring signal (see [meterScreenActiveFlow]) —
+ *  the collector uses it as-is, no age math needed. */
 private data class RideGate(
     val state: RideState,
     val mode: Boolean,
     val enabledDns: List<Int>,
-    val meterScreenAt: Long,
+    val meterScreenActive: Boolean,
 )
 
 /** One battery-alert event. flatMapLatest only SELECTS the flow that produces these (pure); the arm/
@@ -413,17 +414,18 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                 // reorder) that doesn't change the enabled SET won't re-trigger this gate — so no channel
                 // close/reopen flap mid-ride. (sorted() makes distinctUntilChanged order-insensitive.)
                 sharedMeters.map { ms -> ms.filter { it.enabled }.map { it.deviceNumber }.sorted() }.distinctUntilChanged(),
-                // Meter-management screen activity: while it's recent the gate releases the channel so the
-                // screen's ANT scan isn't starved by our off-ride channel.
-                applicationContext.meterScreenActiveAtFlow(),
-            ) { state, mode, dns, meterScreenAt -> RideGate(state, mode, dns, meterScreenAt) }
+                // Meter-management screen activity: while it's active the gate releases the channel so the
+                // screen's ANT scan isn't starved by our off-ride channel. Self-expiring — re-fires false
+                // on its own once the backstop lapses, even with no other RideGate input changing.
+                applicationContext.meterScreenActiveFlow(),
+            ) { state, mode, dns, meterScreenActive -> RideGate(state, mode, dns, meterScreenActive) }
                 // Dedup is safe: RideState.Recording/Idle are payload-free objects, so
                 // collapsing identical emissions never drops a real transition. And
                 // engine.onRideState(state) is intentionally called before the comparison
                 // shouldRun gate below, so NP/avg reset + pause-freeze work even when
                 // comparison mode is OFF.
                 .distinctUntilChanged()
-                .collect { (state, mode, enabledDns, meterScreenAt) ->
+                .collect { (state, mode, enabledDns, meterScreenActive) ->
                     engine.onRideState(state)
                     antManager.onRideState(state)
                     isRecording = state is RideState.Recording
@@ -444,8 +446,15 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                     }
                     wasInRide = inRide
                     // Estimate engine acquire/release stays tied to COMPARISON mode only;
-                    // dynamics recording does not need the estimate engine running.
-                    val shouldRunComparison = mode && state is RideState.Recording
+                    // dynamics recording does not need the estimate engine running. Kept alive across
+                    // Recording<->Paused (autopause) too, not just Recording: releasing on every traffic
+                    // light and re-acquiring on resume rebuilt the whole pipeline (incl. up to a 5s
+                    // UserProfile fetch), leaving est_power/est_power_3s missing from the FIT for several
+                    // seconds after each pause. Session-accumulation freeze during pause is already handled
+                    // by the engine's own `recording` flag (see RideResetGate / onRideState), and FIT writes
+                    // stop anyway while paused (ELAPSED_TIME doesn't tick), so there's no correctness cost
+                    // to leaving the pipeline warm.
+                    val shouldRunComparison = mode && (state is RideState.Recording || state is RideState.Paused)
                     // Raw ANT meters connect whenever at least one saved meter is ENABLED AND KPower's
                     // meter-management screen isn't using the radio. Ride state NO LONGER gates this — the
                     // channel stays open off-ride too, so the meter reports live power/battery in the
@@ -455,12 +464,8 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                     // itself active via DataStore (meterScreenActiveAt), and we release while that's recent.
                     // Disable/delete a meter -> enabledDns shrinks -> connectMeters drops that channel.
                     // Comparison mode no longer drives the meter connection — it only drives the estimate
-                    // engine, acquired separately via shouldRunComparison above.
-                    // age in [0, backstop): a stamp "in the future" (clock moved back) reads as NOT active,
-                    // so the meter still connects rather than staying suppressed on a negative age.
-                    val meterScreenAge = System.currentTimeMillis() - meterScreenAt
-                    val meterScreenActive = meterScreenAt != 0L &&
-                        meterScreenAge in 0 until METER_SCREEN_ACTIVE_BACKSTOP_MS
+                    // engine, acquired separately via shouldRunComparison above. meterScreenActive is
+                    // already the self-expiring signal from meterScreenActiveFlow(): no age math here.
                     val shouldConnect = enabledDns.isNotEmpty() && !meterScreenActive
                     if (shouldRunComparison && !acquiredForComparison) {
                         engine.acquire(comparisonToken); acquiredForComparison = true

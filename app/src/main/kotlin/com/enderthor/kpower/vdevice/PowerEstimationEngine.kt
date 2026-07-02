@@ -141,6 +141,9 @@ class PowerEstimationEngine(
     private val ma3s = MovingAverage(windowSamples = 3)
     private val npCalc = NormalizedPowerCalculator()
     private val runningAvg = RunningAverage()
+    // Encapsulates "reset only on a genuine new ride (Idle->Recording), freeze during pause" — see
+    // RideResetGate. Only touched under the @Synchronized onRideState() below.
+    private val resetGate = RideResetGate()
     @Volatile private var recording = false
     @Volatile private var pendingReset = false
 
@@ -169,15 +172,11 @@ class PowerEstimationEngine(
      */
     @Synchronized fun isActive(): Boolean = consumers.isNotEmpty()
 
+    // Reset only on a genuine new ride (Idle->Recording); freeze (keep accumulating) across a pause —
+    // an autopause resume must NOT wipe NP/avg/calibration. See RideResetGate.
     @Synchronized fun onRideState(state: RideState) {
-        when (state) {
-            is RideState.Recording -> {
-                if (!recording) resetSessionAccumulators()
-                recording = true
-            }
-            is RideState.Paused -> recording = false
-            is RideState.Idle -> recording = false
-        }
+        if (resetGate.onRideState(state)) resetSessionAccumulators()
+        recording = resetGate.recording
     }
 
     // Resets only the published StateFlows (StateFlow.value is thread-safe). The
@@ -257,7 +256,13 @@ class PowerEstimationEngine(
                 karooSystem.speedStreamWithStaleness(),
                 karooSystem.streamDataMonitorFlow(DataType.Type.ELEVATION_GRADE),
                 karooSystem.streamDataMonitorFlow(DataType.Type.PRESSURE_ELEVATION_CORRECTION),
-                karooSystem.streamDataMonitorFlow(DataType.Type.CADENCE, noCheck = true),
+                // noCheck skips the emit(initialState) path, so without a synthetic first emission this
+                // is the only combine input with no initial value — the whole combine (and every est_*
+                // output) would stall until the host sends the first cadence StreamState. NotAvailable is
+                // the correct fallback: a non-Streaming cadence makes the estimator fall back to the
+                // movement-based pedalling proxy below, which is right before the real stream arrives.
+                karooSystem.streamDataMonitorFlow(DataType.Type.CADENCE, noCheck = true)
+                    .onStart { emit(StreamState.NotAvailable) },
                 karooSystem.headwindFlow(context),
                 powerConfigFlow,
                 weatherEnvFlow,
@@ -386,6 +391,12 @@ class PowerEstimationEngine(
         latestInstantW = Double.NaN
         _powerEmaW.value = Double.NaN
         _instantW.value = Double.NaN
+        // _power3sW is a LIVE rolling value like instant/EMA (fed every metric tick regardless of
+        // `recording`), so it must not survive a pipeline stop either — otherwise a re-acquire can
+        // publish a stale pre-pause 3s value while est_power is still NaN. _npW/_avgW are SESSION
+        // aggregates (gated on `recording`, reset via RideResetGate on Idle->Recording) and are left
+        // alone here.
+        _power3sW.value = Double.NaN
         // Drop held grade/elevation so an acquire→release→acquire within one process doesn't resume
         // with a stale grade if the first sample after re-acquire is a dropout.
         lastGoodSlope = 0.0; lastGoodElevation = 0.0; lastSlopeMs = 0L
