@@ -296,6 +296,17 @@ fun ComparisonScreen() {
                             }
                         }
                     },
+                    onSetOffset = { m, factor, offset ->
+                        scope.launch {
+                            updateAntMeters(ctx) { current ->
+                                current.map {
+                                    if (it.deviceNumber == m.deviceNumber)
+                                        it.copy(powerFactorPct = factor, powerOffsetW = offset)
+                                    else it
+                                }
+                            }
+                        }
+                    },
                 )
 
                 // Short cycling-dynamics note, right after the ANT meters block. Dynamics from an

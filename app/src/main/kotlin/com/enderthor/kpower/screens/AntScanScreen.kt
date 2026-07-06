@@ -15,6 +15,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -49,6 +50,7 @@ const val MAX_METERS = 5
  * [onToggleEnabled] Called when the per-meter Record switch is toggled.
  * [onRename]    Called when the user taps the rename (edit) icon on a saved meter.
  * [onCalibrate] Called when the user taps Calibrate in a saved meter's detail panel.
+ * [onSetOffset] Called with BOTH current values whenever the per-meter factor/offset text fields change.
  * [karooNameFor] Resolves a detected device number to the Karoo's known name (from its paired
  *                sensors), so the scan list shows e.g. "Garmin Rally 200" instead of "Device: 6593".
  */
@@ -62,6 +64,7 @@ fun LazyListScope.antScanItems(
     onToggleEnabled: (SavedMeter, Boolean) -> Unit,
     onRename: (SavedMeter) -> Unit,
     onCalibrate: (SavedMeter) -> Unit,
+    onSetOffset: (SavedMeter, Double, Double) -> Unit,
     karooNameFor: (Int) -> String? = { null },
 ) {
     val atCap = saved.size >= MAX_METERS
@@ -165,6 +168,32 @@ fun LazyListScope.antScanItems(
                             Spacer(Modifier.width(4.dp))
                             Text(stringResource(R.string.btn_calibrate))
                         }
+                        var factorText by remember(m.deviceNumber) {
+                            mutableStateOf(if (m.powerFactorPct == 0.0) "" else m.powerFactorPct.toString())
+                        }
+                        var offsetText by remember(m.deviceNumber) {
+                            mutableStateOf(if (m.powerOffsetW == 0.0) "" else m.powerOffsetW.toString())
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Text(stringResource(R.string.offset_section), style = MaterialTheme.typography.titleSmall)
+                        OutlinedTextField(
+                            value = factorText, modifier = Modifier.fillMaxWidth(),
+                            onValueChange = {
+                                factorText = it
+                                onSetOffset(m, it.toDoubleOrNull() ?: 0.0, offsetText.toDoubleOrNull() ?: 0.0)
+                            },
+                            label = { Text(stringResource(R.string.offset_factor_pct)) },
+                            singleLine = true,
+                        )
+                        OutlinedTextField(
+                            value = offsetText, modifier = Modifier.fillMaxWidth(),
+                            onValueChange = {
+                                offsetText = it
+                                onSetOffset(m, factorText.toDoubleOrNull() ?: 0.0, it.toDoubleOrNull() ?: 0.0)
+                            },
+                            label = { Text(stringResource(R.string.offset_watts)) },
+                            singleLine = true,
+                        )
                     }
                 }
             }
