@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import com.enderthor.kpower.R
 import com.enderthor.kpower.ant.AntDeviceInfo
 import com.enderthor.kpower.ant.SavedMeter
+import com.enderthor.kpower.extension.toDoubleLocale
 
 // Several meters may be SAVED (a garage to switch between), but only ONE may be ACTIVE (enabled) at a
 // time — the active one drives the single set of real-power/dynamics fields and the pm1_* FIT fields.
@@ -180,7 +181,7 @@ fun LazyListScope.antScanItems(
                             value = factorText, modifier = Modifier.fillMaxWidth(),
                             onValueChange = {
                                 factorText = it
-                                onSetOffset(m, it.toDoubleOrNull() ?: 0.0, offsetText.toDoubleOrNull() ?: 0.0)
+                                onSetOffset(m, it.toDoubleLocale(), offsetText.toDoubleLocale())
                             },
                             label = { Text(stringResource(R.string.offset_factor_pct)) },
                             singleLine = true,
@@ -189,7 +190,7 @@ fun LazyListScope.antScanItems(
                             value = offsetText, modifier = Modifier.fillMaxWidth(),
                             onValueChange = {
                                 offsetText = it
-                                onSetOffset(m, factorText.toDoubleOrNull() ?: 0.0, it.toDoubleOrNull() ?: 0.0)
+                                onSetOffset(m, factorText.toDoubleLocale(), it.toDoubleLocale())
                             },
                             label = { Text(stringResource(R.string.offset_watts)) },
                             singleLine = true,
