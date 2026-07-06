@@ -119,6 +119,9 @@
     <string name="section_advanced">Advanced</string>
     <string name="cfg_frontal_area">Frontal Area</string>
     <string name="cfg_power_loss">Power Loss</string>
+    <string name="offset_section">Power offset</string>
+    <string name="offset_factor_pct">Factor (%)</string>
+    <string name="offset_watts">Offset (W)</string>
     <string name="use_karoo_temp_label">Use Karoo temperature sensor as fallback?</string>
     <string name="ignore_low_cadence_label">Ignore low cadence (always calculate power)?</string>
     <string name="btn_save">Save</string>
