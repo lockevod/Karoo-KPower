@@ -160,6 +160,11 @@ data class ConfigData(
     // Unit Headwind emits wind in (default AUTO = Karoo units). Lets KPower convert to m/s correctly
     // if the rider changed Headwind's wind unit. Retrocompat: legacy JSON → AUTO.
     val headwindWindUnit: HeadwindWindUnit = HeadwindWindUnit.AUTO,
+    // Manual power correction for the ESTIMATED source (this bike): P_out = max(0, P·(1+pct/100)+W).
+    // String like the other numeric fields (locale-aware via toDoubleLocale). Defaults "0.0"/"0.0" =
+    // identity, so legacy JSON is unchanged. See docs/superpowers/specs/2026-07-06-power-offset-design.md
+    val estPowerFactorPct: String = "0.0",
+    val estPowerOffsetW: String = "0.0",
 )
 
 // Curated, sunlight-readable dot colours for the bikes list: vivid, high-contrast hues spaced

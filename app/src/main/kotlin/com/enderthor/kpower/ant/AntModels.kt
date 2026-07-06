@@ -22,6 +22,10 @@ data class SavedMeter(
     val slot: Int,
     val enabled: Boolean = true,
     val userNamed: Boolean = false,
+    // Manual power correction for THIS real meter: P_out = max(0, P·(1+powerFactorPct/100)+powerOffsetW).
+    // Defaults 0.0/0.0 = identity, so legacy JSON is unchanged.
+    val powerFactorPct: Double = 0.0,
+    val powerOffsetW: Double = 0.0,
 )
 
 /** True when [label] is an auto/placeholder name (empty, the bare device number, "Device: N",
