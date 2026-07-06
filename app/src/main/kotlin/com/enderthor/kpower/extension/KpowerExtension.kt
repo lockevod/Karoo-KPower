@@ -228,7 +228,7 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
         // ride (the extension process may be killed at ride end).
         engine.realPowerProvider = {
             val dn = savedMetersSnapshot.firstOrNull { it.enabled }?.deviceNumber
-            if (dn != null) antManager.meter(dn)?.power?.value ?: Double.NaN else Double.NaN
+            if (dn != null) antManager.powerFlow(dn).value else Double.NaN
         }
         // Field calibration is a DEV tuning aid: the fitted CdA + per-surface Crr (with ± std error) are
         // written to the DIAGNOSTIC LOG so they can be analysed offline to refine the model coefficients.
@@ -271,7 +271,7 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
         // Keep a snapshot of saved meters so connectDevice() (non-suspend, binder thread) can resolve
         // a meter's friendly label for the reconnect Device name.
         serviceScope.launch {
-            sharedMeters.collect { savedMetersSnapshot = it }
+            sharedMeters.collect { savedMetersSnapshot = it; antManager.setMeterOffsets(it) }
         }
 
         // Brand auto-detect: once a connected meter reports its manufacturer (0x50 page), fill in the
@@ -825,7 +825,7 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                     // into the same record fields (the host keeps one → corrupt FIT).
                     metersSnapshot.firstOrNull { it.enabled }?.let { m ->
                         val reader = antManager.meter(m.deviceNumber)
-                        val pw = reader?.power?.value ?: Double.NaN
+                        val pw = antManager.powerFlow(m.deviceNumber).value
                         val cad = reader?.cadence?.value ?: Double.NaN
                         val bal = reader?.balanceRightPct?.value ?: Double.NaN
                         val tq = reader?.torque?.value ?: Double.NaN

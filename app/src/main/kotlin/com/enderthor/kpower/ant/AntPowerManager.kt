@@ -42,6 +42,21 @@ class AntPowerManager(private val context: Context) {
     private val cadenceFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
     private val power3sFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
     private val npFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
+
+    // Per-device manual power offset (factorPct, offsetW), pushed from the saved-meter list by the
+    // extension whenever it changes. Empty / missing device → identity. Read on every ingested sample.
+    @Volatile private var meterOffsets: Map<Int, Pair<Double, Double>> = emptyMap()
+
+    /** Refresh the per-meter power offsets from the current saved-meter list (identity for any not listed). */
+    fun setMeterOffsets(meters: List<SavedMeter>) {
+        meterOffsets = meters.associate { it.deviceNumber to (it.powerFactorPct to it.powerOffsetW) }
+    }
+
+    /** The device's manual-corrected power (identity when it has no offset entry). */
+    private fun correctedPower(dn: Int, raw: Double): Double {
+        val off = meterOffsets[dn] ?: return raw
+        return com.enderthor.kpower.vdevice.applyPowerOffset(raw, off.first, off.second)
+    }
     // NOTE: torque / avg-torque / max-torque / TE-PS flows were removed — the Karoo shows all of those
     // natively (DataType.Type), so KPower has no on-screen field for them; they reach the FIT straight
     // from the live reader (reader.torque / reader.tePs), not via a manager flow.
@@ -234,7 +249,7 @@ class AntPowerManager(private val context: Context) {
         val batterySink = batteryFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(null) }
         bridges[dn] = scope.launch {
             // mirror power + cadence into the stable sinks (re-binds the NEW meter on reconnect)
-            launch { m.power.collect { sink.value = it } }
+            launch { m.power.collect { sink.value = correctedPower(dn, it) } }
             launch { m.cadence.collect { cadenceSink.value = it } }
             // torque / TE-PS / balance / power-phase are NOT mirrored to flows (no on-screen field — the
             // Karoo shows them natively); they reach the FIT straight from the live reader in startFit.
@@ -251,7 +266,7 @@ class AntPowerManager(private val context: Context) {
                 kotlinx.coroutines.delay(1_000)
                 m.expireIfStale(System.currentTimeMillis())
                 if (m.consumePendingReset()) m.metrics.reset()
-                m.metrics.tick(m.power.value, recording)
+                m.metrics.tick(correctedPower(dn, m.power.value), recording)
                 // 3s is a live rolling average: blank it when power is stale (NaN) so the
                 // field goes `---` on a dropout instead of freezing. NP is a session aggregate
                 // and holds its last accumulated value.
