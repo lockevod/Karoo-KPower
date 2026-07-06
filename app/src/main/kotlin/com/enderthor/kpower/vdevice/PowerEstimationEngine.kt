@@ -338,7 +338,13 @@ class PowerEstimationEngine(
                     // A previous `if (!moving) 0.0` here ALSO zeroed power on slow climbs / GPS dropouts and
                     // overrode the force-power toggle; gating only inside the estimator fixes all three.
                     val rawSigned = est.calculateCyclingWattage()
-                    val instantW = maxOf(0.0, rawSigned)
+                    // Manual per-bike correction of the estimate (identity when both are 0). Applied to the
+                    // floored value so the recorded/broadcast/NP watts all reflect it (single choke point).
+                    val instantW = applyPowerOffset(
+                        maxOf(0.0, rawSigned),
+                        config.estPowerFactorPct.toDoubleLocale(),
+                        config.estPowerOffsetW.toDoubleLocale(),
+                    )
                     // Field calibration: while recording with a real meter present, accumulate the
                     // CdA + per-surface-Crr least-squares regression of REAL power vs the model regressors.
                     if (recording) realPowerProvider?.invoke()?.let { rp ->
