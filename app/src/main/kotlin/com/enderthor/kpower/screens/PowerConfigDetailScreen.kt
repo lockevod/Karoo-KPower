@@ -79,6 +79,8 @@ fun DetailScreen(configdata: ConfigData, onUpdate: (ConfigData) -> Unit, onDelet
     var useRouteSurface by remember(configdata.id) { mutableStateOf(configdata.useRouteSurface) }
     var karooProfileId by remember(configdata.id) { mutableStateOf(configdata.karooProfileId) }
     var dotColor by remember(configdata.id) { mutableStateOf(configdata.dotColorArgb) }
+    var estPowerFactorPct by remember(configdata.id) { mutableStateOf(configdata.estPowerFactorPct) }
+    var estPowerOffsetW by remember(configdata.id) { mutableStateOf(configdata.estPowerOffsetW) }
     val headwindInstalled = remember { ctx.isHeadwindInstalled() }
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
@@ -141,6 +143,8 @@ fun DetailScreen(configdata: ConfigData, onUpdate: (ConfigData) -> Unit, onDelet
         karooProfileId = karooProfileId,
         dotColorArgb = dotColor,
         headwindWindUnit = headwindWindUnit,
+        estPowerFactorPct = estPowerFactorPct,
+        estPowerOffsetW = estPowerOffsetW,
         )
     }
 
@@ -424,6 +428,21 @@ fun DetailScreen(configdata: ConfigData, onUpdate: (ConfigData) -> Unit, onDelet
                     suffix = { Text("%") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true
+                )
+
+                Spacer(Modifier.height(12.dp))
+                Text(stringResource(R.string.offset_section), style = MaterialTheme.typography.titleSmall)
+                OutlinedTextField(
+                    value = estPowerFactorPct, modifier = Modifier.fillMaxWidth(),
+                    onValueChange = { estPowerFactorPct = it },
+                    label = { Text(stringResource(R.string.offset_factor_pct)) },
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = estPowerOffsetW, modifier = Modifier.fillMaxWidth(),
+                    onValueChange = { estPowerOffsetW = it },
+                    label = { Text(stringResource(R.string.offset_watts)) },
+                    singleLine = true,
                 )
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
