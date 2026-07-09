@@ -120,6 +120,7 @@
     <string name="cfg_frontal_area">Área frontal</string>
     <string name="cfg_power_loss">Pérdida de potencia</string>
     <string name="offset_section">Ajuste de potencia</string>
+    <string name="offset_formula_hint">Corregida = P × (1 + Factor/100) + Offset. Deja ambos a 0 para no aplicar nada.</string>
     <string name="offset_factor_pct">Factor (%)</string>
     <string name="offset_watts">Offset (W)</string>
     <string name="use_karoo_temp_label">¿Usar el sensor de temperatura del Karoo como respaldo?</string>

@@ -19,6 +19,17 @@ Pick what you know; the app derives the rest:
   the estimate and to scale the power cap.
 - **Bike weight** (kg) — bike + gear.
 
+## Power offset (both modes)
+
+A manual correction of the estimated power, for when you've compared it against a real meter and want
+to nudge it: **Corrected = P × (1 + Factor/100) + Offset**.
+
+- **Factor (%)** — scales the whole curve. `-5` = 5 % lower everywhere; `0` = no scaling.
+- **Offset (W)** — a flat shift. `+10` = 10 W added everywhere; `0` = no shift.
+
+Leave both at **0** (the default) for no change. The result is floored at 0 W. Shown in Simple and
+Advanced mode.
+
 ## Advanced mode
 
 Type the physics values directly (preset/height/tyre inputs are hidden so nothing recalculates):

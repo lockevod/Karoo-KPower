@@ -120,6 +120,7 @@
     <string name="cfg_frontal_area">Frontal Area</string>
     <string name="cfg_power_loss">Power Loss</string>
     <string name="offset_section">Power offset</string>
+    <string name="offset_formula_hint">Corrected = P × (1 + Factor/100) + Offset. Leave both 0 for no change.</string>
     <string name="offset_factor_pct">Factor (%)</string>
     <string name="offset_watts">Offset (W)</string>
     <string name="use_karoo_temp_label">Use Karoo temperature sensor as fallback?</string>

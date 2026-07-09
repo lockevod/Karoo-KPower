@@ -29,6 +29,8 @@ KPower puede funcionar en paralelo y enriquecer el FIT grabado.
 2. Empareja el medidor **nativo** en tu perfil de ruta (el Karoo muestra potencia, cadencia, balance, eficacia del par, suavidad y par).
 3. Añade **Est. Power / 3s / NP** para ver el estimado junto a la potencia nativa.
 4. Activa **“Grabar estimada (FIT)”** para comparar luego en [intervals.icu](https://intervals.icu).
+5. ¿Ves un sesgo constante frente al medidor real? Ajústalo en **Ajuste de potencia** (Factor % y/o
+   Offset W): `Corregida = P × (1 + Factor/100) + Offset`. A 0 no toca nada. Está en modo simple y avanzado.
 
 **3) Dos medidores a la vez (A vs B)**
 El Karoo graba **una** fuente de potencia: empareja **A nativo** y **activa B en KPower**. Los campos

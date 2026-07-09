@@ -65,7 +65,7 @@ then `adb install app-release.apk`.
 
 ## Settings
 
-Two tabs: **Estimator** (your bikes — weight, tyres, aero, FTP; Simple or Advanced mode) and
+Two tabs: **Estimator** (your bikes — weight, tyres, aero, FTP, power offset; Simple or Advanced mode) and
 **Real meter** (add/enable a real ANT+ meter, battery alert, “log estimate to FIT”, diagnostics).
 Full reference: **[docs/configuration.md](docs/configuration.md)** ·
 real meter & FIT: **[docs/real-meter-and-fit.md](docs/real-meter-and-fit.md)**.

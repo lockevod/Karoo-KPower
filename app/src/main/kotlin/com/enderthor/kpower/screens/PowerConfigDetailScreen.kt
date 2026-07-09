@@ -397,6 +397,30 @@ fun DetailScreen(configdata: ConfigData, onUpdate: (ConfigData) -> Unit, onDelet
             // Weather provider is Open-Meteo (free, no API key) — no provider/key controls needed.
             // (Field calibration is a DEV tuning aid written to the diagnostic log, not a UI feature.)
 
+            // Manual estimate correction — shown in BOTH simple and advanced (it's not an advanced-only
+            // coefficient, it's a user-facing tweak). Both 0 = identity (see PowerOffset.applyPowerOffset).
+            Spacer(Modifier.height(12.dp))
+            Text(stringResource(R.string.offset_section), style = MaterialTheme.typography.titleSmall)
+            Text(
+                text = stringResource(R.string.offset_formula_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = estPowerFactorPct, modifier = Modifier.weight(1f),
+                    onValueChange = { estPowerFactorPct = it },
+                    label = { Text(stringResource(R.string.offset_factor_pct)) },
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = estPowerOffsetW, modifier = Modifier.weight(1f),
+                    onValueChange = { estPowerOffsetW = it },
+                    label = { Text(stringResource(R.string.offset_watts)) },
+                    singleLine = true,
+                )
+            }
+
             if (!simpleMode) {
                 Text(stringResource(R.string.section_advanced), style = MaterialTheme.typography.titleSmall)
 
@@ -428,21 +452,6 @@ fun DetailScreen(configdata: ConfigData, onUpdate: (ConfigData) -> Unit, onDelet
                     suffix = { Text("%") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true
-                )
-
-                Spacer(Modifier.height(12.dp))
-                Text(stringResource(R.string.offset_section), style = MaterialTheme.typography.titleSmall)
-                OutlinedTextField(
-                    value = estPowerFactorPct, modifier = Modifier.fillMaxWidth(),
-                    onValueChange = { estPowerFactorPct = it },
-                    label = { Text(stringResource(R.string.offset_factor_pct)) },
-                    singleLine = true,
-                )
-                OutlinedTextField(
-                    value = estPowerOffsetW, modifier = Modifier.fillMaxWidth(),
-                    onValueChange = { estPowerOffsetW = it },
-                    label = { Text(stringResource(R.string.offset_watts)) },
-                    singleLine = true,
                 )
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
