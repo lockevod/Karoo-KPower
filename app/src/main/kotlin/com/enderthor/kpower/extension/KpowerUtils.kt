@@ -19,3 +19,11 @@ fun StreamState?.getValueOrDefault(): Double {
  */
 fun String.toDoubleLocale(): Double =
     trim().replace(',', '.').toDoubleOrNull()?.takeIf { it.isFinite() } ?: 0.0
+
+/**
+ * Inverse of [toDoubleLocale] for editable fields: render a Double using the current locale's
+ * decimal separator, so a comma-locale user reopening the panel sees "1,5" (what they typed),
+ * not "1.5". Just swaps the separator on Double.toString() — no rounding, no forced decimals.
+ */
+fun Double.toStringLocale(): String =
+    toString().replace('.', java.text.DecimalFormatSymbols.getInstance().decimalSeparator)

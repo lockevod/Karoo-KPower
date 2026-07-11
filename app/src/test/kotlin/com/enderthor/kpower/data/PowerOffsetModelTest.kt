@@ -1,6 +1,9 @@
 package com.enderthor.kpower.data
 
 import com.enderthor.kpower.ant.SavedMeter
+import com.enderthor.kpower.extension.toDoubleLocale
+import com.enderthor.kpower.extension.toStringLocale
+import com.enderthor.kpower.vdevice.applyPowerOffset
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
@@ -39,5 +42,29 @@ class PowerOffsetModelTest {
         val back = json.decodeFromString<SavedMeter>(json.encodeToString(m))
         assertEquals(2.0, back.powerFactorPct, 1e-9)
         assertEquals(5.0, back.powerOffsetW, 1e-9)
+    }
+
+    // End-to-end simulation of the ESTIMATED path (PowerEstimationEngine:343): the config stores
+    // offset as STRINGS, parsed with toDoubleLocale at ride time. A comma-decimal (ES) user typing
+    // "3,5" / "-6,0" must produce the same correction as a dot-locale "3.5" / "-6.0".
+    @Test fun estimated_offset_simulation_comma_and_dot_locale() {
+        val c = ConfigData(0, "B", true, "14.0", "0.008", "0.85", "0.42", "2.5", "0.0", "257")
+        // 200 W raw estimate, +3.5% slope, -6 W zero-bias  ->  200*1.035 - 6 = 201.0
+        val comma = c.copy(estPowerFactorPct = "3,5", estPowerOffsetW = "-6,0")
+        val dot   = c.copy(estPowerFactorPct = "3.5", estPowerOffsetW = "-6.0")
+        val expected = 201.0
+        assertEquals(expected, applyPowerOffset(200.0,
+            comma.estPowerFactorPct.toDoubleLocale(), comma.estPowerOffsetW.toDoubleLocale()), 1e-9)
+        assertEquals(expected, applyPowerOffset(200.0,
+            dot.estPowerFactorPct.toDoubleLocale(), dot.estPowerOffsetW.toDoubleLocale()), 1e-9)
+    }
+
+    // The saved-meter panel displays the stored Double via toStringLocale and re-parses it via
+    // toDoubleLocale on edit. That round-trip must be lossless regardless of the JVM locale's
+    // decimal separator (a comma-locale user must not see their -6.0 turn into 0 or -60).
+    @Test fun meter_offset_display_reparse_round_trips() {
+        for (v in listOf(2.0, -6.0, 3.5, -0.25, 100.0)) {
+            assertEquals(v, v.toStringLocale().toDoubleLocale(), 1e-9)
+        }
     }
 }

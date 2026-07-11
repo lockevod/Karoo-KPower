@@ -32,6 +32,7 @@ import com.enderthor.kpower.R
 import com.enderthor.kpower.ant.AntDeviceInfo
 import com.enderthor.kpower.ant.SavedMeter
 import com.enderthor.kpower.extension.toDoubleLocale
+import com.enderthor.kpower.extension.toStringLocale
 
 // Several meters may be SAVED (a garage to switch between), but only ONE may be ACTIVE (enabled) at a
 // time — the active one drives the single set of real-power/dynamics fields and the pm1_* FIT fields.
@@ -170,31 +171,38 @@ fun LazyListScope.antScanItems(
                             Text(stringResource(R.string.btn_calibrate))
                         }
                         var factorText by remember(m.deviceNumber) {
-                            mutableStateOf(if (m.powerFactorPct == 0.0) "" else m.powerFactorPct.toString())
+                            mutableStateOf(if (m.powerFactorPct == 0.0) "" else m.powerFactorPct.toStringLocale())
                         }
                         var offsetText by remember(m.deviceNumber) {
-                            mutableStateOf(if (m.powerOffsetW == 0.0) "" else m.powerOffsetW.toString())
+                            mutableStateOf(if (m.powerOffsetW == 0.0) "" else m.powerOffsetW.toStringLocale())
                         }
                         Spacer(Modifier.height(8.dp))
                         Text(stringResource(R.string.offset_section), style = MaterialTheme.typography.titleSmall)
-                        OutlinedTextField(
-                            value = factorText, modifier = Modifier.fillMaxWidth(),
-                            onValueChange = {
-                                factorText = it
-                                onSetOffset(m, it.toDoubleLocale(), offsetText.toDoubleLocale())
-                            },
-                            label = { Text(stringResource(R.string.offset_factor_pct)) },
-                            singleLine = true,
+                        Text(
+                            text = stringResource(R.string.offset_formula_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        OutlinedTextField(
-                            value = offsetText, modifier = Modifier.fillMaxWidth(),
-                            onValueChange = {
-                                offsetText = it
-                                onSetOffset(m, factorText.toDoubleLocale(), it.toDoubleLocale())
-                            },
-                            label = { Text(stringResource(R.string.offset_watts)) },
-                            singleLine = true,
-                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = factorText, modifier = Modifier.weight(1f),
+                                onValueChange = {
+                                    factorText = it
+                                    onSetOffset(m, it.toDoubleLocale(), offsetText.toDoubleLocale())
+                                },
+                                label = { Text(stringResource(R.string.offset_factor_pct)) },
+                                singleLine = true,
+                            )
+                            OutlinedTextField(
+                                value = offsetText, modifier = Modifier.weight(1f),
+                                onValueChange = {
+                                    offsetText = it
+                                    onSetOffset(m, factorText.toDoubleLocale(), it.toDoubleLocale())
+                                },
+                                label = { Text(stringResource(R.string.offset_watts)) },
+                                singleLine = true,
+                            )
+                        }
                     }
                 }
             }
