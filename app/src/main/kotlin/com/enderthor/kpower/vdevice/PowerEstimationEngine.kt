@@ -108,7 +108,26 @@ class PowerEstimationEngine(
     }
 
     private val accelerationTracker = AccelerationTracker()
-    private val gradeSmoother = GradeSmoother()
+    // Fuente PRIMARIA de pendiente: derivada del stream de ALTITUD (fresco), no del `grade` del Karoo
+    // (retrasado ~6 s). Validado sobre FIT: corr 0,60→0,82, retardo 8→2 s — ver
+    // docs/superpowers/specs/2026-07-12-estimator-grade-dynamics-design.md (Fase 1).
+    private val altitudeGradeDeriver = AltitudeGradeDeriver()
+    // Sobre esa pendiente (ya fresca) aplica un lead ligero para afinar el residual. leadSeconds=2 fue
+    // el óptimo con grade-de-altitud (con el grade retrasado del Karoo hacía falta 4).
+    private val gradeCompensator = GradeLeadCompensator(tauMs = 1_000.0, leadSeconds = 2.0)
+    @Volatile private var lastGradeLogMs = 0L
+
+    // Fase 2 (C): pendiente desde el perfil de elevación de la RUTA navegada — retardo ~0 y sin ruido de
+    // altitud. Estado de ruta poblado por colectores aparte (OnNavigationState + DISTANCE_TO_DESTINATION),
+    // leído en el tick. Sobre el grade de ruta solo un EMA corto (sin lead: la fuente ya es instantánea).
+    @Volatile private var routeProfile: RouteElevationProfile? = null
+    @Volatile private var routeDistanceM = 0.0
+    @Volatile private var routeRejoinM: Double? = null
+    @Volatile private var distToDestM = Double.NaN
+    @Volatile private var onRoute = false
+    // maxDtMs corto: un hueco off-route real (>3 s) re-siembra el EMA con el grade de ruta fresco al
+    // volver, en vez de mezclarlo con uno viejo de otra posición (revisión adversarial #2).
+    private val routeGradeSmoother = GradeSmoother(tauMs = 1_000.0, maxDtMs = 3_000L)
     // Last good grade %/elevation m, held across stream dropouts (a missing stream != 0% / sea level).
     @Volatile private var lastGoodSlope = 0.0
     @Volatile private var lastGoodElevation = 0.0
@@ -249,6 +268,46 @@ class PowerEstimationEngine(
                 }
             }
 
+            // Fase 2 (C): ruta navegada. Decodifica el perfil de elevación al cambiar de ruta y mantiene el
+            // estado (distancia total + rejoin). Idle / navegación a destino (sin ruta) → limpia el perfil.
+            launch {
+                karooSystem.consumerFlow<io.hammerhead.karooext.models.OnNavigationState>().collect { nav ->
+                    when (val s = nav.state) {
+                        is io.hammerhead.karooext.models.OnNavigationState.NavigationState.NavigatingRoute -> {
+                            val decoded = RouteElevationProfile.fromPolyline(s.routeElevationPolyline)
+                            // Guarda del eje de distancia: el perfil solo es fiable si su span de distancia
+                            // (metros) casa con routeDistance. Si difiere mucho (eje normalizado/resampleado
+                            // distinto), NO lo usamos → cae a la pendiente de altitud, no a potencia errónea.
+                            val axisOk = decoded != null && s.routeDistance > 0.0 &&
+                                kotlin.math.abs(decoded.totalDistanceM - s.routeDistance) <=
+                                    maxOf(200.0, 0.1 * s.routeDistance)
+                            // Ruta INVERTIDA: no podemos saber sin datos de campo si la polilínea de elevación
+                            // viene en orden de marcha o de definición → desactivamos el grade de ruta (seguro;
+                            // la altitud no depende de la orientación). Revisar cuando validemos en dispositivo.
+                            routeProfile = if (axisOk && !s.reversed) decoded else null
+                            routeDistanceM = s.routeDistance
+                            routeRejoinM = s.rejoinDistance
+                            if (FileLogTree.enabled && decoded != null && routeProfile == null)
+                                Timber.tag("GRADE").d(
+                                    "route profile dropped: axisOk=%b reversed=%b total=%.0f routeDist=%.0f",
+                                    axisOk, s.reversed, decoded.totalDistanceM, s.routeDistance
+                                )
+                        }
+                        else -> { routeProfile = null; routeDistanceM = 0.0; routeRejoinM = null }
+                    }
+                }
+            }
+            // Distancia al destino + on-route (por tick). Con routeDistance → distancia recorrida en ruta.
+            launch {
+                karooSystem.streamDataFlow(DataType.Type.DISTANCE_TO_DESTINATION).collect { st ->
+                    if (st is StreamState.Streaming) {
+                        val v = st.dataPoint.values
+                        distToDestM = v[DataType.Field.DISTANCE_TO_DESTINATION] ?: Double.NaN
+                        onRoute = (v[DataType.Field.ON_ROUTE] ?: 0.0) > 0.5
+                    } else onRoute = false
+                }
+            }
+
             combine(
                 karooSystem.speedStreamWithStaleness(),
                 karooSystem.streamDataMonitorFlow(DataType.Type.ELEVATION_GRADE),
@@ -314,10 +373,50 @@ class PowerEstimationEngine(
                         // tunnel/GPS outage would over-estimate); after the bound, fall back to flat.
                         lastGoodSlope = 0.0
                     }
-                    val slopePercent = gradeSmoother.update(lastGoodSlope, nowMs)
                     val elevStream = bundle.values.elevation
                     if (elevStream is StreamState.Streaming) lastGoodElevation = elevStream.getValueOrDefault()
                     val heldElevation = lastGoodElevation
+                    // Prioridad de pendiente: RUTA (C, retardo ~0) > ALTITUD (Fase 1, fresca) > grade del
+                    // Karoo (retrasado, último recurso). El grade de ruta va por un EMA corto (sin lead, ya
+                    // es instantáneo); altitud/Karoo por el compensador con lead.
+                    val altGrade = if (elevStream is StreamState.Streaming)
+                        altitudeGradeDeriver.update(speedMs, heldElevation, nowMs) else null
+                    val routePos = if (onRoute) RoutePositionTracker.distanceAlong(
+                        routeDistanceM, distToDestM, onRoute, routeRejoinM
+                    ) else null
+                    // Reescala la posición (frame de routeDistance del Karoo) al eje del perfil: el guard
+                    // solo garantiza que los totales casan ~±10%, así que sin reescalar la MISMA posición
+                    // física caería en una fracción distinta del perfil → grade en el punto equivocado
+                    // (revisión adversarial #1). Con reescala proporcional el grade se lee donde toca.
+                    val routeGrade = if (routePos != null && routeDistanceM > 0.0) {
+                        val prof = routeProfile
+                        prof?.gradeAt(routePos * prof.totalDistanceM / routeDistanceM)
+                    } else null
+                    // Alimenta SIEMPRE el compensador (aunque usemos ruta) para que su EMA/derivada no se
+                    // enfríen y disparen un pico de lead al volver a altitud/Karoo tras un tramo en ruta
+                    // (revisión adversarial #3). Solo usamos su salida cuando no hay grade de ruta.
+                    val compensated = gradeCompensator.update(altGrade ?: lastGoodSlope, nowMs)
+                    val slopePercent: Double
+                    val gradeSrc: String
+                    if (routeGrade != null) {
+                        slopePercent = routeGradeSmoother.update(routeGrade, nowMs)
+                        gradeSrc = "route"
+                    } else {
+                        slopePercent = compensated
+                        gradeSrc = if (altGrade != null) "alt" else "karoo"
+                    }
+                    // Diagnostic (throttled, only when the rider enabled file logging): compares the grade
+                    // sources so freshness can be verified offline (same method as the SURFACE log). This is
+                    // the on-device check for both the altitude stream (Fase 1) and route grade (Fase 2).
+                    if (FileLogTree.enabled && nowMs - lastGradeLogMs >= 3_000L) {
+                        lastGradeLogMs = nowMs
+                        Timber.tag("GRADE").d(
+                            "route=%s alt=%s karoo=%.1f used=%.1f src=%s elev=%.0f v=%.1f",
+                            routeGrade?.let { "%.1f".format(it) } ?: "—",
+                            altGrade?.let { "%.1f".format(it) } ?: "—",
+                            lastGoodSlope, slopePercent, gradeSrc, heldElevation, speedMs
+                        )
+                    }
                     val tempC: Double? = bundle.weatherTempC ?: run {
                         if (config.useKarooTemp && bundle.karooTemp is StreamState.Streaming)
                             bundle.karooTemp.getValueOrDefault() - KAROO_TEMP_SENSOR_BIAS_C else null
@@ -399,6 +498,8 @@ class PowerEstimationEngine(
         // Drop held grade/elevation so an acquire→release→acquire within one process doesn't resume
         // with a stale grade if the first sample after re-acquire is a dropout.
         lastGoodSlope = 0.0; lastGoodElevation = 0.0; lastSlopeMs = 0L
+        // Drop route state too (a stale profile/position must not drive grade after a re-acquire).
+        routeProfile = null; routeDistanceM = 0.0; routeRejoinM = null; distToDestM = Double.NaN; onRoute = false
     }
 
     private fun calculatePowerBike(

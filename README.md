@@ -33,25 +33,16 @@ Plus **auto-naming** (brand + model), **battery level & low-battery alert**, and
 
 > Power is an **estimation**, not a measurement — the parameters matter. Setup: **[docs/configuration.md](docs/configuration.md)**.
 
-## Quick start — which setup is mine?
+## Quick start
 
-| Your case | Pair as Karoo power | KPower on-screen fields you'd add |
-|---|---|---|
-| **No power meter** | **KPW Estimated** | none needed (Karoo shows power/NP natively); optional Est. Power / 3s / NP |
-| **Real meter, want the estimate too (compare)** | the real meter (native) | Est. Power / 3s / NP |
-| **Two meters at once** | meter A (native) | Real Power / 3s / NP (shows the 2nd meter) |
-| **Real meter, want the FIT extras** | the real meter (native) | none — the Karoo shows the dynamics; KPower just enriches the FIT |
+New here? Pick your setup in the quick guide:
+**🇬🇧 [Quick start](docs/quick-start.md)** · **🇪🇸 [Guía rápida](docs/guia-rapida.md)**
 
-Steps:
-1. **No meter:** *Estimator* tab → **+** → fill the bike → on the Karoo pair **“KPW Estimated”** as power. Ride.
-2. **Real meter:** *Real meter* tab → **Scan → Add → Enable** → pair the meter **natively** in your ride
-   profile (the Karoo then shows power, cadence, balance, TE, PS, torque). KPower reads it in parallel to
-   write the FIT extras. Turn on **“Log estimated power (FIT)”** if you want to compare estimate vs real.
-
-> **The Karoo already shows balance / torque effectiveness / pedal smoothness / torque natively** for a
-> natively-paired meter, so KPower no longer duplicates them as on-screen fields. KPower's unique
-> contribution with a real meter is in the **FIT** (torque, power phase, PCO, barycenter) — see
-> [docs/real-meter-and-fit.md](docs/real-meter-and-fit.md).
+> **Heads-up — the ANT+ rule:** a meter **can't** be read over ANT+ by the Karoo and KPower at the same
+> time (they share the one ANT+ radio; whichever locks it first keeps it). To use both, pair the meter to
+> the Karoo over **BLE** (ANT+ stays free for KPower), or pick one. All valid pairing combinations —
+> including how to get your **offset** into the recording — are in the quick guide and
+> **[docs/real-meter-and-fit.md](docs/real-meter-and-fit.md#how-to-pair-the-power-source--and-the-ant-rule)**.
 
 ## Install (sideload)
 

@@ -14,17 +14,49 @@ optional — if you only want the estimate, ignore this page.
 - Battery and brand arrive on slow ANT+ pages and only while the meter is awake — they can show “?” for
   a few seconds, and not at all while a scan is running.
 
-## How to pair the power source
+## How to pair the power source — and the ANT+ rule
 
-The Karoo records **one** power source. Choose how the meter feeds it:
+The Karoo records **one** power source. But read this constraint first, because it decides which setups
+are even possible:
 
-- **Native pairing (recommended):** pair the meter directly in your **ride profile → sensors**. The
-  Karoo then records power + cadence **and shows/records the cycling dynamics it understands**
-  (see below). KPower reads the same broadcast in parallel to add the FIT extras. **Don't also pair
-  KPower's “KPW …” sensor** — that would record power twice.
-- **KPW virtual:** pair KPower's **“KPW &lt;brand model&gt;”** instead. Then KPower is the power source.
-  A virtual sensor can only carry **power + cadence**, so the Karoo gets **no dynamics** this way — and
-  KPower's FIT dev fields become the only place balance/TE/PS/torque are recorded.
+> **A meter can't be read over ANT+ by BOTH the Karoo and KPower at the same time.** They share the one
+> ANT+ radio; whichever channel locks the meter first holds it, and the other silently never connects —
+> you get one or the other, not both. This is a hardware limit (verified on-device), not a bug. The way
+> around it is to put the two on **different radios**: the meter on the Karoo over **BLE**, and KPower
+> over **ANT+**.
+
+Pick the setup that matches what you want:
+
+### 1. Power + the dynamics the Karoo understands (balance/TE/PS) — simplest
+Pair the meter directly in your **ride profile → sensors** (BLE **or** ANT+ — either is fine, since only
+the Karoo reads it). Leave it **disabled** in KPower. The Karoo records power + native dynamics; the
+estimator can still compare (`est_power` vs the native `power`). No KPower ANT+ channel → no conflict.
+
+### 2. Also want KPower's extra dynamics (torque, power phase, PCO, barycenter)? — the "split"
+Pair the meter to the Karoo **over BLE**, **and** enable it in KPower (KPower reads over ANT+). BLE for
+the Karoo + ANT+ for KPower = **different radios**, so they coexist: the Karoo records power + native
+dynamics, and KPower adds torque / power-phase / PCO / barycenter as FIT developer fields.
+**Needs a dual-band (ANT+ & BLE) meter.**
+
+### 3. Want your **offset** (%/W) applied to the recorded power?
+Pair the meter in **KPower only** (ANT+) and pair **“KPW &lt;brand model&gt;”** as the Karoo's power
+source — do **not** pair the meter to the Karoo. KPower applies the offset and re-broadcasts, so the
+Karoo records the **corrected** power. A virtual sensor carries only **power + cadence**, so the Karoo
+gets **no native dynamics** — but KPower's dev fields then record **all** of them (including the exotics).
+This is the one thing the split (setup 2) can't give you: in the split the Karoo records the meter **raw**,
+so the offset never reaches the recording.
+
+### 4. Estimate only
+Pair **KPW Estimated**. No real meter involved.
+
+### ANT+-only meter (no BLE)? You must pick one
+You can't have the Karoo **and** KPower on it (that's the conflict above). Choose:
+- **Karoo reads it** (setup 1): native power + native dynamics; **no** KPower extras, **no** offset.
+- **KPower reads it** (setup 3, KPW virtual as the Karoo's source): power **with offset** + KPower's
+  **full** dynamics as dev fields; but the Karoo's power is the virtual and there are **no** native dynamics.
+
+**Never** pair the meter natively **and** enable it in KPower over ANT+ at once — one channel will
+silently win and the other goes dark.
 
 ## What the Karoo records natively (native pairing)
 
@@ -40,8 +72,11 @@ It shows **torque / avg torque / max torque** live too — but does **not** writ
 (there's no standard FIT torque record field). It does **not** record power phase, PCO or torque
 barycenter at all.
 
-So KPower has **no on-screen field** for balance/TE/PS/torque — the Karoo already shows them. KPower's
-value with a real meter is in the **FIT**.
+So with a natively-paired meter KPower needs **no on-screen field** for TE/PS/torque — the Karoo shows
+them; its value is in the **FIT**. The **exception is a Balance L/R field** (instant + a power-weighted
+session average): it's provided on-screen because with a **KPW-virtual (offset) source** the Karoo shows
+**no** native dynamics, so KPower's field is the only live balance view. With a native meter it's
+redundant (just don't add it). The instant field blanks (`--`) when you're not producing power.
 
 ## What KPower writes to the FIT
 

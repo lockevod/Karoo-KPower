@@ -27,3 +27,14 @@ fun String.toDoubleLocale(): Double =
  */
 fun Double.toStringLocale(): String =
     toString().replace('.', java.text.DecimalFormatSymbols.getInstance().decimalSeparator)
+
+/**
+ * Keep only what makes a signed integer: an optional leading '-' plus digits. Everything else
+ * (dots, commas, letters, extra signs) is dropped as the rider types, so the offset fields accept
+ * only whole positive/negative numbers regardless of what the soft keyboard offers. "" and "-" are
+ * valid intermediate states (rider mid-typing) and parse to 0.0 via [toDoubleLocale].
+ */
+fun signedIntFilter(s: String): String {
+    val sign = if (s.startsWith('-')) "-" else ""
+    return sign + s.filter { it.isDigit() }
+}

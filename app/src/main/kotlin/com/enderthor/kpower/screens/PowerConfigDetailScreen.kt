@@ -33,6 +33,7 @@ import com.enderthor.kpower.extension.antMetersFlow
 import com.enderthor.kpower.extension.consumerFlow
 import com.enderthor.kpower.extension.isHeadwindInstalled
 import com.enderthor.kpower.extension.knownProfilesFlow
+import com.enderthor.kpower.extension.signedIntFilter
 import com.enderthor.kpower.extension.toDoubleLocale
 import com.enderthor.kpower.vdevice.estimateCrr
 import com.enderthor.kpower.vdevice.estimateFrontalArea
@@ -409,14 +410,16 @@ fun DetailScreen(configdata: ConfigData, onUpdate: (ConfigData) -> Unit, onDelet
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
                     value = estPowerFactorPct, modifier = Modifier.weight(1f),
-                    onValueChange = { estPowerFactorPct = it },
+                    onValueChange = { estPowerFactorPct = signedIntFilter(it) },
                     label = { Text(stringResource(R.string.offset_factor_pct)) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true,
                 )
                 OutlinedTextField(
                     value = estPowerOffsetW, modifier = Modifier.weight(1f),
-                    onValueChange = { estPowerOffsetW = it },
+                    onValueChange = { estPowerOffsetW = signedIntFilter(it) },
                     label = { Text(stringResource(R.string.offset_watts)) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true,
                 )
             }

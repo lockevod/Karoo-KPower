@@ -158,6 +158,102 @@ class GradeSmoother(
 }
 
 /**
+ * Deriva la pendiente desde el stream de ALTITUD (fresco) en vez del `grade` del Karoo (ya suavizado
+ * ~6 s). Validado sobre FIT real: grade desde altitud → corr 0,60→0,82 y retardo 8→2 s (con lead), muy
+ * por encima del lead sobre el grade del Karoo. `grade% = 100·Δaltitud / Σ(velocidad·dt)` sobre una
+ * ventana causal corta — integra la distancia desde la velocidad que el motor ya consume, así que NO
+ * necesita un stream nuevo.
+ *
+ * Devuelve `null` cuando no puede fiarse (poco recorrido: parado / casi parado, o gap de stream) → el
+ * llamante cae al `grade` del Karoo. El coste es algo más de ruido de pendiente (se suaviza con EMA
+ * corto aquí y el lead/EMA de [GradeLeadCompensator] aguas abajo); en llano el ruido pesa más → validar.
+ *
+ * Sin reloj propio (el llamante pasa [nowMs]) → testeable y validable con el arnés offline del FIT.
+ */
+class AltitudeGradeDeriver(
+    private val windowMs: Long = 4_000L,
+    private val minTravelM: Double = 4.0,
+    private val emaTauMs: Double = 2_000.0,
+    private val maxDtMs: Long = 10_000L,
+) {
+    private data class Sample(val ts: Long, val cumDistM: Double, val altM: Double)
+    private val history = ArrayDeque<Sample>()
+    private var cumDistM = 0.0
+    private var prevTs = 0L
+    private var ema = 0.0
+    private var seeded = false
+
+    fun update(speedMs: Double, altitudeM: Double, nowMs: Long): Double? {
+        val dtMs = nowMs - prevTs
+        if (prevTs != 0L && (dtMs <= 0L || dtMs > maxDtMs)) {
+            // Gap / pausa: la distancia integrada y la ventana ya no son continuas → reinicia.
+            history.clear(); seeded = false
+        }
+        // Integra distancia desde la velocidad (deriva despreciable en una ventana de pocos segundos).
+        if (prevTs != 0L && dtMs in 1..maxDtMs) cumDistM += speedMs * (dtMs / 1000.0)
+        prevTs = nowMs
+        history.addLast(Sample(nowMs, cumDistM, altitudeM))
+        while (history.size > 1 && nowMs - history.first().ts > windowMs) history.removeFirst()
+
+        val oldest = history.first()
+        val travel = cumDistM - oldest.cumDistM
+        if (travel < minTravelM) return null            // muy poco recorrido → pendiente no fiable
+        val rawGrade = 100.0 * (altitudeM - oldest.altM) / travel
+        if (!seeded) { ema = rawGrade; seeded = true } else {
+            val alpha = 1.0 - exp(-dtMs / emaTauMs)
+            ema += alpha * (rawGrade - ema)
+        }
+        return ema
+    }
+}
+
+/**
+ * Compensa el retardo del grade barométrico del Karoo (medido en campo: ~5 s del stream del Karoo +
+ * ~3 s del pipeline). Sobre el EMA base ([GradeSmoother]) añade un término LEAD proporcional a la
+ * derivada suavizada del grade: `grade_comp = ema + leadSeconds · d(ema)/dt`. Anticipa los cambios de
+ * rampa sin tocar coeficientes ni física — el error del estimador era de TIMING, no de magnitud.
+ *
+ * - [tauMs] EMA base (1,5 s; el Karoo ya suaviza aguas arriba, no hace falta más).
+ * - [leadSeconds] fuerza del lead (≈4 s = óptimo validado sobre FIT real: corr 0,60→0,71, retardo
+ *   8→5 s, sin penalización de ruido; por encima de ~6 s el ruido empieza a ganar).
+ * - [derivTauMs] la derivada se suaviza fuerte (~3 s) para NO amplificar el ruido de grade.
+ * - [maxLeadPercent] acota el aporte del lead y [maxGradePercent] la salida, para que un salto de grade
+ *   (túnel / pérdida de GPS) no dispare la potencia.
+ * - Gap mayor que [maxDtMs] → re-siembra con el crudo (delega en [GradeSmoother]).
+ *
+ * Sin reloj propio (el llamante pasa [nowMs]) → testeable y validable con el arnés offline del FIT.
+ */
+class GradeLeadCompensator(
+    tauMs: Double = 1_500.0,
+    private val leadSeconds: Double = 4.0,
+    private val derivTauMs: Double = 3_000.0,
+    private val maxGradePercent: Double = 25.0,
+    private val maxLeadPercent: Double = 8.0,
+    private val maxDtMs: Long = 10_000L,
+) {
+    private val base = GradeSmoother(tauMs, maxDtMs)
+    private var prevEma = 0.0
+    private var derivEma = 0.0
+    private var prevTs = 0L
+
+    fun update(gradePercent: Double, nowMs: Long): Double {
+        val ema = base.update(gradePercent, nowMs)
+        val dtMs = nowMs - prevTs
+        if (prevTs == 0L || dtMs <= 0L || dtMs > maxDtMs) {
+            // Primer sample o gap: re-siembra la derivada, sin lead (igual que el EMA base re-sembrado).
+            prevTs = nowMs; prevEma = ema; derivEma = 0.0
+            return ema.coerceIn(-maxGradePercent, maxGradePercent)
+        }
+        val rawDeriv = (ema - prevEma) / (dtMs / 1000.0)     // %/s
+        val alpha = 1.0 - exp(-dtMs / derivTauMs)
+        derivEma += alpha * (rawDeriv - derivEma)
+        prevTs = nowMs; prevEma = ema
+        val lead = (leadSeconds * derivEma).coerceIn(-maxLeadPercent, maxLeadPercent)
+        return (ema + lead).coerceIn(-maxGradePercent, maxGradePercent)
+    }
+}
+
+/**
  * Histéresis del gate de cadencia: pedaleo ON al superar [onRpm], OFF por debajo de
  * [offRpm]. Sustituye el umbral único (<22 rpm → 0 W), que hacía parpadear la potencia
  * entre 0 y el valor completo cuando la cadencia bailaba alrededor del corte.

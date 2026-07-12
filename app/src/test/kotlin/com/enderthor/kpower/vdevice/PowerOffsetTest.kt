@@ -27,4 +27,9 @@ class PowerOffsetTest {
     @Test fun nan_passes_through() {
         assertTrue(applyPowerOffset(Double.NaN, 5.0, 10.0).isNaN())
     }
+
+    @Test fun zero_in_zero_out_despite_offset() {
+        // Field bug: 10% + 1W must NOT turn "not pedalling" into 1 phantom watt.
+        assertEquals(0.0, applyPowerOffset(0.0, 10.0, 1.0), 1e-9)
+    }
 }

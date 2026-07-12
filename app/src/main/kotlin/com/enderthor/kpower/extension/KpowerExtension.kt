@@ -86,11 +86,19 @@ private data class BatEvent(
 )
 
 // Diagnostic-log Telegram upload cadence (KGhost pattern).
-private const val LOG_SEND_INTERVAL_MS = 20 * 60_000L   // periodic upload while recording
+// Drain OFTEN (every 3 min) so the tail left for ride-end is small: a long interval let ~20 min of log
+// pile up and be POSTed in one burst right as the Karoo saves+uploads the activity → the rider felt the
+// ride "take longer to finish". Frequent small tails keep the ride-end send tiny (and it must finish
+// fast — the OS kills the extension process at ride end). Each send only reads the not-yet-sent tail.
+private const val LOG_SEND_INTERVAL_MS = 3 * 60_000L    // periodic upload while recording
 private const val LOG_CHUNK_CHARS = 60_000             // target chars/chunk (then byte-capped below)
 private const val MAX_CHUNK_BYTES = 90_000            // hard UTF-8 byte cap (host MakeHttpRequest limit ~100 KB)
 private const val LOG_PERIODIC_MAX_CHUNKS = 6           // cap per periodic tick
-private const val RIDE_END_MAX_CHUNKS = 200             // drain the remaining tail at ride end
+// Bounded ride-end burst: with 3-min draining the tail is normally ~1 chunk. This ceiling only bites if
+// the link was down mid-ride and the periodic fell behind — then the excess beyond 20 chunks (~1.8 MB) is
+// simply not sent (the on-device file keeps everything), rather than monopolising the ride save with a
+// multi-MB burst. Priority: don't collapse the ride finish.
+private const val RIDE_END_MAX_CHUNKS = 20
 
 class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
 {
@@ -168,6 +176,10 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
             RealPowerDataType(extension, realFieldTypeId(0, "power"),   { sharedActiveDn }) { dn -> antManager.powerFlow(dn) },
             RealPowerDataType(extension, realFieldTypeId(0, "3s"),      { sharedActiveDn }) { dn -> antManager.power3sFlow(dn) },
             RealPowerDataType(extension, realFieldTypeId(0, "np"),      { sharedActiveDn }) { dn -> antManager.npFlow(dn) },
+            // L/R balance (instant + session average), dual "L/R" Glance fields. Only the KPW-virtual
+            // (offset) source needs these — with a native meter the Karoo shows balance itself.
+            BalanceDataType(extension, "real-balance-0",     getString(R.string.real1_balance_name),     { sharedActiveDn }) { dn -> antManager.balanceFlow(dn) },
+            BalanceDataType(extension, "real-balance-avg-0", getString(R.string.real1_balance_avg_name), { sharedActiveDn }) { dn -> antManager.balanceAvgFlow(dn) },
             // real-avg/max/10s/cadence removed (on-screen): the Karoo shows cadence natively, and
             // avg/max are derivable post-ride from the per-second pm{n}_power in the FIT. (cadenceFlow
             // itself stays — the KPW virtual sensor uses it to broadcast cadence to the Karoo.)

@@ -42,6 +42,8 @@ class AntPowerManager(private val context: Context) {
     private val cadenceFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
     private val power3sFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
     private val npFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
+    private val balanceFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
+    private val balanceAvgFlows = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.flow.MutableStateFlow<Double>>()
 
     // Per-device manual power offset (factorPct, offsetW), pushed from the saved-meter list by the
     // extension whenever it changes. Empty / missing device → identity. Read on every ingested sample.
@@ -108,6 +110,9 @@ class AntPowerManager(private val context: Context) {
     /** Stable 3s / NP power flows for a device number (survive reconnect, like powerFlow). */
     fun power3sFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<Double> = power3sFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
     fun npFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<Double> = npFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
+    /** Right-side balance %: instant + session-average. Left = 100 − right. NaN when no dynamics. */
+    fun balanceFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<Double> = balanceFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
+    fun balanceAvgFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<Double> = balanceAvgFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
 
     /** Detected brand name for a device (from the 0x50 page); null until seen. */
     fun manufacturerFlow(dn: Int): kotlinx.coroutines.flow.StateFlow<String?> = manufacturerFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(null) }
@@ -244,6 +249,8 @@ class AntPowerManager(private val context: Context) {
         val cadenceSink = cadenceFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
         val p3sSink = power3sFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
         val npSink = npFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
+        val balSink = balanceFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
+        val balAvgSink = balanceAvgFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(Double.NaN) }
         val mfgSink = manufacturerFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(null) }
         val mfgShortSink = manufacturerShortFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(null) }
         val batterySink = batteryFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(null) }
@@ -266,12 +273,17 @@ class AntPowerManager(private val context: Context) {
                 kotlinx.coroutines.delay(1_000)
                 m.expireIfStale(System.currentTimeMillis())
                 if (m.consumePendingReset()) m.metrics.reset()
-                m.metrics.tick(correctedPower(dn, m.power.value), recording)
+                m.metrics.tick(correctedPower(dn, m.power.value), m.balanceRightPct.value, recording)
                 // 3s is a live rolling average: blank it when power is stale (NaN) so the
                 // field goes `---` on a dropout instead of freezing. NP is a session aggregate
                 // and holds its last accumulated value.
                 p3sSink.value = if (m.power.value.isNaN()) Double.NaN else m.metrics.power3sW.value
                 npSink.value = m.metrics.npW.value
+                // Balance: instant blanks when not producing power (dropout NaN, or coasting ≤0) so a
+                // crank-torque meter that keeps sending torque pages but stops the 0x10 balance page can't
+                // freeze a stale L/R on screen. Average is a session aggregate (holds).
+                balSink.value = if (m.power.value.isNaN() || m.power.value <= 0.0) Double.NaN else m.balanceRightPct.value
+                balAvgSink.value = m.metrics.balanceAvgRightPct.value
             }
         }
     }
@@ -282,6 +294,8 @@ class AntPowerManager(private val context: Context) {
         cadenceFlows[dn]?.value = Double.NaN
         power3sFlows[dn]?.value = Double.NaN
         npFlows[dn]?.value = Double.NaN
+        balanceFlows[dn]?.value = Double.NaN
+        balanceAvgFlows[dn]?.value = Double.NaN
     }
 
     /**

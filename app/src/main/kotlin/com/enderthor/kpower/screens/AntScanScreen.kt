@@ -2,6 +2,7 @@ package com.enderthor.kpower.screens
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -27,10 +28,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.enderthor.kpower.R
 import com.enderthor.kpower.ant.AntDeviceInfo
 import com.enderthor.kpower.ant.SavedMeter
+import com.enderthor.kpower.extension.signedIntFilter
 import com.enderthor.kpower.extension.toDoubleLocale
 import com.enderthor.kpower.extension.toStringLocale
 
@@ -187,19 +190,21 @@ fun LazyListScope.antScanItems(
                             OutlinedTextField(
                                 value = factorText, modifier = Modifier.weight(1f),
                                 onValueChange = {
-                                    factorText = it
-                                    onSetOffset(m, it.toDoubleLocale(), offsetText.toDoubleLocale())
+                                    factorText = signedIntFilter(it)
+                                    onSetOffset(m, factorText.toDoubleLocale(), offsetText.toDoubleLocale())
                                 },
                                 label = { Text(stringResource(R.string.offset_factor_pct)) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 singleLine = true,
                             )
                             OutlinedTextField(
                                 value = offsetText, modifier = Modifier.weight(1f),
                                 onValueChange = {
-                                    offsetText = it
-                                    onSetOffset(m, factorText.toDoubleLocale(), it.toDoubleLocale())
+                                    offsetText = signedIntFilter(it)
+                                    onSetOffset(m, factorText.toDoubleLocale(), offsetText.toDoubleLocale())
                                 },
                                 label = { Text(stringResource(R.string.offset_watts)) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 singleLine = true,
                             )
                         }
