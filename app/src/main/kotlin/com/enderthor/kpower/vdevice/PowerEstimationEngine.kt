@@ -116,8 +116,6 @@ class PowerEstimationEngine(
     // el óptimo con grade-de-altitud (con el grade retrasado del Karoo hacía falta 4).
     private val gradeCompensator = GradeLeadCompensator(tauMs = 1_000.0, leadSeconds = 2.0)
     @Volatile private var lastGradeLogMs = 0L
-    /** Tracks the compensator's input source so a switch between the two can re-seed it. */
-    private var lastAltGradeAvailable = false
 
     // Fase 2 (C): pendiente desde el perfil de elevación de la RUTA navegada — retardo ~0 y sin ruido de
     // altitud. Estado de ruta poblado por colectores aparte (OnNavigationState + DISTANCE_TO_DESTINATION),
@@ -130,15 +128,14 @@ class PowerEstimationEngine(
     // maxDtMs corto: un hueco off-route real (>3 s) re-siembra el EMA con el grade de ruta fresco al
     // volver, en vez de mezclarlo con uno viejo de otra posición (revisión adversarial #2).
     private val routeGradeSmoother = GradeSmoother(tauMs = 1_000.0, maxDtMs = 3_000L)
-    // Last good grade %/elevation m, held across stream dropouts (a missing stream != 0% / sea level).
-    @Volatile private var lastGoodSlope = 0.0
+    // Last good grade %, held across stream dropouts, plus the re-seed decisions that go with it.
+    private val gradeHold = GradeHold(maxHoldMs = GRADE_MAX_HOLD_MS)
     // ponytail: 0.0 here is a MEASUREMENT masquerading as "unknown" — with no elevation stream AND no
     // weather pressure, airDensity falls back to sea-level ISA and over-estimates aero ~25 % at 2000 m.
     // Seeding it from the weather response does NOT fix that: airDensity only reads elevation when
     // pressurePa is null, and pressurePa comes from the same response. A real fix needs an elevation
     // source that survives "no weather" — persist the last known elevation across rides.
     @Volatile private var lastGoodElevation = 0.0
-    @Volatile private var lastSlopeMs = 0L   // for the staleness bound below
     // Consecutive 1 Hz ticks with speed above MIN_SPEED_FOR_POWER_MS (debounces GPS speed spikes). Only
     // touched on the single estimate-collect coroutine.
     private var movingTicks = 0
@@ -373,22 +370,12 @@ class PowerEstimationEngine(
                     // missing stream as 0 — a momentary grade dropout would otherwise read as 0% (flat)
                     // and collapse the gravity term mid-climb (and elevation→0 = sea-level air density).
                     val slopeStream = bundle.values.slope
-                    if (slopeStream is StreamState.Streaming) {
-                        // Stream back after a gap: the jump from the held (or zeroed) value to the real
-                        // grade is a STEP, not a real grade change. Feeding it to the compensator's
-                        // derivative reads as a huge %/s and adds a lead spike (measured: ~+130 W for
-                        // ~5 s). Re-seed so the first sample after the gap carries no lead. 3 ticks of
-                        // the 1 Hz sample() — one missed tick is just jitter, not a dropout.
-                        if (lastSlopeMs != 0L && nowMs - lastSlopeMs > 3_000L) gradeCompensator.reseed()
-                        lastGoodSlope = slopeStream.getValueOrDefault(); lastSlopeMs = nowMs
-                    } else if (lastSlopeMs != 0L && nowMs - lastSlopeMs > GRADE_MAX_HOLD_MS) {
-                        // Don't hold a stale grade forever (e.g. a steep ramp pinned through a long
-                        // tunnel/GPS outage would over-estimate); after the bound, fall back to flat.
-                        // Same step problem in the other direction: dropping G→0 in one tick read as a
-                        // fast descent and produced a phantom -2 % (~-149 W). Re-seed on the cliff too.
-                        if (lastGoodSlope != 0.0) gradeCompensator.reseed()
-                        lastGoodSlope = 0.0
-                    }
+                    val reseedForHold = gradeHold.update(
+                        streaming = slopeStream is StreamState.Streaming,
+                        streamValue = slopeStream.getValueOrDefault(),
+                        nowMs = nowMs,
+                    )
+                    val lastGoodSlope = gradeHold.slopePercent
                     val elevStream = bundle.values.elevation
                     if (elevStream is StreamState.Streaming) lastGoodElevation = elevStream.getValueOrDefault()
                     val heldElevation = lastGoodElevation
@@ -416,11 +403,8 @@ class PowerEstimationEngine(
                     // the whole reason the altitude path exists). That switch is a step exactly like a
                     // stream gap, and it happens far more often: every stop-and-restart now guarantees
                     // one, because the speed guard clears the deriver's window.
-                    val altGradeAvailable = altGrade != null
-                    if (altGradeAvailable != lastAltGradeAvailable) {
+                    if (reseedForHold || gradeHold.noteAltGradeAvailable(altGrade != null))
                         gradeCompensator.reseed()
-                        lastAltGradeAvailable = altGradeAvailable
-                    }
                     val compensated = gradeCompensator.update(altGrade ?: lastGoodSlope, nowMs)
                     val slopePercent: Double
                     val gradeSrc: String
@@ -536,7 +520,7 @@ class PowerEstimationEngine(
         _power3sW.value = Double.NaN
         // Drop held grade/elevation so an acquire→release→acquire within one process doesn't resume
         // with a stale grade if the first sample after re-acquire is a dropout.
-        lastGoodSlope = 0.0; lastGoodElevation = 0.0; lastSlopeMs = 0L
+        gradeHold.reset(); lastGoodElevation = 0.0
         // Drop route state too (a stale profile/position must not drive grade after a re-acquire).
         routeProfile = null; routeDistanceM = 0.0; routeRejoinM = null; distToDestM = Double.NaN; onRoute = false
     }

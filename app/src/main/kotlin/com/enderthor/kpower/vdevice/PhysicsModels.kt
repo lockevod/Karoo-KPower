@@ -221,6 +221,67 @@ class AltitudeGradeDeriver(
 }
 
 /**
+ * Mantiene el ÚLTIMO grade bueno a través de los cortes de stream, y decide cuándo hay que re-sembrar
+ * el [GradeLeadCompensator]. Vivía dentro del colector del `combine` del motor, que necesita un
+ * KarooSystemService y un Context para alcanzarse: es decir, no se podía testear. Aquí sí, y sigue el
+ * mismo patrón que [AccelerationTracker] / [AltitudeGradeDeriver] / [RoutePositionTracker].
+ *
+ * Hay TRES discontinuidades que no son cambios reales de pendiente, y las tres engañan a la derivada
+ * del compensador si se le entregan tal cual:
+ *  1. el stream vuelve tras un corte (escalón del valor retenido al real, medido: +130 W ~5 s),
+ *  2. expira el hold y el valor retenido cae a 0 de golpe (descenso fantasma, ~-149 W),
+ *  3. la FUENTE cambia entre el grade derivado de altitud y el del Karoo, que difieren
+ *     sistemáticamente (el del Karoo va ~6 s retrasado — la razón de ser de la vía de altitud).
+ * La 3 es la más frecuente, y el guard de velocidad del deriver la hizo aún más frecuente: cada
+ * parada y arranque garantiza una.
+ *
+ * Sin reloj propio: el llamante pasa [nowMs].
+ */
+class GradeHold(
+    private val maxHoldMs: Long = 60_000L,
+    private val gapMs: Long = 3_000L,
+) {
+    /** Último grade bueno; 0 tras expirar el hold. */
+    var slopePercent = 0.0
+        private set
+    private var lastStreamMs = 0L
+    private var altAvailable = false
+
+    /**
+     * Consume el estado del stream de grade del Karoo.
+     * @return true si hay que re-sembrar el compensador (discontinuidades 1 y 2).
+     */
+    fun update(streaming: Boolean, streamValue: Double, nowMs: Long): Boolean {
+        if (streaming) {
+            // 3 ticks del sample() de 1 Hz: perder un tick suelto es jitter, no un corte.
+            val backAfterGap = lastStreamMs != 0L && nowMs - lastStreamMs > gapMs
+            slopePercent = streamValue
+            lastStreamMs = nowMs
+            return backAfterGap
+        }
+        // No retener un grade viejo eternamente (una rampa fijada durante un túnel largo
+        // sobreestimaría); pasado el límite, a llano.
+        if (lastStreamMs != 0L && nowMs - lastStreamMs > maxHoldMs && slopePercent != 0.0) {
+            slopePercent = 0.0
+            return true
+        }
+        return false
+    }
+
+    /**
+     * Consume la disponibilidad del grade de altitud, que solo se conoce después de [update].
+     * @return true si hay que re-sembrar el compensador (discontinuidad 3).
+     */
+    fun noteAltGradeAvailable(available: Boolean): Boolean {
+        if (available == altAvailable) return false
+        altAvailable = available
+        return true
+    }
+
+    fun reset() { slopePercent = 0.0; lastStreamMs = 0L; altAvailable = false }
+}
+
+/**
  * Compensa el retardo del grade barométrico del Karoo (medido en campo: ~5 s del stream del Karoo +
  * ~3 s del pipeline). Sobre el EMA base ([GradeSmoother]) añade un término LEAD proporcional a la
  * derivada suavizada del grade: `grade_comp = ema + leadSeconds · d(ema)/dt`. Anticipa los cambios de
