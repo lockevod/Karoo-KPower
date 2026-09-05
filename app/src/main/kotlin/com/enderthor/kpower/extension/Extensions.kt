@@ -259,8 +259,12 @@ private val preferenceWriteScope = CoroutineScope(Dispatchers.IO + SupervisorJob
                 savePreferences(context, configs)
             } catch (e: CancellationException) {
                 throw e
-            } catch (e: Exception) {
-                Timber.e(e, "Failed to save bike settings")
+            } catch (t: Throwable) {
+                // Throwable, not Exception: this is the process's ONLY settings writer and the
+                // SupervisorJob does not restart it, so letting an Error (OOM encoding a large bike
+                // list, LinkageError) escape means every later save is silently dropped — the editor
+                // shows the change and it is gone on the next launch.
+                Timber.e(t, "Failed to save bike settings")
             }
         }
     }

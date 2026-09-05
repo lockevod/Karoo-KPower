@@ -84,12 +84,17 @@ class SurfaceConditionReader(private val context: Context) {
         if (!dir.exists() || !dir.isDirectory) { knownMapfiles = emptyList(); return }
 
         val files = dir.listFiles { f -> f.isFile && f.extension.equals("map", true) } ?: emptyArray()
+        // Never log the NAME: mapfiles are named after their region ("catalunya.map") and this log is
+        // uploaded, so a filename is a coarse home location. Size identifies which file (stably, unlike
+        // a list index) without naming it. The THROWABLE is dropped for the same reason — mapsforge's
+        // MapFileException and FileNotFoundException both embed the full path in their message, and
+        // FileLogTree appends the stack trace verbatim.
         knownMapfiles = files.mapNotNull { file ->
             try {
                 val mf = MapFile(file)
                 try { MapFileInfo(file, mf.mapFileInfo.boundingBox) } finally { mf.close() }
             } catch (e: Exception) {
-                Timber.e(e, "Surface: cannot read mapfile ${file.name}")
+                Timber.e("Surface: cannot read mapfile (%d MB): %s", file.length() shr 20, e.javaClass.simpleName)
                 null
             }
         }
@@ -116,7 +121,7 @@ class SurfaceConditionReader(private val context: Context) {
                     )
                 }
             } catch (e: Exception) {
-                Timber.e(e, "Surface: readMapData failed for ${file.name}")
+                Timber.e("Surface: readMapData failed for mapfile (%d MB): %s", file.length() shr 20, e.javaClass.simpleName)
                 runCatching { openReaders.remove(file)?.close() }
             }
         }

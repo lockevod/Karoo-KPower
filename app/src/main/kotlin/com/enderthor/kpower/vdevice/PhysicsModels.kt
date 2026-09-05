@@ -155,6 +155,9 @@ class GradeSmoother(
         prevTs = nowMs
         return ema
     }
+
+    /** Re-seed on the next sample, as if a gap had occurred. */
+    fun reseed() { prevTs = 0L }
 }
 
 /**
@@ -176,6 +179,8 @@ class AltitudeGradeDeriver(
     private val emaTauMs: Double = 2_000.0,
     private val maxDtMs: Long = 10_000L,
 ) {
+    private companion object { const val MIN_SPEED_FOR_GRADE_MS = 0.5 }
+
     private data class Sample(val ts: Long, val cumDistM: Double, val altM: Double)
     private val history = ArrayDeque<Sample>()
     private var cumDistM = 0.0
@@ -185,6 +190,14 @@ class AltitudeGradeDeriver(
 
     fun update(speedMs: Double, altitudeM: Double, nowMs: Long): Double? {
         val dtMs = nowMs - prevTs
+        // Sin velocidad no hay distancia, pero la ALTITUD sigue llegando: si guardásemos esas muestras,
+        // al volver la velocidad dividiríamos un desnivel real de varios segundos entre la distancia de
+        // un solo tick → pendiente 3x la real y un pico de potencia en cada recuperación del GPS. Cubre
+        // tanto el stream ausente (speed→0) como el centinela de velocidad obsoleta (también 0).
+        if (speedMs < MIN_SPEED_FOR_GRADE_MS) {
+            history.clear(); seeded = false; prevTs = nowMs
+            return null
+        }
         if (prevTs != 0L && (dtMs <= 0L || dtMs > maxDtMs)) {
             // Gap / pausa: la distancia integrada y la ventana ya no son continuas → reinicia.
             history.clear(); seeded = false
@@ -251,6 +264,18 @@ class GradeLeadCompensator(
         val lead = (leadSeconds * derivEma).coerceIn(-maxLeadPercent, maxLeadPercent)
         return (ema + lead).coerceIn(-maxGradePercent, maxGradePercent)
     }
+
+    /**
+     * Re-siembra la derivada ante una discontinuidad que NO es un hueco temporal: el corte del hold de
+     * grade (que baja el valor retenido a 0 de golpe) o el regreso del stream tras un corte. Sin esto la
+     * derivada lee ese ESCALÓN como un cambio de pendiente realísimo y añade un lead enorme —medido:
+     * descenso fantasma de -2 % al expirar el hold y pico de +130 W al volver el stream—.
+     *
+     * Re-siembra TAMBIÉN el EMA base: solo con [prevTs] el escalón seguía rampando por el suavizador y
+     * la derivada lo recogía a partir del segundo tick, dejando ~2/3 del artefacto y además hundiendo el
+     * primer tick (~155 W por debajo de la verdad). Así es el mismo camino que un hueco real.
+     */
+    fun reseed() { prevTs = 0L; base.reseed() }
 }
 
 /**

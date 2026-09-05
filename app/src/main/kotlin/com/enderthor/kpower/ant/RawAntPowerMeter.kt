@@ -9,10 +9,19 @@ import kotlin.math.PI
 
 internal enum class PowerEventStatus { NEW, HOLD, COAST }
 
+/**
+ * @Synchronized because [update] runs on the ANT lib's callback thread while [reset] is called from
+ * the manager's 1 Hz bridge coroutine (via expireIfStale) and from disconnect() on the caller's
+ * thread. Without a happens-before edge the ANT thread can still see the pre-dropout state after a
+ * reset and classify the first reacquired page as COAST/HOLD — publishing 0 W or leaving the field
+ * blank for a second right when the meter comes back. Every other cross-thread field in this class
+ * is @Volatile for the same reason; at 4 Hz the monitor costs nothing.
+ */
 internal class PowerEventTracker(private val coastMs: Long) {
     private var eventCount: Int? = null
     private var lastChangeMs = 0L
 
+    @Synchronized
     fun update(nextEventCount: Int, nowMs: Long): PowerEventStatus {
         if (eventCount != nextEventCount) {
             eventCount = nextEventCount
@@ -22,10 +31,39 @@ internal class PowerEventTracker(private val coastMs: Long) {
         return if (nowMs - lastChangeMs > coastMs) PowerEventStatus.COAST else PowerEventStatus.HOLD
     }
 
+    @Synchronized
     fun reset() {
         eventCount = null
         lastChangeMs = 0L
     }
+}
+
+/**
+ * Holds the previous torque page PER PAGE TYPE. 0x11 (wheel) and 0x12 (crank) are separate
+ * accumulators, so a delta across the two is meaningless and [CyclingDynamicsParser.torquePower]
+ * rejects it. With ONE shared baseline, a meter that sent both would have every frame compared against
+ * the other type — null forever, the bounded HOLD expires, and the meter reads 0 W for the whole ride,
+ * silently. No such meter is known (the ANT+ profile ties the page to the sensor, and a meter has one
+ * sensor), but for a single-type meter one baseline is simply always null and the behaviour is
+ * byte-for-byte unchanged — so this costs nothing and closes the case the type guard already detects.
+ *
+ * @Synchronized for the same reason as [PowerEventTracker]: advance() runs on the ANT callback thread
+ * while reset() comes from the 1 Hz bridge.
+ */
+internal class TorqueBaselines {
+    private var wheel: TorqueData? = null
+    private var crank: TorqueData? = null
+
+    /** The previous page OF THE SAME TYPE (null on the first), replacing it with [d]. */
+    @Synchronized
+    fun advance(d: TorqueData): TorqueData? {
+        val prev = if (d.isCrank) crank else wheel
+        if (d.isCrank) crank = d else wheel = d
+        return prev
+    }
+
+    @Synchronized
+    fun reset() { wheel = null; crank = null }
 }
 
 /**
@@ -100,14 +138,14 @@ class RawAntPowerMeter(
     /** Timestamp (ms) of the most recent power-bearing page; unrelated dynamics must not keep stale
      * power alive. 0 until the first 0x10/0x11/0x12 page arrives. */
     @Volatile private var lastPowerPageMs: Long = 0L
-    private val powerEventTracker = PowerEventTracker(COAST_MS)
+    private val powerEventTracker = PowerEventTracker(POWER_ONLY_COAST_MS)
 
     // ── Torque-based power (0x11/0x12) state ────────────────────────────────────────────────────
     // @Volatile because onPayload runs on the ANT callback thread, and a channel reopen registers a
     // FRESH event handler that may be invoked from a different thread — volatile publishes the last
-    // delta state across that boundary so a reopen can't read a stale prevTorque and emit a spike.
-    /** Previous torque page, for the delta that yields power/cadence. Null until the first one. */
-    @Volatile private var prevTorque: TorqueData? = null
+    // delta state across that boundary so a reopen can't read a stale baseline and emit a spike.
+    /** Previous torque page per type, for the delta that yields power/cadence. */
+    private val torqueBaselines = TorqueBaselines()
     /** Wall-clock of the last NEW rotation event (Δevent>0); drives coast-to-zero when pedalling stops. */
     @Volatile private var lastTorqueEventChangeMs: Long = 0L
     /**
@@ -144,21 +182,27 @@ class RawAntPowerMeter(
                             _cadence.value = d.cadenceRpm ?: Double.NaN
                             _torque.value = computeTorque(d.powerW, d.cadenceRpm)
                         }
-                        PowerEventStatus.COAST -> {
-                            _power.value = 0.0; _cadence.value = 0.0; _torque.value = 0.0
-                        }
-                        PowerEventStatus.HOLD -> Unit
+                        PowerEventStatus.COAST -> coastPowerOnly()
+                        // A repeated event count only means "no NEW power event"; the page's cadence
+                        // byte says whether the rider actually stopped, and it reads 0 immediately. Use
+                        // it, so the long window below is only ever paid by a meter that freezes that
+                        // byte — instead of by every normal coast on every meter.
+                        PowerEventStatus.HOLD -> if (d.cadenceRpm == 0.0) coastPowerOnly()
                     }
                     lastPowerPageMs = now
                 } else if (_cadence.value.isNaN()) {
                     d.cadenceRpm?.let { _cadence.value = it }   // seed cadence before 2nd torque frame
                 }
-                // Balance is a per-page ratio, not an accumulator: a repeated event count republishes
-                // the same number (a no-op on the StateFlow), so it does NOT need the freshness gate —
-                // and gating it would freeze balance on a torque meter whose 0x10 event count is static.
-                // Only coasting clears it, because a balance with no pedalling is meaningless.
+                // Balance is a per-page ratio, not an accumulator, so it needs no event-count freshness
+                // gate — gating it on the 0x10 counter would pin it at NaN for a whole ride on a torque
+                // meter whose 0x10 counter is static. But it MUST be blanked while coasting: the FIT
+                // writer reads this flow directly (KpowerExtension "dyn_balance_r/l", gated only on
+                // !isNaN), so a meter that holds its last ratio while freewheeling would otherwise write
+                // a frozen L/R on every record of a descent. Which path owns "coasting" depends on the
+                // meter type, so key it off the PUBLISHED POWER, which both paths have already set.
+                val publishedPower = _power.value
                 _balanceRightPct.value =
-                    if (eventStatus == PowerEventStatus.COAST) Double.NaN
+                    if (publishedPower.isNaN() || publishedPower <= 0.0) Double.NaN
                     else d.balanceRightPct ?: Double.NaN
             }
             CyclingDynamicsParser.PAGE_WHEEL_TORQUE, CyclingDynamicsParser.PAGE_CRANK_TORQUE -> {
@@ -215,7 +259,7 @@ class RawAntPowerMeter(
     private fun onTorquePage(d: TorqueData) {
         torquePageSeen = true
         val now = System.currentTimeMillis()
-        val prev = prevTorque
+        val prev = torqueBaselines.advance(d)
         if (prev != null) {
             // A NEW rotation event distinguishes "coasting" (no event) from "event present but the
             // computed value was rejected" (clamp / wrap artifact). Only the former may coast to 0.
@@ -242,8 +286,7 @@ class RawAntPowerMeter(
                     // power/cadence/torque AND clear the dynamics models so the FIT records a gap,
                     // not the last frozen TE/PS/angles/position (those pages stop while coasting).
                     _power.value = 0.0; _cadence.value = 0.0; _torque.value = 0.0
-                    _tePs.value = null; _forceAngleLeft.value = null; _forceAngleRight.value = null
-                    _pedalPosition.value = null; _barycenter.value = null
+                    clearDynamics()
                 }
                 // else: repeated frame within the coast window → hold the last values.
             }
@@ -252,8 +295,23 @@ class RawAntPowerMeter(
             if (_cadence.value.isNaN()) d.cadenceRpm?.let { _cadence.value = it }
             lastTorqueEventChangeMs = now
         }
-        prevTorque = d
         lastPowerPageMs = now
+    }
+
+    /** Zero the power-only surface and drop the dynamics models. Reached from the 0x10 path only, so
+     *  in practice only for a meter with no torque page — every Cycling Dynamics meter seen so far also
+     *  sends 0x11/0x12 and coasts through onTorquePage instead. Kept as defence in depth. */
+    private fun coastPowerOnly() {
+        _power.value = 0.0; _cadence.value = 0.0; _torque.value = 0.0
+        clearDynamics()
+    }
+
+    /** Drop the Cycling Dynamics models. Coasting stops those pages, so anything still held is the
+     *  last pedalling value — and KpowerExtension writes them into the FIT every second, which on a
+     *  10-minute descent means 600 samples of phantom perfect pedalling in the ride's TE/PS averages. */
+    private fun clearDynamics() {
+        _tePs.value = null; _forceAngleLeft.value = null; _forceAngleRight.value = null
+        _pedalPosition.value = null; _barycenter.value = null
     }
 
     /** τ = P / (2π·rpm/60). NaN if power null or cadence null/≤0. */
@@ -272,10 +330,10 @@ class RawAntPowerMeter(
         _balanceRightPct.value = Double.NaN; _torque.value = Double.NaN
         _forceAngleLeft.value = null; _forceAngleRight.value = null
         _pedalPosition.value = null; _tePs.value = null; _barycenter.value = null
-        // prevTorque cleared so the next frame re-seeds (no stale delta). torquePageSeen is LATCHED:
+        // baselines cleared so the next frame re-seeds (no stale delta). torquePageSeen is LATCHED:
         // it's device identity (this meter reports power via torque pages), so a >5s dropout must not
         // flip it back and let a 0x10 power=0 frame momentarily publish 0 W on reacquire.
-        prevTorque = null; lastTorqueEventChangeMs = 0L; lastPowerPageMs = 0L
+        torqueBaselines.reset(); lastTorqueEventChangeMs = 0L; lastPowerPageMs = 0L
         powerEventTracker.reset()
     }
 
@@ -284,9 +342,17 @@ class RawAntPowerMeter(
         channel = null; reset()
     }
 
-    private companion object {
+    internal companion object {   // internal so tests read the REAL constants, not copies
         /** Hold the last torque-derived power for this long without a new crank event, then coast to 0. */
         const val COAST_MS = 3_000L
+        // The 0x10 power event count advances once per CRANK revolution, so COAST_MS (3 s) is
+        // satisfied BETWEEN PEDAL STROKES below ~20 rpm — MTB technical climbing would flicker to
+        // 0 W at its hardest moment. 6 s covers down to 10 rpm.
+        // This window is NOT backstopped by expireIfStale: lastPowerPageMs is refreshed on every 0x10
+        // frame, HOLD and COAST included, so a meter that keeps broadcasting never goes stale. What
+        // bounds it in practice is the cadence-byte check above, which coasts immediately on any meter
+        // that reports 0 rpm — this window only covers meters that freeze that byte.
+        const val POWER_ONLY_COAST_MS = 6_000L
         /** Upper bound on holding a last-good value when new events arrive but every compute is rejected
          *  (broken/stuck meter). Far longer than any real effort, so it never zeros a legitimate sprint;
          *  short enough that a stuck stream doesn't freeze phantom watts for the whole ride. */

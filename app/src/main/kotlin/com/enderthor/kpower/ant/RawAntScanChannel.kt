@@ -61,11 +61,19 @@ class RawAntScanChannel(
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
             if (stopped || service == null) return
             antService = AntService(service)
+            // The service (re)started, so ANY handle still in the field belongs to the dead process —
+            // it can only have been published by an open() that raced the disconnect. Drop it here, or
+            // open()'s `channel == null` gate is satisfied by a corpse and the scan never recovers.
+            val dead = synchronized(this@RawAntScanChannel) { channel.also { channel = null } }
+            dead?.let { releaseQuietly(it) }
             scope.launch { open() }
         }
         override fun onServiceDisconnected(name: ComponentName?) {
             antService = null
-            channel = null
+            // No reschedule here: retrying open() would only find `antService == null` and spin on the
+            // null-provider path every 2 s for as long as the scan screen is open. Android redelivers
+            // onServiceConnected when the service comes back, and that is what reopens.
+            synchronized(this@RawAntScanChannel) { channel = null }
         }
     }
 
@@ -82,6 +90,9 @@ class RawAntScanChannel(
     /** Synchronous (non-suspend) so a concurrent stop()/scope.cancel() can't interrupt mid-config and
      *  orphan a channel. Always releases the LOCAL channel on failure (never the shared field). */
     private fun open() {
+        // ponytail: unlike RawAntChannel this has no silence watchdog. A published-but-dead handle is
+        // now cleared by onServiceConnected, which covers the reachable case; add a lastBroadcastMs
+        // recycle loop if a channel that is open but silent is ever observed on device.
         if (!tryBeginChannelOpen(opening) { stopped || channel != null }) return
         try {
             openClaimed()
@@ -131,12 +142,14 @@ class RawAntScanChannel(
             val published = synchronized(this) {
                 if (stopped || channel != null) false else { channel = ch; true }
             }
+            // Only reachable when stop() raced us (the `opening` CAS means no second openClaimed can be
+            // in flight, so `channel != null` cannot happen here) — nothing to reschedule.
             if (!published) { releaseQuietly(ch); return }
             openAttempts = 0
             Timber.d("RawAntScanChannel: wildcard background scan open (rf=57 priority=11)")
         } catch (e: Throwable) {
             releaseQuietly(ch)                                  // LOCAL ch — never the field
-            if (channel === ch) channel = null
+            synchronized(this) { if (channel === ch) channel = null }
             Timber.e(e, "RawAntScanChannel: configure/open failed")
             scheduleRetry(2_000, countsToward = true)
         }

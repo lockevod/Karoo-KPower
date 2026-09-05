@@ -116,6 +116,8 @@ class PowerEstimationEngine(
     // el óptimo con grade-de-altitud (con el grade retrasado del Karoo hacía falta 4).
     private val gradeCompensator = GradeLeadCompensator(tauMs = 1_000.0, leadSeconds = 2.0)
     @Volatile private var lastGradeLogMs = 0L
+    /** Tracks the compensator's input source so a switch between the two can re-seed it. */
+    private var lastAltGradeAvailable = false
 
     // Fase 2 (C): pendiente desde el perfil de elevación de la RUTA navegada — retardo ~0 y sin ruido de
     // altitud. Estado de ruta poblado por colectores aparte (OnNavigationState + DISTANCE_TO_DESTINATION),
@@ -130,6 +132,11 @@ class PowerEstimationEngine(
     private val routeGradeSmoother = GradeSmoother(tauMs = 1_000.0, maxDtMs = 3_000L)
     // Last good grade %/elevation m, held across stream dropouts (a missing stream != 0% / sea level).
     @Volatile private var lastGoodSlope = 0.0
+    // ponytail: 0.0 here is a MEASUREMENT masquerading as "unknown" — with no elevation stream AND no
+    // weather pressure, airDensity falls back to sea-level ISA and over-estimates aero ~25 % at 2000 m.
+    // Seeding it from the weather response does NOT fix that: airDensity only reads elevation when
+    // pressurePa is null, and pressurePa comes from the same response. A real fix needs an elevation
+    // source that survives "no weather" — persist the last known elevation across rides.
     @Volatile private var lastGoodElevation = 0.0
     @Volatile private var lastSlopeMs = 0L   // for the staleness bound below
     // Consecutive 1 Hz ticks with speed above MIN_SPEED_FOR_POWER_MS (debounces GPS speed spikes). Only
@@ -367,10 +374,19 @@ class PowerEstimationEngine(
                     // and collapse the gravity term mid-climb (and elevation→0 = sea-level air density).
                     val slopeStream = bundle.values.slope
                     if (slopeStream is StreamState.Streaming) {
+                        // Stream back after a gap: the jump from the held (or zeroed) value to the real
+                        // grade is a STEP, not a real grade change. Feeding it to the compensator's
+                        // derivative reads as a huge %/s and adds a lead spike (measured: ~+130 W for
+                        // ~5 s). Re-seed so the first sample after the gap carries no lead. 3 ticks of
+                        // the 1 Hz sample() — one missed tick is just jitter, not a dropout.
+                        if (lastSlopeMs != 0L && nowMs - lastSlopeMs > 3_000L) gradeCompensator.reseed()
                         lastGoodSlope = slopeStream.getValueOrDefault(); lastSlopeMs = nowMs
                     } else if (lastSlopeMs != 0L && nowMs - lastSlopeMs > GRADE_MAX_HOLD_MS) {
                         // Don't hold a stale grade forever (e.g. a steep ramp pinned through a long
                         // tunnel/GPS outage would over-estimate); after the bound, fall back to flat.
+                        // Same step problem in the other direction: dropping G→0 in one tick read as a
+                        // fast descent and produced a phantom -2 % (~-149 W). Re-seed on the cliff too.
+                        if (lastGoodSlope != 0.0) gradeCompensator.reseed()
                         lastGoodSlope = 0.0
                     }
                     val elevStream = bundle.values.elevation
@@ -395,6 +411,16 @@ class PowerEstimationEngine(
                     // Alimenta SIEMPRE el compensador (aunque usemos ruta) para que su EMA/derivada no se
                     // enfríen y disparen un pico de lead al volver a altitud/Karoo tras un tramo en ruta
                     // (revisión adversarial #3). Solo usamos su salida cuando no hay grade de ruta.
+                    // The compensator's INPUT SOURCE switches here between the altitude-derived grade
+                    // and the Karoo grade, and the two differ systematically (the Karoo's lags ~6 s —
+                    // the whole reason the altitude path exists). That switch is a step exactly like a
+                    // stream gap, and it happens far more often: every stop-and-restart now guarantees
+                    // one, because the speed guard clears the deriver's window.
+                    val altGradeAvailable = altGrade != null
+                    if (altGradeAvailable != lastAltGradeAvailable) {
+                        gradeCompensator.reseed()
+                        lastAltGradeAvailable = altGradeAvailable
+                    }
                     val compensated = gradeCompensator.update(altGrade ?: lastGoodSlope, nowMs)
                     val slopePercent: Double
                     val gradeSrc: String
@@ -446,14 +472,27 @@ class PowerEstimationEngine(
                     )
                     // Field calibration: while recording with a real meter present, accumulate the
                     // CdA + per-surface-Crr least-squares regression of REAL power vs the model regressors.
-                    if (recording) realPowerProvider?.invoke()?.let { rp ->
+                    // Only learn Crr/CdA from a FRESH grade. During a hold (or right after one) the
+                    // model's slope is wrong while the real meter's power is right, so the residual is
+                    // biased — and this fit is then OFFERED to the rider to apply to their bike.
+                    // Gate on the source that actually produced slopePercent. Checking the Karoo grade
+                    // stream instead would starve the calibrator to ZERO samples on a device whose
+                    // ELEVATION_GRADE is flaky but whose ELEVATION stream is healthy — the model's slope
+                    // is fine there, it just came from the altitude path.
+                    val gradeFresh = routeGrade != null || altGrade != null ||
+                        bundle.values.slope is StreamState.Streaming
+                    if (recording && gradeFresh) realPowerProvider?.invoke()?.let { rp ->
                         est.calibrationRegressors(rp)?.let { (y, x1, x2) ->
                             fieldCalibrator.add(y, x1, x2, resolveSurfaceForCalc(config))
                         }
                     }
                     latestInstantW = instantW                  // floored → metrics (incl. NP) match a real meter
                     _instantW.value = instantW                 // instant field: non-negative display
-                    if (!_hasSample.value) _hasSample.value = true
+                    // Only a REAL speed sample counts as "we have data". The first combine tick now
+                    // carries NotAvailable on every stream, so flipping this unconditionally made the
+                    // field stop showing "searching" and display a confident 0 W within ~1 s of start.
+                    if (!_hasSample.value && bundle.values.speed is StreamState.Streaming)
+                        _hasSample.value = true
                 }
         }
 

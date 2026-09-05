@@ -32,7 +32,7 @@ import java.io.IOException
 class SettingsBackupTest {
     private val tmp = kotlin.io.path.createTempDirectory("kpower-prefs").toFile()
 
-    private val profiles = stringPreferencesKey("configdata")
+    private val profiles = stringPreferencesKey(CONFIG_DATA_KEY)   // production name, not a copy
     private val meters = stringPreferencesKey("antPowerMeters")
     private val comparison = booleanPreferencesKey("comparisonMode")
     private val position = stringPreferencesKey("lastKnownPosition")    // churn
@@ -45,6 +45,14 @@ class SettingsBackupTest {
     ): DataStore<Preferences> =
         PreferenceDataStoreFactory.create(migrations = migrations, scope = scope) {
             tmp.resolve(name).apply { mkdirs() }.resolve("$name.preferences_pb")
+        }
+
+    /** The mirror runs on Dispatchers.Default while the test body is on runBlocking's own event loop,
+     *  so yield() does not hand it the CPU. Poll instead of guessing a yield count. */
+    private suspend fun awaitBackup(backup: DataStore<Preferences>, expected: String?) =
+        withTimeout(5_000) {
+            while (backup.data.first()[profiles] != expected) kotlinx.coroutines.delay(10)
+            true
         }
 
     @Test
@@ -174,6 +182,109 @@ class SettingsBackupTest {
         )
 
         assertEquals(emptyMap<Preferences.Key<*>, Any>(), recovered.data.first().asMap())
+        scope.cancel()
+    }
+
+    private val resetAt = SETTINGS_RESET_AT   // production key, not a copy
+
+    /** C1: a wiped store renders as one DEFAULT bike (loadPreferencesFlow cannot tell "key absent" from
+     *  "fresh install"), and the editor auto-saves on dispose — so merely opening it stamps a real
+     *  configdata into the reset store. Without the reset marker the mirror accepts those defaults and
+     *  clears the only copy that still had the rider's bikes. */
+    @Test
+    fun `a reset store cannot overwrite the backup before its restore succeeds`() = runBlocking {
+        val scope = CoroutineScope(Job())
+        val settings = store("reset-settings", scope)
+        val backup = store("reset-backup", scope)
+        backup.edit { it[profiles] = "[{bike:road},{bike:mtb}]" }
+
+        val mirror = scope.launch { mirrorSettings(settings, backup) }
+        // The store was wiped by the corruption handler, which stamps the marker...
+        settings.edit { it[resetAt] = System.currentTimeMillis() }
+        // ...and the rider opens the default bike, so the editor writes it back.
+        settings.edit { it[profiles] = "[{bike:default}]" }
+        repeat(20) { yield() }
+
+        assertEquals(
+            "backup must still hold the rider's bikes",
+            "[{bike:road},{bike:mtb}]", backup.data.first()[profiles]
+        )
+        mirror.cancel(); scope.cancel()
+    }
+
+    /** The marker must survive a backup we could not READ — "we don't know what was there" is not
+     *  "there was nothing". Only a successful read (even of an empty backup) clears it. Asserted on the
+     *  OBSERVABLE consequence — the mirror staying blocked — because asserting shouldMigrate()==false
+     *  alone passed even with the `if (backupWasRead)` guard reverted to an unconditional remove. */
+    @Test
+    fun `an unreadable backup keeps the reset marker so the mirror stays blocked`() = runBlocking {
+        val unreadable = object : DataStore<Preferences> {
+            override val data = flow<Preferences> { throw IOException("backup unreadable") }
+            override suspend fun updateData(t: suspend (Preferences) -> Preferences) = emptyPreferences()
+        }
+        val migration = RestoreSettingsBackup(unreadable, maxReadAttempts = 1, retryDelayMs = 0)
+        val current = mutablePreferencesOf(resetAt to System.currentTimeMillis(),
+            profiles to "[{bike:default}]")
+        assertFalse("nothing to restore yet", migration.shouldMigrate(current))
+
+        val scope = CoroutineScope(Job())
+        val settings = store("unreadable-primary", scope, listOf(migration))
+        val backup = store("unreadable-primary-backup", scope)
+        backup.edit { it[profiles] = "[{bike:road},{bike:mtb}]" }
+        val mirror = scope.launch { mirrorSettings(settings, backup) }
+        settings.edit { it[resetAt] = System.currentTimeMillis(); it[profiles] = "[{bike:default}]" }
+        repeat(20) { yield() }
+        assertEquals("marker must still block the mirror",
+            "[{bike:road},{bike:mtb}]", backup.data.first()[profiles])
+        // Prove the mirror was ALIVE and it was the marker that stopped it — otherwise a lazy scheduler
+        // would make the assertion above pass for the wrong reason.
+        settings.edit { it.remove(resetAt) }
+        assertTrue("the mirror must write once the marker is gone",
+            awaitBackup(backup, "[{bike:default}]"))
+        mirror.cancel(); scope.cancel()
+    }
+
+    /** …but it must EXPIRE. A backup that stays unreadable would otherwise freeze the mirror for the
+     *  whole session and then, on the launch it finally reads, overwrite everything the rider re-entered
+     *  meanwhile. Past the age limit their current settings are the truth. */
+    @Test
+    fun `an expired reset marker releases the mirror and stops the backup winning`() = runBlocking {
+        val scope = CoroutineScope(Job())
+        val settings = store("expired-settings", scope)
+        val backup = store("expired-backup", scope)
+        backup.edit { it[profiles] = "[{bike:old}]" }
+        val mirror = scope.launch { mirrorSettings(settings, backup) }
+
+        val twoDaysAgo = System.currentTimeMillis() - 2L * 24 * 60 * 60 * 1000
+        settings.edit { it[resetAt] = twoDaysAgo; it[profiles] = "[{bike:rebuilt}]" }
+        assertTrue("an expired marker must not block the mirror",
+            awaitBackup(backup, "[{bike:rebuilt}]"))
+
+        // And the restore must no longer let the backup clobber the rebuilt config.
+        val stale = RestoreSettingsBackup(backup, maxReadAttempts = 1, retryDelayMs = 0)
+        val current = mutablePreferencesOf(resetAt to twoDaysAgo, profiles to "[{bike:rebuilt}]")
+        assertTrue("an expired marker still runs, to drop itself", stale.shouldMigrate(current))
+        val migrated = stale.migrate(current)
+        assertEquals("the rider's rebuilt config wins", "[{bike:rebuilt}]", migrated[profiles])
+        assertNull("expired marker dropped", migrated[resetAt])
+        mirror.cancel(); scope.cancel()
+    }
+
+    /** A RECENT marker still means the primary is untrusted and the backup wins outright. */
+    @Test
+    fun `a fresh reset marker lets the backup win and is cleared once read`() = runBlocking {
+        val scope = CoroutineScope(Job())
+        val good = store("fresh-marker-backup", scope)
+        good.edit { it[profiles] = "[{bike:road}]"; it[meters] = "[6593]" }
+        val restore = RestoreSettingsBackup(good, maxReadAttempts = 1, retryDelayMs = 0)
+        val current = mutablePreferencesOf(resetAt to System.currentTimeMillis(),
+            profiles to "[{bike:default}]")
+
+        assertTrue("a readable backup must run the migration", restore.shouldMigrate(current))
+        val migrated = restore.migrate(current)
+        assertEquals("[{bike:road}]", migrated[profiles])
+        assertEquals("[6593]", migrated[meters])
+        assertNull("marker cleared once we know what the backup held", migrated[resetAt])
         scope.cancel()
     }
 }

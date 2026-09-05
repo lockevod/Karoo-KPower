@@ -69,4 +69,31 @@ class AltitudeGradeDeriverTest {
         val afterGap = d.update(8.0, 130.0, t + 20_000L) // 20 s gap
         assertNull(afterGap)
     }
+
+    /** A3: while speed is gone the altitude keeps arriving. Keeping those samples means that on
+     *  recovery a real multi-second climb is divided by ONE tick of distance — a 2 % grade reads as
+     *  6 % and the gravity term spikes by 100-250 W on every GPS recovery. */
+    @Test
+    fun `a speed dropout does not turn into a phantom grade spike on recovery`() {
+        val deriver = AltitudeGradeDeriver()
+        var t = 0L
+        var alt = 100.0
+        // 10 s at 8 m/s on a steady 2 % climb.
+        repeat(10) { t += 1_000; alt += 0.16; deriver.update(8.0, alt, t) }
+        t += 1_000; alt += 0.16
+        val steady = deriver.update(8.0, alt, t)!!
+        assertTrue("baseline should read ~2 %, was $steady", steady in 1.0..3.0)
+
+        // 3 s of speed dropout — the stream reports 0, the barometer keeps climbing.
+        repeat(3) { t += 1_000; alt += 0.16; assertNull(deriver.update(0.0, alt, t)) }
+
+        // Speed is back. Until enough real distance is travelled there is no trustworthy grade...
+        t += 1_000; alt += 0.16
+        assertNull("must not derive a grade from one tick of distance", deriver.update(8.0, alt, t))
+        // ...and once there is, it reads the true grade, not a 3x spike.
+        var recovered: Double? = null
+        repeat(4) { t += 1_000; alt += 0.16; recovered = deriver.update(8.0, alt, t) }
+        // Tight: a 1.0..3.0 band still passed with the guard reverted (the decayed spike reaches 2.83 %).
+        assertEquals("recovered grade should be the true 2 %", 2.0, recovered!!, 0.15)
+    }
 }

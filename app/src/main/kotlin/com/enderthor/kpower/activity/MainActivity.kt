@@ -16,8 +16,9 @@ import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
+import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.datastore.preferences.core.mutablePreferencesOf
 import androidx.datastore.preferences.preferencesDataStore
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
@@ -28,6 +29,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import timber.log.Timber
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -42,7 +44,34 @@ import java.util.concurrent.atomic.AtomicBoolean
 // (they are caches, not settings): mirroring them would put the backup under the same kill-mid-write
 // fire as the original, for data nobody misses.
 private val CHURN_KEYS = setOf("lastKnownPosition", "meterScreenActiveAt", "current", "stats")
-private const val CONFIG_DATA_KEY = "configdata"
+internal const val CONFIG_DATA_KEY = "configdata"
+
+// Set by the corruption handler, i.e. written into the very snapshot that replaces the unparseable
+// file, so a reset is OBSERVABLE. It has to be: `loadPreferencesFlow` cannot tell "configdata key
+// absent because the store was wiped" from "fresh install" — both render as one default bike — and
+// the editor auto-saves on dispose, so merely opening that default bike stamps a real configdata
+// into the wiped store. Without this marker the mirror would then treat those defaults as the
+// rider's settings and clear the only copy that still had their bikes. Cleared only once the backup
+// has actually been READ (successfully, even if it turns out empty); a failed read keeps it, because
+// "we don't know what was there" must not be confused with "there was nothing".
+internal val SETTINGS_RESET_AT = longPreferencesKey("settingsWasResetAt")
+
+/**
+ * How long a reset marker has authority. It is a TIMESTAMP, not a flag, because the flag version had
+ * two failure modes that compounded: while it was set the mirror refused to write, and it was only
+ * cleared once the backup could be read — so a backup that stayed unreadable (cold boot, busy eMMC)
+ * blocked the mirror for the whole session AND, on the launch it finally read, overwrote everything
+ * the rider had re-entered meanwhile with the pre-corruption copy. Past this age the rider has had
+ * launches to reconfigure and their current settings are the truth, so the marker loses its authority:
+ * the mirror unblocks and the restore falls back to filling in only the keys the primary lacks.
+ */
+private const val RESET_MARKER_MAX_AGE_MS = 24L * 60 * 60 * 1000
+
+/** True while a corruption reset is recent enough that the primary must not be trusted. */
+internal fun Map<Preferences.Key<*>, Any>.resetPending(nowMs: Long = System.currentTimeMillis()): Boolean {
+    val at = this[SETTINGS_RESET_AT] as? Long ?: return false
+    return nowMs - at < RESET_MARKER_MAX_AGE_MS
+}
 
 internal fun Preferences.durable() = asMap().filterKeys { it.name !in CHURN_KEYS }
 
@@ -57,36 +86,59 @@ private val Context.settingsBackup: DataStore<Preferences> by preferencesDataSto
 
 val Context.dataStore: DataStore<Preferences> by preferencesDataStore(
     name = "settings",
-    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
+    corruptionHandler = ReplaceFileCorruptionHandler { mutablePreferencesOf(SETTINGS_RESET_AT to System.currentTimeMillis()) },
     produceMigrations = { ctx -> listOf(RestoreSettingsBackup(ctx.settingsBackup)) }
 )
 
 /** Refills a wiped store from the backup on open. It also repairs an incomplete primary that acquired
- *  unrelated defaults after a failed backup read, identified by a backup profile list absent from the
- *  primary. Existing primary keys win when those missing settings are merged back. */
+ *  unrelated defaults after a failed backup read, identified by the [SETTINGS_WAS_RESET] marker. */
 internal class RestoreSettingsBackup(
     private val backup: DataStore<Preferences>,
-    private val maxReadAttempts: Int = 3,
+    private val maxReadAttempts: Int = 2,
     private val retryDelayMs: Long = 1_000,
 ) : DataMigration<Preferences> {
     private var pendingRestore: Map<Preferences.Key<*>, Any> = emptyMap()
+    private var wasReset = false
+    private var staleMarker = false
+    private var backupWasRead = false
 
     override suspend fun shouldMigrate(currentData: Preferences): Boolean {
-        if (currentData.asMap().keys.any { it.name == CONFIG_DATA_KEY }) return false
-        pendingRestore = readDurableBackup(backup, maxReadAttempts, retryDelayMs) ?: emptyMap()
-        return pendingRestore.isNotEmpty() && (
-            currentData.durable().isEmpty() || pendingRestore.keys.any { it.name == CONFIG_DATA_KEY }
-        )
+        val durable = currentData.durable()
+        wasReset = durable.resetPending()
+        staleMarker = durable[SETTINGS_RESET_AT] != null && !wasReset
+        // Steady state: profiles present, no marker at all — trusted, don't even read the backup.
+        if (!wasReset && !staleMarker && currentData.asMap().keys.any { it.name == CONFIG_DATA_KEY })
+            return false
+        val read = readDurableBackup(backup, maxReadAttempts, retryDelayMs)
+        backupWasRead = read != null
+        pendingRestore = read ?: emptyMap()
+        // Run migrate() to clear the marker as soon as the backup is readable, even when it turns out
+        // empty — that is a definite "there was nothing to restore", which unblocks the mirror. An
+        // expired marker also runs, purely to drop it.
+        return staleMarker || (wasReset && backupWasRead) || (pendingRestore.isNotEmpty() && (
+            durable.isEmpty() || pendingRestore.keys.any { it.name == CONFIG_DATA_KEY }
+        ))
     }
 
     override suspend fun migrate(currentData: Preferences): Preferences =
         currentData.toMutablePreferences()
             .apply {
-                val currentNames = currentData.asMap().keys.mapTo(mutableSetOf()) { it.name }
-                putAllUnchecked(pendingRestore.filterKeys { it.name !in currentNames })
+                if (wasReset) {
+                    // A RECENT post-corruption rebuild: anything the primary picked up since the reset
+                    // is a default or a stray edit made while the rider's real setup was missing, so the
+                    // backup wins outright. Bounded by RESET_MARKER_MAX_AGE_MS — past that the rider has
+                    // had time to genuinely reconfigure and we must not clobber that.
+                    putAllUnchecked(pendingRestore)
+                } else {
+                    val currentNames = currentData.asMap().keys.mapTo(mutableSetOf()) { it.name }
+                    putAllUnchecked(pendingRestore.filterKeys { it.name !in currentNames })
+                }
+                if (backupWasRead || staleMarker) remove(SETTINGS_RESET_AT)
             }
 
-    override suspend fun cleanUp() { pendingRestore = emptyMap() }
+    override suspend fun cleanUp() {
+        pendingRestore = emptyMap(); wasReset = false; staleMarker = false; backupWasRead = false
+    }
 }
 
 private val mirrorScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -96,8 +148,7 @@ private val mirrorStarted = AtomicBoolean(false)
  *  Both the activity and the extension service call it because either can be the only one alive, so
  *  later calls are no-ops — two collectors would just duplicate every write. It runs on a
  *  process-owned scope, NOT the caller's: on the activity's lifecycleScope a screen rotation would
- *  cancel the only mirror and the service's call would already have been a no-op.
- *  distinctUntilChanged means a ride's churn-key writes cost nothing here. */
+ *  cancel the only mirror and the service's call would already have been a no-op. */
 fun Context.mirrorSettingsToBackup() {
     if (!mirrorStarted.compareAndSet(false, true)) return
     val app = applicationContext
@@ -105,20 +156,32 @@ fun Context.mirrorSettingsToBackup() {
 }
 
 internal suspend fun mirrorSettings(source: DataStore<Preferences>, backup: DataStore<Preferences>) {
+    // Deduped by hand rather than with distinctUntilChanged, which sits UPSTREAM of the write and so
+    // would drop the retry: once mirrorSnapshot exhausted its attempts that exact snapshot could never
+    // arrive again, freezing the backup silently until the rider next changed a setting. Advancing
+    // only on success means the next emission (a churn write during a ride, or any edit) retries it.
+    var lastMirrored: Map<Preferences.Key<*>, Any>? = null
     while (true) {
         try {
             source.data
                 .map { it.durable() }
-                .distinctUntilChanged()
                 .collect { durable ->
-                    // Empty means fresh install or a primary-store corruption reset. A deliberate
-                    // "no bikes" save still carries configdata="[]", so it is non-empty here.
-                    if (durable.isNotEmpty()) mirrorSnapshot(backup, durable)
+                    // Empty means fresh install. A deliberate "no bikes" save still carries
+                    // configdata="[]", so it is non-empty here.
+                    if (durable.isEmpty() || durable == lastMirrored) return@collect
+                    // Restore still pending: the primary holds post-reset defaults, not the rider's
+                    // settings. Mirroring now would destroy the only copy that still has their bikes.
+                    // Expires, so an unreadable backup cannot freeze the mirror indefinitely — after a
+                    // day the rider's current settings are the truth and deserve backing up.
+                    if (durable.resetPending()) return@collect
+                    if (mirrorSnapshot(backup, durable)) lastMirrored = durable
                 }
         } catch (e: CancellationException) {
             throw e
-        } catch (e: Exception) {
-            Timber.w(e, "Primary settings read failed; preserving backup and retrying")
+        } catch (t: Throwable) {
+            // Throwable: mirrorStarted is never reset, so if this coroutine dies the process has no
+            // backup for the rest of its life — and silently. The loop below retries instead.
+            Timber.w(t, "Primary settings read failed; preserving backup and retrying")
         }
         delay(1_000)
     }
@@ -126,12 +189,18 @@ internal suspend fun mirrorSettings(source: DataStore<Preferences>, backup: Data
 
 internal suspend fun readDurableBackup(
     backup: DataStore<Preferences>,
-    maxAttempts: Int = 3,
+    maxAttempts: Int = 2,   // worst case 2x2s + 1s: this blocks every dataStore consumer
     retryDelayMs: Long = 1_000,
+    readTimeoutMs: Long = 2_000,
 ): Map<Preferences.Key<*>, Any>? {
     repeat(maxAttempts.coerceAtLeast(1)) { attempt ->
         try {
-            return backup.data.first().durable()
+            // Bounded: this runs on the PRIMARY store's init path, so a backup read that hangs (rather
+            // than throws) would block every dataStore consumer in the process — the settings screens
+            // and the estimator's config load included — with no recovery short of a process kill.
+            withTimeoutOrNull(readTimeoutMs) { backup.data.first().durable() }?.let { return it }
+            Timber.w("Settings backup read timed out (%d/%d)", attempt + 1, maxAttempts)
+            if (attempt + 1 < maxAttempts) delay(retryDelayMs)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

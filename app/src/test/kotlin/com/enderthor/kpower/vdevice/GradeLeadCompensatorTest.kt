@@ -65,4 +65,34 @@ class GradeLeadCompensatorTest {
         for (g in listOf(0.0, 50.0, 100.0, 100.0, 100.0)) { out = comp.update(g, t); t += 1_000L }
         assertTrue("out=$out must be <= 25", out <= 25.0 + 1e-9)
     }
+
+    /**
+     * reseed() must kill the lead across a NON-gap discontinuity: the held-grade cliff (G -> 0) and the
+     * stream coming back (0 -> G). Reseeding only `prevTs` left the step ramping through the base EMA,
+     * so the derivative picked it up from the second tick and ~2/3 of the artefact survived — and the
+     * first tick after a stream return came out well BELOW the truth. Both directions asserted.
+     */
+    @Test
+    fun `reseed removes the lead artefact across a step in both directions`() {
+        val c = GradeLeadCompensator(tauMs = 1_000.0, leadSeconds = 2.0)
+        var t = 0L
+        repeat(30) { t += 1_000; c.update(6.0, t) }
+
+        // Hold cliff: 6 % -> 0 %. Without reseeding the base this dipped to about -0.6 % (a phantom
+        // descent worth ~-43 W); a real gap would have re-seeded straight to 0.
+        c.reseed()
+        var worst = 0.0
+        repeat(6) { t += 1_000; worst = minOf(worst, c.update(0.0, t)) }
+        assertTrue("phantom descent after the hold cliff: $worst %", worst > -0.1)
+
+        // Stream return: 0 % -> 6 %. The first tick must land on the truth, not undershoot it.
+        repeat(20) { t += 1_000; c.update(0.0, t) }
+        c.reseed()
+        t += 1_000
+        val firstAfter = c.update(6.0, t)
+        assertEquals("first tick after the stream returns", 6.0, firstAfter, 0.05)
+        var peak = firstAfter
+        repeat(6) { t += 1_000; peak = maxOf(peak, c.update(6.0, t)) }
+        assertTrue("overshoot after the stream returns: $peak %", peak < 6.1)
+    }
 }

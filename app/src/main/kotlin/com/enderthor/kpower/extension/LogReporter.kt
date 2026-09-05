@@ -38,10 +38,27 @@ object LogReporter {
     private val CALIBRATION_START = Regex("(CALIBRATION START #\\d+) \\([^\\r\\n)]*\\)")
     private val IDENTITY_PAYLOAD = Regex("(PAGE 0x5[01] payload=)[0-9A-Fa-f ]+")
     private val ANT_DEVICE = Regex("\\bdev=(\\d+)")
-    private val HASH_DEVICE = Regex("#(\\d+)")
-    private val SAVED_IDS = Regex("\\b(id|conn)=\\S+")
+    // A DENYLIST, not an allowlist: everything `#<digits>` is treated as a device number except the
+    // handful of known counters. An allowlist of prefixes would fail OPEN — several strings already
+    // embed a raw device number ("Power #\$dn", "KPW #\$deviceNumber") and would leak the day someone
+    // logs one. The exclusion exists because a bare `#\\d+` also ate `failure #3` in "RawAntChannel
+    // #6593 reopen in 2000ms (failure #3: death)", making the retry counter unreadable on exactly the
+    // failure path the log exists to diagnose.
+    private val HASH_DEVICE = Regex("(?<!failure )#(\\d+)")
+    // Any absolute path: mapfile and cache paths are named after the rider's region, and exception
+    // messages (which FileLogTree appends in full) and kotlinx-serialization parse errors drag them —
+    // and the offending JSON — into the upload.
+    private val FS_PATH = Regex("/(storage|sdcard|data|mnt)/\\S+")
+    // `conn=` is a connection TYPE (ANT_PLUS / BLE), not an identifier — redacting it threw away the
+    // only ANT-vs-BLE signal in the log for no privacy gain. Only `id=` is an identifier.
+    private val SAVED_IDS = Regex("\\bid=\\S+")
     private val SERIAL = Regex("serial=\\S+")
-    private val DEVICE_NAME = Regex("name=.*?(?= serial=)")   // the KAROODEV "saved id=… name=X serial=…" line
+    // Order-INDEPENDENT: the old lookahead required ` serial=` to follow `name=`, so reordering the
+    // KAROODEV format string (or inserting a field) would have shipped the rider's sensor name to
+    // Telegram unredacted, silently. Now it runs to the next known field or to end of line, so an
+    // unrecognised layout over-redacts instead of leaking.
+    private val DEVICE_NAME =
+        Regex("name=.*?(?=\\s(?:serial|batt|conn|id)=|$)", RegexOption.MULTILINE)
 
     /** True only when a real bot token + chat id were compiled in (so callers can skip work entirely). */
     val configured: Boolean
@@ -55,20 +72,31 @@ object LogReporter {
     }
 
     /**
-     * Replaces every device number with a per-file alias (A, B, … then AA) instead of a blanket `•`:
-     * the real ANT id never leaves, but two meters in the same log stay tellable apart — otherwise a
-     * dual-meter session redacts to lines nobody can attribute. Aliases are assigned in order of first
-     * appearance and are meaningless outside this one file.
+     * Replaces every device number with an alias (A, B, … then AA) instead of a blanket `•`: the real
+     * ANT id never leaves, but two meters in the same log stay tellable apart — otherwise a dual-meter
+     * session redacts to lines nobody can attribute. Aliases are assigned in order of first appearance
+     * and are meaningless outside this process, so they cannot be reversed to a device number.
+     *
+     * Held for the LIFE OF THE PROCESS, not per call: a ride's log is uploaded in ~30 chunks, each
+     * redacted separately, so a per-call map made the same meter `A` in one chunk and `B` in the next —
+     * defeating the whole point. Concurrent because the periodic uploader and the pairing screen can
+     * redact at the same time.
      */
-    private fun aliasDeviceNumbers(text: String): String {
-        val alias = HashMap<String, String>()
-        fun aliasOf(number: String) = alias.getOrPut(number) {
-            ('A' + alias.size % 26).toString().repeat(alias.size / 26 + 1)
+    private val deviceAliases = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    private fun aliasOf(number: String): String = synchronized(deviceAliases) {
+        // NOT getOrPut alone: it is get-then-put (not computeIfAbsent) and `size` is read outside any
+        // lock, so two concurrent redactions could assign the same letter to two different meters. This
+        // runs a handful of times per upload, not per line, so the monitor costs nothing.
+        deviceAliases.getOrPut(number) {
+            val n = deviceAliases.size
+            ('A' + n % 26).toString().repeat(n / 26 + 1)
         }
-        return text
-            .replace(ANT_DEVICE) { "dev=" + aliasOf(it.groupValues[1]) }
-            .replace(HASH_DEVICE) { "#" + aliasOf(it.groupValues[1]) }
     }
+
+    private fun aliasDeviceNumbers(text: String): String = text
+        .replace(ANT_DEVICE) { "dev=" + aliasOf(it.groupValues[1]) }
+        .replace(HASH_DEVICE) { "#" + aliasOf(it.groupValues[1]) }
 
     /** Strips GPS coordinates + sensor serials + saved-device names so no location/identity leaves. */
     fun redactForUpload(content: String): String = aliasDeviceNumbers(
@@ -79,7 +107,8 @@ object LogReporter {
             .replace(COORD, "$1=•")
             .replace(DEVICE_NAME, "name=•")
             .replace(SERIAL, "serial=•")
-            .replace(SAVED_IDS, "$1=•")
+            .replace(SAVED_IDS, "id=•")
+            .replace(FS_PATH, "•")
     )
 
     /**

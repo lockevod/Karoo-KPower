@@ -161,13 +161,22 @@ object CyclingDynamicsParser {
         // 8/16-bit deltas can be inconsistent (e.g. events wrapped >256 while period wrapped once),
         // producing a one-tick spike. Treat that as "no valid delta" (null) so the caller holds/
         // coasts and the NEXT clean frame recovers — never letting a garbage spike reach the FIT.
-        if (power !in 0.0..MAX_PLAUSIBLE_W ||
-            (curr.isCrank && rotationRpm !in 0.0..MAX_PLAUSIBLE_RPM)
-        ) return null
+        // Keep a rotation bound on the WHEEL page too, not just the crank one: without it a frame with
+        // dEvent=1/dPeriod=100/dTorque=150 yields a perfectly "plausible" 603 W and lands in the FIT.
+        // ponytail: this is a sanity CLAMP, not a true consistency check — it only catches artifacts
+        // whose implied wheel speed exceeds ~150 km/h (dPeriod <= ~102 for dEvent=1); one landing just
+        // outside still passes. The honest check is temporal (compare dPeriod/2048 against the
+        // wall-clock gap between frames); add it if garbage spikes are ever seen on device.
+        val rotationLimit = if (curr.isCrank) MAX_PLAUSIBLE_RPM else MAX_PLAUSIBLE_WHEEL_RPM
+        if (power !in 0.0..MAX_PLAUSIBLE_W || rotationRpm !in 0.0..rotationLimit) return null
         return TorquePower(
             powerW = power,
             cadenceRpm = cadence,
-            torqueNm = (dTorque / 32.0) / dEvent,
+            // Per WHEEL revolution on 0x11 — that is wheel torque, and it is published alongside a
+            // CRANK cadence and written to the FIT as pm1_torque, where it reads as crank torque. The
+            // two differ by the gear ratio (3-4x) and we cannot derive it, so report nothing rather
+            // than a number in the wrong reference frame.
+            torqueNm = if (curr.isCrank) (dTorque / 32.0) / dEvent else Double.NaN,
         )
     }
 
@@ -176,4 +185,7 @@ object CyclingDynamicsParser {
     // outside this band (huge/negative), so they're still caught.
     private const val MAX_PLAUSIBLE_W = 2000.0
     private const val MAX_PLAUSIBLE_RPM = 200.0     // track sprint tops ~200; above = artifact
+    // Wheel rotation, not pedalling: ~1200 rpm is ~150 km/h on a 2.1 m tyre, well above any descent
+    // or trainer spin-up, so it only rejects inconsistent masked deltas.
+    private const val MAX_PLAUSIBLE_WHEEL_RPM = 1200.0
 }

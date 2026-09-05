@@ -106,6 +106,11 @@ class RawAntChannel(
      *  the check-and-set is atomic — a plain volatile read-then-write let two callers both pass. */
     private val opening = AtomicBoolean(false)
 
+    /** When a delayed open() is already due; Long.MAX_VALUE once the failure budget is spent. The
+     *  heartbeat backstop only fires past this, so it can neither cut short the search-rest duty cycle
+     *  nor keep retrying (and logging an ERROR every 15 s) a channel that deliberately gave up. */
+    @Volatile private var nextOpenDueMs = 0L
+
     /** Guards [releaseChannel] so a handle is torn down (close/unassign/release) at most once, even
      *  when open()'s own configure-time bailouts race stop() on the SAME channel (different IO
      *  threads) — a concurrent double-release can corrupt the ANT provider's free-channel accounting
@@ -230,6 +235,16 @@ class RawAntChannel(
                 // or death, recycle it — covers meters that stop broadcasting while the channel still
                 // reads as tracking. Budget-exempt (reuses the search-timeout duty-cycle path). lastPageMs
                 // is reset to 0 so we don't recycle again until real data returns.
+                // Backstop for the "no channel and nothing scheduled" hole: a request dropped by the
+                // open() CAS can be the LAST one pending (its winner having bailed out on a path that
+                // schedules nothing), and the silence check below can't help because it requires a
+                // channel. Cheap: only fires when there is genuinely nothing to lose.
+                if (!stopped && channel == null && !opening.get() &&
+                    System.currentTimeMillis() > nextOpenDueMs
+                ) {
+                    Timber.i("RawAntChannel #%d idle with no channel — reopening", deviceNumber)
+                    open()
+                }
                 val lp = lastPageMs
                 if (!stopped && channel != null && !opening.get() && lp > 0L &&
                     System.currentTimeMillis() - lp > HEARTBEAT_TIMEOUT_MS
@@ -337,7 +352,7 @@ class RawAntChannel(
                             MessageFromAntType.BROADCAST_DATA -> {
                                 // Receiving a page proves the link is healthy — clear the failure budget
                                 // so a death hours later still gets a full set of retries.
-                                failures = 0
+                                failures = 0; nextOpenDueMs = 0L
                                 lastPageMs = System.currentTimeMillis()
                                 runCatching {
                                     val payload = BroadcastDataMessage(msg).payload
@@ -420,6 +435,7 @@ class RawAntChannel(
                     // budget-exempt backstop in case that broadcast is missed/coalesced (so the meter
                     // can't be permanently dead).
                     Timber.w("RawAntChannel #%d no channel available; awaiting provider", deviceNumber)
+                    nextOpenDueMs = System.currentTimeMillis() + NO_CHANNEL_RETRY_MS
                     scope.launch { delay(NO_CHANNEL_RETRY_MS); if (!stopped && channel == null && !opening.get()) open() }
                 } else {
                     Timber.e(e, "RawAntChannel #%d open failed", deviceNumber)
@@ -481,6 +497,7 @@ class RawAntChannel(
         channel = null
         releaseChannel(dead)
         Timber.i("RawAntChannel #%d search idle (%s) — retry in %dms", deviceNumber, reason, SEARCH_REST_MS)
+        nextOpenDueMs = System.currentTimeMillis() + SEARCH_REST_MS
         scope.launch { delay(SEARCH_REST_MS); if (!stopped) open() }
     }
 
@@ -503,10 +520,15 @@ class RawAntChannel(
         if (stopped) return
         if (++failures > MAX_FAILURES) {
             Timber.e("RawAntChannel #%d gave up after %d consecutive failures (%s)", deviceNumber, failures - 1, reason)
+            // Park the heartbeat backstop too, or the budget bounds nothing: it would call open() every
+            // 15 s forever, logging an ERROR and burning a binder round-trip each time. Cleared with the
+            // budget when a page arrives, and by a fresh connect().
+            nextOpenDueMs = Long.MAX_VALUE
             return
         }
         val backoff = (REOPEN_BACKOFF_MS * failures).coerceAtMost(MAX_BACKOFF_MS)
         Timber.w("RawAntChannel #%d reopen in %dms (failure #%d: %s)", deviceNumber, backoff, failures, reason)
+        nextOpenDueMs = System.currentTimeMillis() + backoff
         scope.launch {
             delay(backoff)
             if (!stopped) open()

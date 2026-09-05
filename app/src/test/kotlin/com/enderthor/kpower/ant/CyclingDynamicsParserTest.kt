@@ -235,4 +235,48 @@ class CyclingDynamicsParserTest {
         assertEquals("Bkool", antDeviceDisplayName(d.manufacturerId, d.modelNumber))
         assertEquals("ANT #999", AntManufacturers.name(999))   // truly unknown id still falls back
     }
+
+    /** M3: dropping the rpm bound on 0x11 removed the only CROSS-CHECK that the two masked
+     *  accumulators are consistent — an inconsistent frame after a reacquire then yields a perfectly
+     *  "plausible" 603 W that lands in the FIT and inflates NP/TSS. */
+    @Test
+    fun torquePower_wheelFrameWithInconsistentDeltasIsRejected() {
+        val prev = TorqueData(false, eventCount = 0, ticks = 0, cadenceRpm = 85.0,
+            accumPeriod = 0, accumTorque = 0)
+        // dEvent=1 with dPeriod=100 is 1229 wheel rpm (~155 km/h on a 2.1 m tyre) — impossible, so the
+        // 603 W it computes cannot be trusted either.
+        val curr = TorqueData(false, eventCount = 1, ticks = 1, cadenceRpm = 85.0,
+            accumPeriod = 100, accumTorque = 150)
+        assertNull(CyclingDynamicsParser.torquePower(prev, curr))
+    }
+
+    @Test
+    fun torquePower_wheelFrameWithARealisticWheelSpeedIsKept() {
+        val prev = TorqueData(false, eventCount = 0, ticks = 0, cadenceRpm = 85.0,
+            accumPeriod = 0, accumTorque = 0)
+        // 1 wheel rev in 2048/8 ticks = 480 rpm (~60 km/h) — a fast descent, must NOT be rejected.
+        val curr = TorqueData(false, eventCount = 1, ticks = 1, cadenceRpm = 85.0,
+            accumPeriod = 256, accumTorque = 200)
+        val tp = CyclingDynamicsParser.torquePower(prev, curr)!!
+        assertEquals("pedal cadence comes from the page, not the wheel rate", 85.0, tp.cadenceRpm, 0.01)
+    }
+
+    /** B2: on 0x11 the torque accumulator is per WHEEL revolution, but it is published next to a crank
+     *  cadence and written to the FIT as pm1_torque, where it reads as crank torque — off by the gear
+     *  ratio. We cannot derive that ratio, so report nothing rather than a wrong-frame number. */
+    @Test
+    fun torquePower_wheelPageReportsNoCrankTorque() {
+        val prev = TorqueData(false, eventCount = 0, ticks = 0, cadenceRpm = 85.0,
+            accumPeriod = 0, accumTorque = 0)
+        val curr = TorqueData(false, eventCount = 1, ticks = 1, cadenceRpm = 85.0,
+            accumPeriod = 256, accumTorque = 200)
+        assertTrue(CyclingDynamicsParser.torquePower(prev, curr)!!.torqueNm.isNaN())
+
+        val cPrev = TorqueData(true, eventCount = 0, ticks = 0, cadenceRpm = null,
+            accumPeriod = 0, accumTorque = 0)
+        val cCurr = TorqueData(true, eventCount = 1, ticks = 1, cadenceRpm = null,
+            accumPeriod = 2048, accumTorque = 640)
+        assertEquals("crank torque is still reported", 20.0,
+            CyclingDynamicsParser.torquePower(cPrev, cCurr)!!.torqueNm, 0.01)
+    }
 }
