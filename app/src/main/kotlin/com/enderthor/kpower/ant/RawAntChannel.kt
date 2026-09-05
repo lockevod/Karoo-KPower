@@ -31,6 +31,16 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import timber.log.Timber
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
+
+internal fun tryBeginChannelOpen(opening: AtomicBoolean, blocked: () -> Boolean): Boolean {
+    if (blocked() || !opening.compareAndSet(false, true)) return false
+    if (blocked()) {
+        opening.set(false)
+        return false
+    }
+    return true
+}
 
 /**
  * Opens a raw ANT+ SLAVE channel bound to ONE bike-power device number (type 11, RF 57,
@@ -94,7 +104,7 @@ class RawAntChannel(
 
     /** Guards against two open() attempts running at once (death-retry racing a late rebind). CAS so
      *  the check-and-set is atomic — a plain volatile read-then-write let two callers both pass. */
-    private val opening = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val opening = AtomicBoolean(false)
 
     /** Guards [releaseChannel] so a handle is torn down (close/unassign/release) at most once, even
      *  when open()'s own configure-time bailouts race stop() on the SAME channel (different IO
@@ -293,10 +303,9 @@ class RawAntChannel(
      * released immediately and we return without opening, so no orphan channel is left.
      */
     private suspend fun open() {
-        if (stopped) return
-        // Atomically claim the "opening" slot; if another open() is already in flight it is acquiring
-        // a fresh channel, so dropping this attempt is safe (that one will succeed or reschedule).
-        if (!opening.compareAndSet(false, true)) return
+        // Claim only when no acquisition is in flight and no live channel already exists. A delayed
+        // retry can otherwise overwrite a channel opened sooner by the provider/rebind callback.
+        if (!tryBeginChannelOpen(opening) { stopped || channel != null }) return
         try {
             runCatching {
                 // The ANT Radio Service can be mid-restart (ChannelNotAvailableException

@@ -20,7 +20,7 @@
     <string name="real1_balance_avg_desc">Session-average left/right balance of the real meter (while recording).</string>
     <string name="meter_double_pair_warning">Tip: to feed this meter to the Karoo, pair the sensor named “KPOWER …” (your meter\'s name with a KPOWER prefix) in your ride profile — don\'t also pair the meter natively, or power will be recorded twice.</string>
     <string name="diagnostic_log_label">Diagnostic logging</string>
-    <string name="diagnostic_log_desc">Records a detailed log file for each ride (every ANT+ page including unknown ones, parsed values, and connection events) so it can be analysed later. Off by default — it uses some extra battery and storage.</string>
+    <string name="diagnostic_log_desc">Records detailed ride and ANT+ diagnostics. In developer-configured builds, enabling it also sends anonymized, GPS-stripped logs to the developer via Telegram during/after rides and after pairing or calibration. Off by default — it uses extra battery, storage and data.</string>
 
     <!-- Tabs -->
     <string name="tab_bikes">Estimator</string>

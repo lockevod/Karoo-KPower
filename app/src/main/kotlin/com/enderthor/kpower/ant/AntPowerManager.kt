@@ -6,12 +6,30 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
 import timber.log.Timber
+
+internal fun correctedPowerFlow(
+    deviceNumber: Int,
+    rawPower: Flow<Double>,
+    offsets: Flow<Map<Int, Pair<Double, Double>>>,
+): Flow<Double> = combine(rawPower, offsets) { raw, currentOffsets ->
+    val offset = currentOffsets[deviceNumber] ?: return@combine raw
+    com.enderthor.kpower.vdevice.applyPowerOffset(raw, offset.first, offset.second)
+}
+
+internal fun removeIdentifyJobIfOwned(
+    jobs: java.util.concurrent.ConcurrentHashMap<Int, Job>,
+    deviceNumber: Int,
+    owner: Job,
+): Boolean = jobs.remove(deviceNumber, owner)
 
 /** Owns the ANT+ power-meter scan and the connected per-device readers. */
 class AntPowerManager(private val context: Context) {
@@ -34,7 +52,6 @@ class AntPowerManager(private val context: Context) {
     // wake when the rider pedals — keeping the request channel open means the name appears within ~1s of
     // it waking, instead of staying "Identifying…" forever. Released as soon as the name resolves, or when
     // the scan stops. Keyed by device number → its in-flight identify job (also the dedup).
-    private val identifyToken = Any()
     private val identifyJobs = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.Job>()
 
     private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
@@ -47,16 +64,16 @@ class AntPowerManager(private val context: Context) {
 
     // Per-device manual power offset (factorPct, offsetW), pushed from the saved-meter list by the
     // extension whenever it changes. Empty / missing device → identity. Read on every ingested sample.
-    @Volatile private var meterOffsets: Map<Int, Pair<Double, Double>> = emptyMap()
+    private val meterOffsets = MutableStateFlow<Map<Int, Pair<Double, Double>>>(emptyMap())
 
     /** Refresh the per-meter power offsets from the current saved-meter list (identity for any not listed). */
     fun setMeterOffsets(meters: List<SavedMeter>) {
-        meterOffsets = meters.associate { it.deviceNumber to (it.powerFactorPct to it.powerOffsetW) }
+        meterOffsets.value = meters.associate { it.deviceNumber to (it.powerFactorPct to it.powerOffsetW) }
     }
 
     /** The device's manual-corrected power (identity when it has no offset entry). */
     private fun correctedPower(dn: Int, raw: Double): Double {
-        val off = meterOffsets[dn] ?: return raw
+        val off = meterOffsets.value[dn] ?: return raw
         return com.enderthor.kpower.vdevice.applyPowerOffset(raw, off.first, off.second)
     }
     // NOTE: torque / avg-torque / max-torque / TE-PS flows were removed — the Karoo shows all of those
@@ -164,8 +181,8 @@ class AntPowerManager(private val context: Context) {
 
     /**
      * Open device [dn]'s own bidirectional channel for a few seconds so it requests + reports its
-     * manufacturer page, then release it. Reuses the ref-counted acquire/release lifecycle (under the
-     * [identifyToken]) and the stable [manufacturerFlow], so it shares all the channel recovery logic.
+     * manufacturer page, then release it. Reuses the ref-counted acquire/release lifecycle with a
+     * per-session holder token and the stable [manufacturerFlow], so it shares all channel recovery.
      * No-op if already identifying [dn], the scan is not running, or the manager is closed.
      *
      * @Synchronized (same monitor as [stopScan]): startIdentify runs on the scan channel's callback
@@ -188,18 +205,21 @@ class AntPowerManager(private val context: Context) {
         // (its finally removing a not-yet-present map entry, a no-op) before this thread even reaches the
         // map assignment — leaving a stale completed Job that blocks re-identifying dn until stopScan.
         // Starting only after the map entry exists guarantees the finally's remove() always finds it.
+        val holderToken = Any()
         val job = scope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
+            val owner = coroutineContext[Job]!!
             try {
                 // acquire INSIDE the coroutine: if the job is cancelled before its body runs (stopScan
                 // racing the launch), the channel hold is never taken, so it can't leak. The channel is
                 // held until the name resolves or stopScan cancels this job (finally releases either way).
-                acquire(dn, identifyToken)
+                acquire(dn, holderToken)
                 val name = manufacturerFlow(dn).filterNotNull().first()
+                if (identifyJobs[dn] !== owner) return@launch
                 updateResolved(dn, name)
                 Timber.d("ANT identify #%d resolved: %s", dn, name)
             } finally {
-                release(dn, identifyToken)
-                identifyJobs.remove(dn)
+                release(dn, holderToken)
+                removeIdentifyJobIfOwned(identifyJobs, dn, owner)
             }
         }
         identifyJobs[dn] = job
@@ -256,7 +276,7 @@ class AntPowerManager(private val context: Context) {
         val batterySink = batteryFlows.getOrPut(dn) { kotlinx.coroutines.flow.MutableStateFlow(null) }
         bridges[dn] = scope.launch {
             // mirror power + cadence into the stable sinks (re-binds the NEW meter on reconnect)
-            launch { m.power.collect { sink.value = correctedPower(dn, it) } }
+            launch { correctedPowerFlow(dn, m.power, meterOffsets).collect { sink.value = it } }
             launch { m.cadence.collect { cadenceSink.value = it } }
             // torque / TE-PS / balance / power-phase are NOT mirrored to flows (no on-screen field — the
             // Karoo shows them natively); they reach the FIT straight from the live reader in startFit.

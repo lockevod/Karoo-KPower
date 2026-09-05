@@ -34,6 +34,12 @@ object LogReporter {
     // Any coordinate token (`lat=`, `lng=`, `lon=` — note GpsCoordinates.toString() uses `lon=` —,
     // `latitude=`, `longitude=`) → `=•`. Then sensor serials and the Karoo saved-device names.
     private val COORD = Regex("(lat|lng|lon|latitude|longitude)=-?\\d+(\\.\\d+)?")
+    private val CLASSIFY_COORDS = Regex("classifyAt\\([^\\r\\n)]*\\)")
+    private val CALIBRATION_START = Regex("(CALIBRATION START #\\d+) \\([^\\r\\n)]*\\)")
+    private val IDENTITY_PAYLOAD = Regex("(PAGE 0x5[01] payload=)[0-9A-Fa-f ]+")
+    private val ANT_DEVICE = Regex("\\bdev=(\\d+)")
+    private val HASH_DEVICE = Regex("#(\\d+)")
+    private val SAVED_IDS = Regex("\\b(id|conn)=\\S+")
     private val SERIAL = Regex("serial=\\S+")
     private val DEVICE_NAME = Regex("name=.*?(?= serial=)")   // the KAROODEV "saved id=… name=X serial=…" line
 
@@ -48,11 +54,33 @@ object LogReporter {
         val ok: Boolean get() = this is Success
     }
 
+    /**
+     * Replaces every device number with a per-file alias (A, B, … then AA) instead of a blanket `•`:
+     * the real ANT id never leaves, but two meters in the same log stay tellable apart — otherwise a
+     * dual-meter session redacts to lines nobody can attribute. Aliases are assigned in order of first
+     * appearance and are meaningless outside this one file.
+     */
+    private fun aliasDeviceNumbers(text: String): String {
+        val alias = HashMap<String, String>()
+        fun aliasOf(number: String) = alias.getOrPut(number) {
+            ('A' + alias.size % 26).toString().repeat(alias.size / 26 + 1)
+        }
+        return text
+            .replace(ANT_DEVICE) { "dev=" + aliasOf(it.groupValues[1]) }
+            .replace(HASH_DEVICE) { "#" + aliasOf(it.groupValues[1]) }
+    }
+
     /** Strips GPS coordinates + sensor serials + saved-device names so no location/identity leaves. */
-    fun redactForUpload(content: String): String = content
-        .replace(COORD, "$1=•")
-        .replace(DEVICE_NAME, "name=•")
-        .replace(SERIAL, "serial=•")
+    fun redactForUpload(content: String): String = aliasDeviceNumbers(
+        content
+            .replace(CLASSIFY_COORDS, "classifyAt(•,•)")
+            .replace(CALIBRATION_START, "$1 (•)")
+            .replace(IDENTITY_PAYLOAD, "$1•")
+            .replace(COORD, "$1=•")
+            .replace(DEVICE_NAME, "name=•")
+            .replace(SERIAL, "serial=•")
+            .replace(SAVED_IDS, "$1=•")
+    )
 
     /**
      * Sends [content] (redacted) as a Telegram document named [fileName], with [caption] as the message

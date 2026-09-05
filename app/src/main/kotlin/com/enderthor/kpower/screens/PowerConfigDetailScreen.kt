@@ -22,6 +22,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.activity.compose.BackHandler
 import com.enderthor.kpower.R
 import com.enderthor.kpower.data.BikePosition
 import com.enderthor.kpower.data.ConfigData
@@ -84,6 +85,7 @@ fun DetailScreen(configdata: ConfigData, onUpdate: (ConfigData) -> Unit, onDelet
     var estPowerOffsetW by remember(configdata.id) { mutableStateOf(configdata.estPowerOffsetW) }
     val headwindInstalled = remember { ctx.isHeadwindInstalled() }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    val deleted = remember(configdata.id) { mutableStateOf(false) }
 
     val detailCtx = androidx.compose.ui.platform.LocalContext.current
     val knownProfiles by detailCtx.knownProfilesFlow().collectAsState(initial = emptyList())
@@ -147,6 +149,17 @@ fun DetailScreen(configdata: ConfigData, onUpdate: (ConfigData) -> Unit, onDelet
         estPowerFactorPct = estPowerFactorPct,
         estPowerOffsetW = estPowerOffsetW,
         )
+    }
+
+    val latestConfig = rememberUpdatedState(getUpdatedConfigData())
+    DisposableEffect(configdata.id) {
+        onDispose {
+            if (!deleted.value) onUpdate(latestConfig.value)
+        }
+    }
+    BackHandler {
+        onUpdate(getUpdatedConfigData())
+        onBack()
     }
 
     // Auto-save: persist every edit after a short debounce (no Save/Cancel buttons). snapshotFlow
@@ -497,6 +510,7 @@ fun DetailScreen(configdata: ConfigData, onUpdate: (ConfigData) -> Unit, onDelet
             confirmButton = {
                 TextButton(onClick = {
                     showDeleteConfirm = false
+                    deleted.value = true
                     onDelete()
                 }) {
                     Text(stringResource(R.string.btn_delete), color = MaterialTheme.colorScheme.error)

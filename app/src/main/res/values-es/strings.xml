@@ -20,7 +20,7 @@
     <string name="real1_balance_avg_desc">Balance izquierda/derecha medio de la sesión del medidor real (mientras graba).</string>
     <string name="meter_double_pair_warning">Consejo: para enviar este potenciómetro al Karoo, empareja el sensor llamado “KPOWER …” (el nombre de tu potenciómetro con el prefijo KPOWER) en tu perfil de ruta — no emparejes además el potenciómetro de forma nativa, o la potencia se grabará dos veces.</string>
     <string name="diagnostic_log_label">Registro de diagnóstico</string>
-    <string name="diagnostic_log_desc">Graba un archivo de registro detallado en cada salida (cada página ANT+ incluidas las desconocidas, valores interpretados y eventos de conexión) para poder analizarlo después. Off por defecto — consume algo más de batería y almacenamiento.</string>
+    <string name="diagnostic_log_desc">Graba diagnósticos detallados de la salida y ANT+. En compilaciones configuradas por el desarrollador, al activarlo también envía registros anonimizados y sin GPS al desarrollador por Telegram durante/después de la salida y tras emparejar o calibrar. Off por defecto — consume más batería, almacenamiento y datos.</string>
 
     <!-- Tabs -->
     <string name="tab_bikes">Estimador</string>

@@ -26,6 +26,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import timber.log.Timber
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Power-meter discovery EXACTLY the way the Karoo's sensor service does it (verified by decompiling
@@ -54,6 +55,7 @@ class RawAntScanChannel(
     @Volatile private var channel: AntChannel? = null
     @Volatile private var stopped = false
     @Volatile private var openAttempts = 0
+    private val opening = AtomicBoolean(false)
 
     private val conn = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
@@ -80,7 +82,15 @@ class RawAntScanChannel(
     /** Synchronous (non-suspend) so a concurrent stop()/scope.cancel() can't interrupt mid-config and
      *  orphan a channel. Always releases the LOCAL channel on failure (never the shared field). */
     private fun open() {
-        if (stopped) return
+        if (!tryBeginChannelOpen(opening) { stopped || channel != null }) return
+        try {
+            openClaimed()
+        } finally {
+            opening.set(false)
+        }
+    }
+
+    private fun openClaimed() {
         // channelProvider is a binder call (throws RemoteException if the ANT service died) — guard it,
         // else open() throws on the IO coroutine with no retry and the scan silently never recovers.
         val provider = runCatching { antService?.channelProvider }.getOrNull()
@@ -118,8 +128,10 @@ class RawAntScanChannel(
             ch.setChannelId(ChannelId(0, 0, 0))                 // wildcard = all devices
             if (stopped) { releaseQuietly(ch); return }
             ch.open()
-            channel = ch
-            if (stopped) { channel = null; releaseQuietly(ch); return }   // stop() raced past open()
+            val published = synchronized(this) {
+                if (stopped || channel != null) false else { channel = ch; true }
+            }
+            if (!published) { releaseQuietly(ch); return }
             openAttempts = 0
             Timber.d("RawAntScanChannel: wildcard background scan open (rf=57 priority=11)")
         } catch (e: Throwable) {
@@ -154,7 +166,14 @@ class RawAntScanChannel(
                 onBroadcast(cid.deviceNumber, bdm.payload)
             }
         }
-        override fun onChannelDeath() {}
+        override fun onChannelDeath() {
+            val current = synchronized(this@RawAntScanChannel) {
+                if (stopped || channel !== ch) false else { channel = null; true }
+            }
+            if (!current) return
+            releaseQuietly(ch)
+            scheduleRetry(2_000, countsToward = true)
+        }
     }
 
     private fun releaseQuietly(ch: AntChannel) {
@@ -165,8 +184,10 @@ class RawAntScanChannel(
     }
 
     fun stop() {
-        stopped = true
-        val ch = channel; channel = null
+        val ch = synchronized(this) {
+            stopped = true
+            channel.also { channel = null }
+        }
         antService = null
         // Release + unbind are binder IPC that can block — do them OFF the caller (stop() is invoked from
         // Compose click handlers on the main thread), then cancel the scope once teardown is done.

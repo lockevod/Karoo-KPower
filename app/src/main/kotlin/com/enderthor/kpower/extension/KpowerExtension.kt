@@ -41,6 +41,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
 
+import com.enderthor.kpower.activity.mirrorSettingsToBackup
 import com.enderthor.kpower.BuildConfig
 import com.enderthor.kpower.R
 import com.enderthor.kpower.ant.BatteryLevel
@@ -234,6 +235,10 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
         serviceScope.launch {
             karooSystem.updateLastKnownGps(this@KpowerExtension)
         }
+
+        // Mirror the durable settings so a corrupted store (process killed mid-write at ride end)
+        // is refilled on the next open instead of resetting the rider's setup.
+        applicationContext.mirrorSettingsToBackup()
 
         // Field calibration: feed the engine the ACTIVE real meter's live power, and persist the running
         // CdA + per-surface-Crr fit every 30 s while recording, so the settings UI can offer it after the

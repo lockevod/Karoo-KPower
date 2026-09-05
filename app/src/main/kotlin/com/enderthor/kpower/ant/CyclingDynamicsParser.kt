@@ -146,17 +146,24 @@ object CyclingDynamicsParser {
      *   Torque (Nm)  = (Δtorque / 32) / Δevent
      */
     fun torquePower(prev: TorqueData, curr: TorqueData): TorquePower? {
+        if (prev.isCrank != curr.isCrank) return null
         val dEvent = (curr.eventCount - prev.eventCount) and 0xFF
         val dPeriod = (curr.accumPeriod - prev.accumPeriod) and 0xFFFF
         val dTorque = (curr.accumTorque - prev.accumTorque) and 0xFFFF
         if (dEvent == 0 || dPeriod == 0) return null
         val power = 128.0 * Math.PI * dTorque / dPeriod
-        val cadence = 60.0 * 2048.0 * dEvent / dPeriod
+        val rotationRpm = 60.0 * 2048.0 * dEvent / dPeriod
+        // On 0x11, event/period describe WHEEL rotation; byte 3 is the optional pedal cadence.
+        // On 0x12, event/period describe CRANK rotation and therefore are the cadence.
+        val cadence = if (curr.isCrank) rotationRpm
+        else curr.cadenceRpm?.takeIf { it in 0.0..MAX_PLAUSIBLE_RPM } ?: Double.NaN
         // Reject physically-impossible results. After a reacquire that skipped frames, the masked
         // 8/16-bit deltas can be inconsistent (e.g. events wrapped >256 while period wrapped once),
         // producing a one-tick spike. Treat that as "no valid delta" (null) so the caller holds/
         // coasts and the NEXT clean frame recovers — never letting a garbage spike reach the FIT.
-        if (power !in 0.0..MAX_PLAUSIBLE_W || cadence !in 0.0..MAX_PLAUSIBLE_RPM) return null
+        if (power !in 0.0..MAX_PLAUSIBLE_W ||
+            (curr.isCrank && rotationRpm !in 0.0..MAX_PLAUSIBLE_RPM)
+        ) return null
         return TorquePower(
             powerW = power,
             cadenceRpm = cadence,

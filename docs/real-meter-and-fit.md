@@ -164,6 +164,12 @@ enabled, **“Log estimated power (FIT)”** on, and **diagnostic logging** on, 
 a ± std error) go to the diagnostic log (`CALIB …`) for offline analysis. A small ± means the ride
 pinned the value down; a large ± means it didn't.
 
+When **diagnostic logging** is enabled in a build configured for developer delivery, KPower
+automatically sends log chunks to the developer through Telegram during and after rides, and after
+pairing or calibration. The uploaded copy removes GPS coordinates, saved sensor names, serial/device
+identifiers and raw ANT identity pages; the full-detail file remains local. Diagnostics are off by
+default and use additional battery, storage and network data.
+
 ## FAQ
 
 **I added a real meter but it gets no signal — does it write garbage to the FIT?**

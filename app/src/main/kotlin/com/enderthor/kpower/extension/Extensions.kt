@@ -74,6 +74,10 @@ import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.single
 import kotlinx.coroutines.flow.timeout
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
 
@@ -245,6 +249,27 @@ suspend fun savePreferences(context: Context, configDatas: List<ConfigData>) {
     context.dataStore.edit { t ->
         t[preferencesKey] = Json.encodeToString(configDatas)
     }
+}
+
+private val preferenceWrites = Channel<Pair<Context, List<ConfigData>>>(Channel.CONFLATED)
+private val preferenceWriteScope = CoroutineScope(Dispatchers.IO + SupervisorJob()).apply {
+    launch {
+        for ((context, configs) in preferenceWrites) {
+            try {
+                savePreferences(context, configs)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to save bike settings")
+            }
+        }
+    }
+}
+
+/** Queue the latest whole-bike-list snapshot on a process-owned writer so leaving Compose cannot
+ * cancel the final save. Conflation is safe because every item is the complete current list. */
+fun queueSavePreferences(context: Context, configDatas: List<ConfigData>) {
+    preferenceWrites.trySend(context.applicationContext to configDatas)
 }
 
 suspend fun saveStats(context: Context, stats: HeadwindStats) {
@@ -709,36 +734,42 @@ fun KarooSystemService.streamDataMonitorFlow(
         return@flow
     }
 
+    monitorStreamData(
+        streamFactory = { streamDataFlow(dataTypeID) },
+        applyDistinct = applyDistinct,
+    ).collect { emit(it) }
+}
+
+@OptIn(FlowPreview::class)
+internal fun monitorStreamData(
+    streamFactory: () -> Flow<StreamState>,
+    applyDistinct: Boolean,
+    timeoutMs: Long = STREAM_TIMEOUT,
+    shortDelayMs: Long = WAIT_STREAMS_SHORT,
+    mediumDelayMs: Long = WAIT_STREAMS_MEDIUM,
+    longDelayMs: Long = WAIT_STREAMS_LONG,
+    retryLimit: Int = RETRY_CHECK_STREAMS,
+): Flow<StreamState> = flow {
     var retryAttempt = 0
-
-    val initialState = StreamState.Streaming(
-        DataPoint(
-            dataTypeId = dataTypeID,
-            values = mapOf(DataType.Field.SINGLE to 0.0)
-        )
-    )
-
-    emit(initialState)
-
+    emit(StreamState.NotAvailable)
     while (currentCoroutineContext().isActive) {
         try {
-            val base = streamDataFlow(dataTypeID)
-            val source = if (applyDistinct) base.distinctUntilChanged() else base
+            val live = streamFactory().timeout(timeoutMs.milliseconds)
+            val source = if (applyDistinct) live.distinctUntilChanged() else live
             source
-                .timeout(STREAM_TIMEOUT.milliseconds)
                 .collect { state ->
                     when (state) {
                         is StreamState.Idle -> {
-                            if (dataTypeID == DataType.Type.SPEED) emit(initialState)
-                            delay(WAIT_STREAMS_SHORT)
+                            emit(state)
+                            delay(shortDelayMs)
                         }
                         is StreamState.NotAvailable -> {
-                            emit(initialState)
-                            delay(WAIT_STREAMS_SHORT * 2)
+                            emit(state)
+                            delay(shortDelayMs * 2)
                         }
                         is StreamState.Searching -> {
-                            emit(initialState)
-                            delay(WAIT_STREAMS_SHORT / 2)
+                            emit(state)
+                            delay(shortDelayMs / 2)
                         }
                         else -> {
                             retryAttempt = 0
@@ -750,19 +781,20 @@ fun KarooSystemService.streamDataMonitorFlow(
         } catch (e: Exception) {
             when (e) {
                 is TimeoutCancellationException -> {
-                    if (retryAttempt++ < RETRY_CHECK_STREAMS) {
+                    emit(StreamState.NotAvailable)
+                    if (retryAttempt++ < retryLimit) {
                         val backoffDelay = (1000L * (1 shl retryAttempt))
-                            .coerceAtMost(WAIT_STREAMS_MEDIUM)
+                            .coerceAtMost(mediumDelayMs)
                         delay(backoffDelay)
                     } else {
                         retryAttempt = 0
-                        delay(WAIT_STREAMS_LONG)
+                        delay(longDelayMs)
                     }
                 }
-                is CancellationException -> { /* propagated by collect, ignore */ }
+                is CancellationException -> throw e
                 else -> {
-                    Timber.e(e, "Error en stream $dataTypeID")
-                    delay(WAIT_STREAMS_LONG)
+                    Timber.e(e, "Error en monitor de stream")
+                    delay(longDelayMs)
                 }
             }
         }
@@ -846,4 +878,3 @@ fun KarooSystemService.headwindFlow(context: Context): Flow<StreamState> =
                 DataPoint("headwindspeed", mapOf(DataType.Field.SINGLE to 0.0))
             ))
         }
-

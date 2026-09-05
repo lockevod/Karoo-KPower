@@ -7,6 +7,27 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlin.math.PI
 
+internal enum class PowerEventStatus { NEW, HOLD, COAST }
+
+internal class PowerEventTracker(private val coastMs: Long) {
+    private var eventCount: Int? = null
+    private var lastChangeMs = 0L
+
+    fun update(nextEventCount: Int, nowMs: Long): PowerEventStatus {
+        if (eventCount != nextEventCount) {
+            eventCount = nextEventCount
+            lastChangeMs = nowMs
+            return PowerEventStatus.NEW
+        }
+        return if (nowMs - lastChangeMs > coastMs) PowerEventStatus.COAST else PowerEventStatus.HOLD
+    }
+
+    fun reset() {
+        eventCount = null
+        lastChangeMs = 0L
+    }
+}
+
 /**
  * Reads ONE ANT+ bike power meter by device number over a RAW ANT channel ([RawAntChannel])
  * instead of antpluginlib. This lets us also see the
@@ -76,8 +97,10 @@ class RawAntPowerMeter(
 
     @Volatile private var channel: RawAntChannel? = null
 
-    /** Timestamp (ms) of the most recent ANT event; 0 until the first sample arrives. */
-    @Volatile private var lastEventMs: Long = 0L
+    /** Timestamp (ms) of the most recent power-bearing page; unrelated dynamics must not keep stale
+     * power alive. 0 until the first 0x10/0x11/0x12 page arrives. */
+    @Volatile private var lastPowerPageMs: Long = 0L
+    private val powerEventTracker = PowerEventTracker(COAST_MS)
 
     // ── Torque-based power (0x11/0x12) state ────────────────────────────────────────────────────
     // @Volatile because onPayload runs on the ANT callback thread, and a channel reopen registers a
@@ -110,34 +133,47 @@ class RawAntPowerMeter(
         when (p[0].toInt() and 0xFF) {
             CyclingDynamicsParser.PAGE_POWER_ONLY -> {
                 val d = CyclingDynamicsParser.parsePowerOnly(p) ?: return
+                val now = System.currentTimeMillis()
+                val eventStatus = powerEventTracker.update(d.eventCount, now)
                 // A torque-based meter also sends 0x10 but with power=0; once we've seen a torque
                 // page, that path owns power/cadence/torque and we take only balance from 0x10.
                 if (!torquePageSeen) {
-                    _power.value = d.powerW ?: Double.NaN
-                    _cadence.value = d.cadenceRpm ?: Double.NaN
-                    _torque.value = computeTorque(d.powerW, d.cadenceRpm)
+                    when (eventStatus) {
+                        PowerEventStatus.NEW -> {
+                            _power.value = d.powerW ?: Double.NaN
+                            _cadence.value = d.cadenceRpm ?: Double.NaN
+                            _torque.value = computeTorque(d.powerW, d.cadenceRpm)
+                        }
+                        PowerEventStatus.COAST -> {
+                            _power.value = 0.0; _cadence.value = 0.0; _torque.value = 0.0
+                        }
+                        PowerEventStatus.HOLD -> Unit
+                    }
+                    lastPowerPageMs = now
                 } else if (_cadence.value.isNaN()) {
                     d.cadenceRpm?.let { _cadence.value = it }   // seed cadence before 2nd torque frame
                 }
-                _balanceRightPct.value = d.balanceRightPct ?: Double.NaN
-                lastEventMs = System.currentTimeMillis()
+                // Balance is a per-page ratio, not an accumulator: a repeated event count republishes
+                // the same number (a no-op on the StateFlow), so it does NOT need the freshness gate —
+                // and gating it would freeze balance on a torque meter whose 0x10 event count is static.
+                // Only coasting clears it, because a balance with no pedalling is meaningless.
+                _balanceRightPct.value =
+                    if (eventStatus == PowerEventStatus.COAST) Double.NaN
+                    else d.balanceRightPct ?: Double.NaN
             }
             CyclingDynamicsParser.PAGE_WHEEL_TORQUE, CyclingDynamicsParser.PAGE_CRANK_TORQUE -> {
                 CyclingDynamicsParser.parseTorque(p)?.let { onTorquePage(it) }
             }
             CyclingDynamicsParser.PAGE_TE_PS -> {
                 CyclingDynamicsParser.parseTePs(p)?.let { _tePs.value = it }
-                lastEventMs = System.currentTimeMillis()
             }
             CyclingDynamicsParser.PAGE_RIGHT_FORCE_ANGLE -> {
                 CyclingDynamicsParser.parseForceAngle(p, isLeft = false)
                     ?.let { _forceAngleRight.value = it }
-                lastEventMs = System.currentTimeMillis()
             }
             CyclingDynamicsParser.PAGE_LEFT_FORCE_ANGLE -> {
                 CyclingDynamicsParser.parseForceAngle(p, isLeft = true)
                     ?.let { _forceAngleLeft.value = it }
-                lastEventMs = System.currentTimeMillis()
             }
             CyclingDynamicsParser.PAGE_PEDAL_POSITION -> {
                 val d = CyclingDynamicsParser.parsePedalPosition(p) ?: return
@@ -150,14 +186,12 @@ class RawAntPowerMeter(
                     val pw = _power.value
                     if (!pw.isNaN()) _torque.value = computeTorque(pw, d.cadenceRpm)
                 }
-                lastEventMs = System.currentTimeMillis()
             }
             CyclingDynamicsParser.PAGE_TORQUE_BARYCENTER -> {
                 CyclingDynamicsParser.parseTorqueBarycenter(p)?.let { _barycenter.value = it }
-                lastEventMs = System.currentTimeMillis()
             }
             CyclingDynamicsParser.PAGE_MANUFACTURER -> {
-                // Device identity (brand). Not a "live" value, so it does NOT update lastEventMs and
+                // Device identity (brand). Not a "live" value, so it does NOT update lastPowerPageMs and
                 // is not cleared by reset()/expireIfStale.
                 CyclingDynamicsParser.parseManufacturer(p)?.let {
                     // FULL "Brand Model" (e.g. "Garmin Rally 200") for the scan list; SHORT (model/brand)
@@ -167,7 +201,7 @@ class RawAntPowerMeter(
                 }
             }
             CyclingDynamicsParser.PAGE_BATTERY -> {
-                // Slow identity-ish status; don't touch lastEventMs and survive reset().
+                // Slow identity-ish status; don't touch lastPowerPageMs and survive reset().
                 CyclingDynamicsParser.parseBatteryStatus(p)?.let { _batteryStatus.value = it }
             }
         }
@@ -219,7 +253,7 @@ class RawAntPowerMeter(
             lastTorqueEventChangeMs = now
         }
         prevTorque = d
-        lastEventMs = now
+        lastPowerPageMs = now
     }
 
     /** τ = P / (2π·rpm/60). NaN if power null or cadence null/≤0. */
@@ -228,9 +262,9 @@ class RawAntPowerMeter(
         return powerW / (2.0 * PI * cadenceRpm / 60.0)
     }
 
-    /** Reset values to NaN if no ANT event arrived within [staleMs] (silent dropout w/o DEAD). */
+    /** Reset values to NaN if no power-bearing page arrived within [staleMs] (silent dropout). */
     fun expireIfStale(nowMs: Long, staleMs: Long = 5_000L) {
-        if (lastEventMs != 0L && nowMs - lastEventMs > staleMs) reset()
+        if (lastPowerPageMs != 0L && nowMs - lastPowerPageMs > staleMs) reset()
     }
 
     private fun reset() {
@@ -241,7 +275,8 @@ class RawAntPowerMeter(
         // prevTorque cleared so the next frame re-seeds (no stale delta). torquePageSeen is LATCHED:
         // it's device identity (this meter reports power via torque pages), so a >5s dropout must not
         // flip it back and let a 0x10 power=0 frame momentarily publish 0 W on reacquire.
-        prevTorque = null; lastTorqueEventChangeMs = 0L
+        prevTorque = null; lastTorqueEventChangeMs = 0L; lastPowerPageMs = 0L
+        powerEventTracker.reset()
     }
 
     fun disconnect() {

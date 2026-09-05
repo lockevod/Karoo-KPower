@@ -75,7 +75,9 @@ real meter & FIT: **[docs/real-meter-and-fit.md](docs/real-meter-and-fit.md)**.
 - Built on the work of **timklge** ([repos](https://github.com/timklge?tab=repositories)) — parts of his
   code make this extension possible.
 - Power model: <https://www.gribble.org/cycling/power_v_speed.html>
-- KPower stores/shares nothing — it only uses the Karoo sensors and weather APIs to estimate power.
+- KPower has no account or backend. Weather lookup sends the current position to Open-Meteo; when the
+  off-by-default diagnostic log is enabled in a developer-configured build, anonymized GPS-stripped
+  logs are sent automatically to the developer through Telegram.
 
 ## Links
 

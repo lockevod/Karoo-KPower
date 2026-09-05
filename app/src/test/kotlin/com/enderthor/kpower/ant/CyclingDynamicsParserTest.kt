@@ -154,6 +154,44 @@ class CyclingDynamicsParserTest {
         assertEquals(90.0, tp.cadenceRpm, 1.0)
     }
 
+    @Test fun torquePower_wheelSpeedDoesNotTripCrankCadenceLimit() {
+        // 330 wheel rpm is ordinary road speed, while byte 3 still reports the rider's 92 rpm cadence.
+        val prev = TorqueData(false, eventCount = 10, ticks = 10, cadenceRpm = 92.0, accumPeriod = 0, accumTorque = 0)
+        val curr = TorqueData(false, eventCount = 11, ticks = 11, cadenceRpm = 92.0, accumPeriod = 372, accumTorque = 278)
+
+        val tp = CyclingDynamicsParser.torquePower(prev, curr)!!
+
+        assertEquals(300.0, tp.powerW, 2.0)
+        assertEquals(92.0, tp.cadenceRpm, 0.0)
+    }
+
+    @Test fun torquePower_wheelPageKeepsPowerWhenCadenceIsUnavailable() {
+        val prev = TorqueData(false, eventCount = 10, ticks = 10, cadenceRpm = null, accumPeriod = 0, accumTorque = 0)
+        val curr = TorqueData(false, eventCount = 11, ticks = 11, cadenceRpm = null, accumPeriod = 372, accumTorque = 278)
+
+        val tp = CyclingDynamicsParser.torquePower(prev, curr)!!
+
+        assertEquals(300.0, tp.powerW, 2.0)
+        assertTrue(tp.cadenceRpm.isNaN())
+    }
+
+    @Test fun torquePower_wheelPageKeepsPowerWhenReportedCadenceIsInvalid() {
+        val prev = TorqueData(false, eventCount = 10, ticks = 10, cadenceRpm = 250.0, accumPeriod = 0, accumTorque = 0)
+        val curr = TorqueData(false, eventCount = 11, ticks = 11, cadenceRpm = 250.0, accumPeriod = 372, accumTorque = 278)
+
+        val tp = CyclingDynamicsParser.torquePower(prev, curr)!!
+
+        assertEquals(300.0, tp.powerW, 2.0)
+        assertTrue(tp.cadenceRpm.isNaN())
+    }
+
+    @Test fun torquePower_doesNotMixWheelAndCrankAccumulators() {
+        val wheel = TorqueData(false, eventCount = 10, ticks = 10, cadenceRpm = 90.0, accumPeriod = 100, accumTorque = 100)
+        val crank = TorqueData(true, eventCount = 11, ticks = 11, cadenceRpm = 90.0, accumPeriod = 1472, accumTorque = 779)
+
+        assertNull(CyclingDynamicsParser.torquePower(wheel, crank))
+    }
+
     @Test fun torquePower_noNewEvent_returnsNull() {
         // Repeated frame (Δevent == 0) -> caller holds/coasts, parser returns null.
         val d = TorqueData(true, eventCount = 5, ticks = 5, cadenceRpm = 40.0, accumPeriod = 100, accumTorque = 200)

@@ -68,7 +68,7 @@ import com.enderthor.kpower.data.previewConfigData
 import com.enderthor.kpower.extension.exportBikesConfig
 import com.enderthor.kpower.extension.importBikesConfig
 import com.enderthor.kpower.extension.loadPreferencesFlow
-import com.enderthor.kpower.extension.savePreferences
+import com.enderthor.kpower.extension.queueSavePreferences
 
 import timber.log.Timber
 
@@ -76,7 +76,6 @@ import timber.log.Timber
 
 @Composable
 fun ConfigDataAppNavHost(modifier: Modifier = Modifier, navController: NavHostController = rememberNavController()){
-    val scope = rememberCoroutineScope()
     val configDatas = remember {
         mutableStateListOf<ConfigData>()
     }
@@ -125,14 +124,14 @@ fun ConfigDataAppNavHost(modifier: Modifier = Modifier, navController: NavHostCo
                                 }
                             }
                         }
-                        scope.launch { savePreferences(ctx, configDatas.toList()) }
+                        queueSavePreferences(ctx, configDatas.toList())
                     },
                     onDelete = {
                         configDatas.removeAll { it.id == r.id }
                         if (r.isActive && configDatas.isNotEmpty() && configDatas.none { it.isActive }) {
                             configDatas[0] = configDatas[0].copy(isActive = true)
                         }
-                        scope.launch { savePreferences(ctx, configDatas.toList()) }
+                        queueSavePreferences(ctx, configDatas.toList())
                         navController.popBackStack()
                     },
                     onBack = { navController.popBackStack() },
@@ -159,7 +158,7 @@ fun ConfigDataAppNavHost(modifier: Modifier = Modifier, navController: NavHostCo
                     }
                     configDatas.clear()
                     configDatas.addAll(normalized)
-                    scope.launch { savePreferences(ctx, configDatas.toList()) }
+                    queueSavePreferences(ctx, configDatas.toList())
                 },
                 onNavigateToConfigData = { configdata -> navController.navigate(route = "configData/${configdata.id}") },
                 onNavigateToCreate = {
@@ -171,7 +170,7 @@ fun ConfigDataAppNavHost(modifier: Modifier = Modifier, navController: NavHostCo
                         isActive = configDatas.isEmpty(),
                     )
                     configDatas.add(newConfigData)
-                    scope.launch { savePreferences(ctx, configDatas.toList()) }
+                    queueSavePreferences(ctx, configDatas.toList())
                     navController.navigate(route = "configData/${newConfigData.id}")
                 },
             )
