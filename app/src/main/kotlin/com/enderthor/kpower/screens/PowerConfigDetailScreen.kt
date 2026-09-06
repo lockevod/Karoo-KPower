@@ -279,9 +279,17 @@ fun DetailScreen(configdata: ConfigData, onUpdate: (ConfigData) -> Unit, onDelet
                 Text(stringResource(R.string.simple_mode_label))
             }
 
+            // Este campo es la ÚNICA vía por la que el equipo entra en el modelo: el peso del
+            // ciclista lo toma KPower del perfil del Karoo (PowerEstimationEngine.kt:232), que es
+            // de Hammerhead y el usuario rellenó pensando en su peso corporal. Sin el desglose,
+            // todo el mundo pone el peso de catálogo de la bici y se deja bidones, herramientas,
+            // casco, ropa y mochila: un sesgo sistemático, universal y siempre en el mismo
+            // sentido (falta masa -> el estimador va corto). Se pide el número correcto en vez de
+            // sumar una constante oculta, que mentiría sobre lo que el rider escribió.
             OutlinedTextField(value = bikeMass, modifier = Modifier.fillMaxWidth(),
                 onValueChange = { bikeMass = it },
                 label = { Text(stringResource(R.string.cfg_bike_mass)) }, suffix = { Text("kg") },
+                supportingText = { Text(stringResource(R.string.cfg_bike_mass_hint)) },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 singleLine = true
             )

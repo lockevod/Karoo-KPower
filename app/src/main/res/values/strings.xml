@@ -99,7 +99,8 @@
     <string name="no_profiles_hint">A Karoo ride profile only appears here after you open it (or start a ride with it) once — KPower learns profiles as you use them.</string>
     <string name="dropdown_position">Position</string>
     <string name="simple_mode_label">Simple mode (hide advanced)</string>
-    <string name="cfg_bike_mass">Bike Mass</string>
+    <string name="cfg_bike_mass">Bike + gear weight</string>
+    <string name="cfg_bike_mass_hint">Bike as you ride it (pedals, full bottles, tools) plus helmet, clothing, shoes and any pack. Your body weight comes from your Karoo profile.</string>
     <string name="section_tyres_surface">Tyres &amp; surface</string>
     <string name="cfg_rider_height">Rider height</string>
     <string name="cfg_tyre_width">Tyre width (mm / inch)</string>

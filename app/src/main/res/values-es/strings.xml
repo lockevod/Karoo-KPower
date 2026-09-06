@@ -99,7 +99,8 @@
     <string name="no_profiles_hint">Un perfil de ruta del Karoo solo aparece aquí después de abrirlo (o iniciar una salida con él) una vez — KPower aprende los perfiles según los usas.</string>
     <string name="dropdown_position">Posición</string>
     <string name="simple_mode_label">Modo simple (ocultar avanzado)</string>
-    <string name="cfg_bike_mass">Peso de la bici</string>
+    <string name="cfg_bike_mass">Peso bici + equipo</string>
+    <string name="cfg_bike_mass_hint">La bici como la ruedas (pedales, bidones llenos, herramientas) más casco, ropa, zapatillas y mochila. Tu peso corporal sale del perfil del Karoo.</string>
     <string name="section_tyres_surface">Neumáticos y superficie</string>
     <string name="cfg_rider_height">Altura del ciclista</string>
     <string name="cfg_tyre_width">Ancho del neumático (mm / pulgadas)</string>

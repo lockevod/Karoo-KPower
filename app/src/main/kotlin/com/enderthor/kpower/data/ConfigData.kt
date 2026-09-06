@@ -185,6 +185,9 @@ val bikeDotColors: List<Long> = listOf(
 
 // Plantilla para configs NUEVAS: estrena modo simple y FTP del perfil (las configs
 // antiguas migradas usan los defaults retrocompatibles del data class).
+// Semilla de primera instalación y plantilla de "bici nueva" (PowerConfigMainScreen.kt:168).
+// Los 14 kg de bikeMass son bici + EQUIPO (bidones llenos, herramientas, casco, ropa,
+// zapatillas), no el peso de catálogo: es lo que el modelo necesita y lo que pide la etiqueta.
 val previewConfigData = listOf(ConfigData(0,"Spark", true, "14.0","0.008","0.85","0.42","2.5","0.0","257", KarooSurface.GRAVEL, false, simpleMode = true, useProfileFtp = true))
 val defaultConfigData = Json.encodeToString(previewConfigData)
 
