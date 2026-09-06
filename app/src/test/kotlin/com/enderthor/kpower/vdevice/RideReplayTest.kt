@@ -78,6 +78,11 @@ class RideReplayTest {
         calibrator: FieldCalibrator? = null, powerLoss: Double = POWER_LOSS,
         // null = los de producción para la fuente de altitud (PowerEstimationEngine.kt:117).
         leadSeconds: Double? = null, tauMs: Double? = null,
+        // Si se pasa, recibe la pendiente REALMENTE USADA por tick. Necesario para agrupar por
+        // terreno: agrupar por el grade crudo del Karoo (~6 s tarde) mientras la estimación se
+        // calculó con el de altitud asigna muestras al cubo equivocado, y como la potencia
+        // correlaciona con la pendiente, eso infla el error aparente de bajada y llano.
+        slopesOut: DoubleArray? = null,
     ): DoubleArray {
         val accelerationTracker = AccelerationTracker()
         val gradeHold = GradeHold()
@@ -124,6 +129,7 @@ class RideReplayTest {
             val compensated = gradeCompensator.update(altGrade ?: lastGoodSlope, nowMs)
             val slopePercent = if (gradeSrc == GradeSrc.LEGACY)
                 legacySmoother.update(lastGoodSlope, nowMs) else compensated
+            slopesOut?.set(i, slopePercent)
 
             val isPedaling = if (t.cadence != null) cadenceGate.update(t.cadence) else moving
 
@@ -265,7 +271,8 @@ class RideReplayTest {
         // 69 kg = perfil tal cual. 74 kg = perfil + ~5 kg de equipo (casco, ropa, bidones, mochila),
         // que es la masa que realmente sube la cuesta.
         for (mass in listOf(RIDER_MASS, RIDER_MASS + 5.0)) {
-            val e = replay(ticks, mass)
+            val slopes = DoubleArray(ticks.size)
+            val e = replay(ticks, mass, slopesOut = slopes)
             val model = idx.map { e[it] }
             val tag = if (mass == RIDER_MASS) "perfil ${mass.toInt()} kg" else "${mass.toInt()} kg (+equipo)"
             println("=== desviacion % — $tag ===")
@@ -298,21 +305,23 @@ class RideReplayTest {
                 assert(abs(dev) < 8.0) { "desviacion de trabajo fuera de rango: $dev %" }
             }
 
-            // DESGLOSE POR TERRENO — el que de verdad importa. El agregado es una media
-            // ponderada dominada por la subida, que se lleva ~91 % de la energía de la marcha y
-            // ya es exacta a <1 %. Todo el error del modelo vive en bajada y llano, y el número
-            // global lo esconde. No sustituir esto por el agregado al leer resultados.
-            println("  por TERRENO (energía, no muestras):")
+            // DESGLOSE POR TERRENO. El agregado es una media ponderada dominada por la subida
+            // (~91 % de la energía), así que por sí solo no dice dónde falla el modelo.
+            // Se agrupa por la pendiente REALMENTE USADA, no por el grade crudo del Karoo:
+            // agrupar por el crudo (6 s tarde) daba bajada −32 % / subidas −0,5 %, que es un
+            // ARTEFACTO de asignación de cubo. Con la pendiente usada el déficit está mucho más
+            // repartido y las subidas cargan la mayor parte de él.
+            println("  por TERRENO (energía, agrupado por la pendiente USADA):")
             for ((lo, hi, lbl) in listOf(
                 Triple(-99.0, -2.0, "bajada < -2 %"), Triple(-2.0, 2.0, "llano -2..2 %"),
                 Triple(2.0, 6.0, "subida 2-6 %"), Triple(6.0, 99.0, "subida > 6 %"),
             )) {
-                val sel = idx.indices.filter { (ticks[idx[it]].grade ?: 0.0).let { g -> g >= lo && g < hi } }
+                val sel = idx.indices.filter { slopes[idx[it]] >= lo && slopes[idx[it]] < hi }
                 if (sel.size < 30) continue
                 val rk = sel.sumOf { real[it] } / 1000.0
                 val mk = sel.sumOf { model[it] } / 1000.0
-                println("    %-16s n=%5d  real=%6.1f kJ  est=%6.1f kJ  -> %+.1f %%".format(
-                    lbl, sel.size, rk, mk, 100.0 * mk / rk - 100.0))
+                println("    %-16s n=%5d  real=%6.1f kJ  est=%6.1f kJ  -> %+6.1f %%  (deficit %+5.1f kJ)".format(
+                    lbl, sel.size, rk, mk, 100.0 * mk / rk - 100.0, mk - rk))
             }
 
             // Por banda de esfuerzo real (media de 30 s, para no puntuar ruido de 1 s).
