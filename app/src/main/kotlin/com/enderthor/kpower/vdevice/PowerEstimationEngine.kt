@@ -436,26 +436,44 @@ class PowerEstimationEngine(
                         slopePercent = compensated
                         gradeSrc = if (altGrade != null) "alt" else "karoo"
                     }
-                    // Diagnostic (throttled, only when the rider enabled file logging): compares the grade
-                    // sources so freshness can be verified offline (same method as the SURFACE log). This is
-                    // the on-device check for both the altitude stream (Fase 1) and route grade (Fase 2).
-                    if (FileLogTree.enabled && nowMs - lastGradeLogMs >= 3_000L) {
-                        lastGradeLogMs = nowMs
-                        Timber.tag("GRADE").d(
-                            "route=%s alt=%s karoo=%.1f used=%.1f src=%s elev=%.0f v=%.1f",
-                            routeGrade?.let { "%.1f".format(it) } ?: "—",
-                            altGrade?.let { "%.1f".format(it) } ?: "—",
-                            lastGoodSlope, slopePercent, gradeSrc, heldElevation, speedMs
-                        )
-                    }
                     val tempC: Double? = bundle.weatherTempC ?: run {
                         if (config.useKarooTemp && bundle.karooTemp is StreamState.Streaming)
                             bundle.karooTemp.getValueOrDefault() - KAROO_TEMP_SENSOR_BIAS_C else null
                     }
                     val pressurePa: Double? = bundle.weatherPressureHpa?.times(100.0)
+                    // El gate de pedaleo se resuelve AQUÍ (y no dentro de calculatePowerBike) para que
+                    // pueda entrar en el log de diagnóstico: sin él, el arreglo del corte de cadencia no
+                    // es verificable desde una marcha real.
+                    val cadenceLive = bundle.values.cadence is StreamState.Streaming
+                    val isPedaling = if (cadenceLive) {
+                        st.cadenceGate.update(bundle.values.cadence.getValueOrDefault(), nowMs)
+                    } else st.cadenceGate.updateAbsent(nowMs, moving)
+
+                    // Diagnostic (throttled, only when the rider enabled file logging). Compara las
+                    // fuentes de pendiente (Fase 1 y Fase 2) y — igual de importante — deja constancia
+                    // del ENTORNO que entró en el cálculo: viento, temperatura y presión. Sin eso, tras
+                    // la marcha hay que RECONSTRUIR el viento, y esa reconstrucción movió el residuo de
+                    // una marcha real casi dos puntos, suficiente para justificar cambios de modelo que
+                    // no hacían falta. Lo que no se registra, se acaba inventando.
+                    if (FileLogTree.enabled && nowMs - lastGradeLogMs >= 3_000L) {
+                        lastGradeLogMs = nowMs
+                        Timber.tag("GRADE").d(
+                            "route=%s alt=%s karoo=%.1f used=%.1f src=%s elev=%.0f v=%.1f " +
+                                "wind=%s temp=%s press=%s cad=%s ped=%d",
+                            routeGrade?.let { "%.1f".format(it) } ?: "—",
+                            altGrade?.let { "%.1f".format(it) } ?: "—",
+                            lastGoodSlope, slopePercent, gradeSrc, heldElevation, speedMs,
+                            if (bundle.values.headwind is StreamState.Streaming)
+                                "%.1f".format(bundle.values.headwind.getValueOrDefault()) else "—",
+                            tempC?.let { "%.1f".format(it) } ?: "—",
+                            pressurePa?.let { "%.0f".format(it / 100.0) } ?: "—",
+                            if (cadenceLive) "live" else "absent",
+                            if (isPedaling) 1 else 0,
+                        )
+                    }
 
                     val est = calculatePowerBike(
-                        userMass, config, bundle.values, slopePercent, heldElevation, acceleration, tempC, pressurePa, userFtp, moving, nowMs, st.cadenceGate
+                        userMass, config, bundle.values, slopePercent, heldElevation, acceleration, tempC, pressurePa, userFtp, isPedaling
                     )
                     // calculateCyclingWattage returns the cap applied to the SIGNED total (so a big
                     // acceleration spike can't show an absurd instant value); we floor it to ≥0 here.
@@ -570,9 +588,8 @@ class PowerEstimationEngine(
         temperatureC: Double?,
         pressurePa: Double?,
         userFtp: Int,
-        moving: Boolean,
-        nowMs: Long,
-        cadenceGate: CadenceGate,
+        // Resuelto por el colector (ver el log GRADE): aquí ya sólo se consume.
+        isPedaling: Boolean,
     ): CyclingWattageEstimator {
         val speed = values.speed.getValueOrDefault()
         val finalHeadwind = values.headwind.getValueOrDefault()
@@ -583,11 +600,6 @@ class PowerEstimationEngine(
         // we no longer force power on — without cadence, not-moving counts as not-pedalling, so the toggle
         // (isforcepower=false) correctly yields 0 on a stationary unit. With the toggle OFF (isforcepower
         // =true) power is computed regardless, exactly as before.
-        // Un CORTE del sensor no es lo mismo que NO TENER sensor: ver CadenceGate.updateAbsent.
-        val isPedaling = if (values.cadence is StreamState.Streaming) {
-            cadenceGate.update(values.cadence.getValueOrDefault(), nowMs)
-        } else cadenceGate.updateAbsent(nowMs, moving)
-
         val ftp = if (config.useProfileFtp && userFtp > 0) userFtp.toDouble()
         else config.ftp.toDoubleLocale()
 

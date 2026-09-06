@@ -47,6 +47,7 @@ import com.enderthor.kpower.R
 import com.enderthor.kpower.ant.BatteryLevel
 import com.enderthor.kpower.ant.batteryLevelOf
 import com.enderthor.kpower.ant.isAutoMeterLabel
+import com.enderthor.kpower.data.OpenMeteoCurrentWeatherResponse
 import com.enderthor.kpower.data.HeadwindStats
 import com.enderthor.kpower.data.WEATHER_CHECK_INTERVAL_MS
 import com.enderthor.kpower.data.WEATHER_MAX_AGE_MS
@@ -509,6 +510,26 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
      * timer pipeline, which under continuous riding produced 0 weather updates
      * because debounce never expired.
      */
+    /**
+     * Deja constancia de QUÉ meteo alimentó el cálculo y de qué proveedor vino. Se emite sólo al
+     * refrescar (cada >=3 km o >=30 min), así que no ensucia el log.
+     *
+     * Por qué importa: `preferHeadwind` es true por defecto, así que con Headwind instalado el
+     * viento NO sale de la API propia. Sin esta línea, tras la marcha hay que reconstruir el viento
+     * a posteriori — y en una comparación real contra un medidor eso movió el residuo casi dos
+     * puntos, suficiente para justificar cambios de modelo innecesarios.
+     */
+    private fun logWeather(src: String, r: OpenMeteoCurrentWeatherResponse) {
+        if (!FileLogTree.enabled) return
+        val c = r.current
+        Timber.tag("WEATHER").d(
+            "src=%s wind=%.1f dir=%.0f temp=%s press=%s",
+            src, c.windSpeed, c.windDirection,
+            c.temperature?.let { "%.1f".format(it) } ?: "—",
+            c.surfacePressure?.let { "%.0f".format(it) } ?: "—",
+        )
+    }
+
     private suspend fun weatherRefreshLoop() {
         while (coroutineContext.isActive) {
             try {
@@ -561,6 +582,10 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
 
                     val hw = karooSystem.fetchHeadwindWeatherSnapshot(gps, isImperial, cfg.headwindWindUnit)
                     if (hw != null) {
+                        // Qué proveedor alimentó el cálculo. Sin esto, tras la marcha no se puede
+                        // saber si el viento vino de Headwind o de la API propia — y ese dato cambia
+                        // la interpretación de cualquier comparación contra un medidor real.
+                        logWeather("headwind", hw)
                         try {
                             saveCurrentData(applicationContext, hw)
                             saveStats(
@@ -595,6 +620,7 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                 try {
                     val body = String(response.body ?: ByteArray(0))
                     val data = parseWeatherResponse(body)
+                    logWeather("own", data)
                     saveCurrentData(applicationContext, data)
                     saveStats(
                         this@KpowerExtension,
