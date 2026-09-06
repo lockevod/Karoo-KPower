@@ -177,6 +177,19 @@ object FileLogTree : Timber.Tree() {
         scope.launch { purgeOldLogs(dir) }
     }
 
+    /**
+     * Checked by Timber BEFORE it formats the message (prepareLog -> isLoggable -> early return ->
+     * formatMessage; verified against the timber 5.0.1 artifact). Without this override the base class
+     * returns true, so a `Timber.d("x=%d", n)` runs String.format for this tree even when logging is OFF
+     * and log() then discards the result.
+     *
+     * What this does NOT save, and the reason the per-call-site `if (FileLogTree.enabled)` gates are
+     * still load-bearing: the vararg array and the arg boxing are built at the CALL SITE, before Timber
+     * fans out to any tree, and a Kotlin string template ("x=$n") is likewise concatenated there. No
+     * isLoggable override can prevent either. Keep gating hot-path logs at the call site.
+     */
+    override fun isLoggable(tag: String?, priority: Int): Boolean = enabled
+
     override fun log(priority: Int, tag: String?, message: String, t: Throwable?) {
         if (!enabled) return
         val line = buildString {

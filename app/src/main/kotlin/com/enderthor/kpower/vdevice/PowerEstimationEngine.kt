@@ -121,6 +121,25 @@ class PowerEstimationEngine(
     @Volatile private var routeProfile: RouteElevationProfile? = null
     @Volatile private var routeDistanceM = 0.0
     @Volatile private var routeRejoinM: Double? = null
+
+    /**
+     * Memo for the decoded elevation profile, keyed by the encoded polyline string.
+     *
+     * OnNavigationState re-emits during a ride for reasons unrelated to the route itself (rejoinPolyline
+     * / rejoinDistance change while the rider is off-route), and fromPolyline() is a full varint decode
+     * into two boxing ArrayList<Double> plus two DoubleArray copies — thousands of temporary objects per
+     * emission on a long route. The profile depends ONLY on the encoded string, so decode once per route
+     * and re-evaluate the (cheap) axis/reversed gate below on every emission.
+     *
+     * ONE field holding both halves, not two: stopPipeline() cancels the collector WITHOUT joining it, so
+     * a release()+acquire() (comparison toggle, virtual-device rebind) can briefly run two generations of
+     * this collector at once. With a separate key and value, the dying one publishes the new key before
+     * the new value and the fresh one can read "new key, previous route's profile" — which the axisOk
+     * guard only catches when the two routes differ in length. A single immutable Pair is published
+     * fully-constructed, so a reader either misses (and re-decodes, which is correct) or hits a
+     * consistent pair.
+     */
+    @Volatile private var elevationMemo: Pair<String?, RouteElevationProfile?>? = null
     @Volatile private var distToDestM = Double.NaN
     @Volatile private var onRoute = false
     // maxDtMs corto: un hueco off-route real (>3 s) re-siembra el EMA con el grade de ruta fresco al
@@ -299,7 +318,14 @@ class PowerEstimationEngine(
                 karooSystem.consumerFlow<io.hammerhead.karooext.models.OnNavigationState>().collect { nav ->
                     when (val s = nav.state) {
                         is io.hammerhead.karooext.models.OnNavigationState.NavigationState.NavigatingRoute -> {
-                            val decoded = RouteElevationProfile.fromPolyline(s.routeElevationPolyline)
+                            // Decode only when the route's elevation polyline actually changed (see
+                            // elevationMemo): the host re-emits this event whenever the rejoin state
+                            // moves, and re-decoding the whole profile each time was pure waste.
+                            val encoded = s.routeElevationPolyline
+                            val memo = elevationMemo
+                            val decoded = if (memo != null && memo.first == encoded) memo.second
+                                else RouteElevationProfile.fromPolyline(encoded)
+                                    .also { elevationMemo = encoded to it }
                             // Guarda del eje de distancia: el perfil solo es fiable si su span de distancia
                             // (metros) casa con routeDistance. Si difiere mucho (eje normalizado/resampleado
                             // distinto), NO lo usamos → cae a la pendiente de altitud, no a potencia errónea.
@@ -318,7 +344,10 @@ class PowerEstimationEngine(
                                     axisOk, s.reversed, decoded.totalDistanceM, s.routeDistance
                                 )
                         }
-                        else -> { routeProfile = null; routeDistanceM = 0.0; routeRejoinM = null }
+                        // Navigation ended / no route: drop the memo too, so the decoded DoubleArrays
+                        // aren't retained for the life of the engine after the route they belong to is
+                        // gone. Re-entering the same route costs exactly one decode.
+                        else -> { routeProfile = null; routeDistanceM = 0.0; routeRejoinM = null; elevationMemo = null }
                     }
                 }
             }

@@ -1,6 +1,7 @@
 package com.enderthor.kpower.extension
 
 import android.content.Context
+import android.content.res.Configuration
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
@@ -34,6 +35,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -95,10 +97,23 @@ class BalanceDataType(
             activeDnFlow()
                 .flatMapLatest { dn -> if (dn == null) flowOf(Double.NaN) else rightPctFlowFor(dn) }
                 .sample(1.seconds)
-                .distinctUntilChanged()
-                .collect { right ->
-                    render(if (right.isNaN()) "--" else { val r = right.roundToInt(); "${100 - r}/$r" })
+                // Dedup on what is actually PAINTED, not on the raw Double: the screen shows the rounded
+                // integer pair, so 52.31 -> 52.44 both paint "48/52". Deduping upstream of the rounding
+                // let every sample through and ran a full Glance compose + updateView IPC (the most
+                // expensive operation in this file) once a second for hours — and for the session-average
+                // field, whose text is effectively frozen after a few minutes, that was ~100% wasted.
+                //
+                // The night mask is part of the key, and it is NOT decoration. Glance's DayNightColorProvider
+                // only defers day/night to the host on API >= 31; the Karoo is below that, so the colour is
+                // resolved HERE at compose time and baked into the RemoteViews. Keying on the text alone
+                // would mean a settled average stops recomposing and keeps the day palette after sunset
+                // (black on black) — the old per-sample repaint was silently carrying the theme flip.
+                .map { right ->
+                    val text = if (right.isNaN()) "--" else { val r = right.roundToInt(); "${100 - r}/$r" }
+                    text to (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK)
                 }
+                .distinctUntilChanged()
+                .collect { (text, _) -> render(text) }
         }
         emitter.setCancellable { scope.cancel() }
     }

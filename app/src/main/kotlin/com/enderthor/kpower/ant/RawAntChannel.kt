@@ -33,6 +33,30 @@ import timber.log.Timber
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
+/**
+ * Rest to wait before the next low-priority search window.
+ *
+ * [meterEverSeen] is the safety gate, and it is the important half of this function. The backoff exists
+ * ONLY to stop the radio hunting for a meter that is not there (bike parked, estimate-only bike, rider
+ * indoors). A meter that has ALREADY answered on this channel is a meter the rider owns and wants, and
+ * it goes silent for entirely normal reasons — coasting a descent, a traffic light, a cafe stop, a
+ * firmware quirk that trips the 30s silence watchdog. Backing off on those means the rider resumes
+ * pedalling and waits out a rest of up to [cap] with a blank power field: at the cap the meter can only
+ * be heard during a 25s window every 145s, so the odds of NOT hearing a wake-up go from ~17% to ~83%
+ * and the mean wait from under a second to ~50s. That trade is never worth any amount of battery on a
+ * power-meter app, so a meter that has been seen keeps the flat [base] rest forever.
+ *
+ * For a meter never seen on this channel the rest doubles from [base] and saturates at [cap].
+ *
+ * Pure so BOTH halves are testable: the seen-gate (which is the regression guard) and the saturation
+ * arithmetic (an off-by-one there either lets the rest grow without bound, so a meter that wakes is
+ * never re-acquired, or pins it at [base], removing the whole point of the backoff).
+ */
+internal fun searchRestMs(rests: Int, meterEverSeen: Boolean, base: Long, cap: Long): Long =
+    if (meterEverSeen) base
+    else if (rests >= 63) cap
+    else (base shl rests).let { if (it <= 0L || it > cap) cap else it }
+
 internal fun tryBeginChannelOpen(opening: AtomicBoolean, blocked: () -> Boolean): Boolean {
     if (blocked() || !opening.compareAndSet(false, true)) return false
     if (blocked()) {
@@ -95,6 +119,28 @@ class RawAntChannel(
      * fresh.
      */
     @Volatile private var failures = 0
+
+    /**
+     * CONSECUTIVE search windows that expired without finding the meter, since this channel was opened.
+     * Drives the exponential rest between search windows (see [reopenAfterSearchTimeout]).
+     *
+     * Why: a search window keeps the ANT receiver on for its whole 25s duration. With a fixed 5s rest a
+     * meter that is simply NOT THERE (bike parked, estimate-only bike, rider indoors) pins the radio at
+     * ~83% duty for as long as the extension process lives, and it buys nothing — a meter that isn't
+     * there won't answer any faster for being asked more often.
+     */
+    @Volatile private var searchRests = 0
+
+    /**
+     * True once ANY ANT page has been received on this channel, i.e. the meter is PRESENT.
+     *
+     * This is the guard that keeps the backoff off the rider's path. It is deliberately sticky: it is
+     * NOT cleared when the meter goes silent, because "went quiet" is exactly the normal case (coasting,
+     * traffic light, cafe stop) that must keep the old flat 5s rest. Only a channel that has never once
+     * heard from its meter is allowed to back off. Scope is one connection: RawAntPowerMeter.connect()
+     * builds a fresh RawAntChannel, so a genuinely new attempt starts unseen again.
+     */
+    @Volatile private var everSawPage = false
 
     /** Wall-clock of the last broadcast page. 0 = none yet. Drives the heartbeat watchdog: a meter that
      *  goes silent while its channel stays nominally "tracking" (firmware quirk — no RX_SEARCH_TIMEOUT,
@@ -352,7 +398,7 @@ class RawAntChannel(
                             MessageFromAntType.BROADCAST_DATA -> {
                                 // Receiving a page proves the link is healthy — clear the failure budget
                                 // so a death hours later still gets a full set of retries.
-                                failures = 0; nextOpenDueMs = 0L
+                                failures = 0; nextOpenDueMs = 0L; searchRests = 0; everSawPage = true
                                 lastPageMs = System.currentTimeMillis()
                                 runCatching {
                                     val payload = BroadcastDataMessage(msg).payload
@@ -486,8 +532,16 @@ class RawAntChannel(
      */
     /**
      * Search window expired (or the channel closed) without finding the meter. Recycle the channel and
-     * retry after a short rest — a duty cycle that lets the radio breathe vs. searching nonstop. NOT
-     * counted against the failure budget: a sleeping meter is normal and must keep retrying all ride.
+     * retry after a rest — a duty cycle that lets the radio breathe vs. searching nonstop. NOT counted
+     * against the failure budget: a sleeping meter is normal and must keep retrying all ride.
+     *
+     * The rest grows exponentially (5s, 10s, 20s, … capped at [MAX_SEARCH_REST_MS]) ONLY for a meter
+     * that has never answered on this channel ([everSawPage]); a meter that has been seen keeps the flat
+     * [SEARCH_REST_MS] forever. That gate matters because this function is NOT only reached on a genuine
+     * "meter not found": the 30s silence watchdog in [startSummaryLoop] also routes through here for a
+     * meter that WAS delivering pages, and a meter that sleeps while the rider coasts or waits at a light
+     * looks identical to one that is absent. Without the gate the rider resumes pedalling into a rest of
+     * up to [MAX_SEARCH_REST_MS] with a blank power field. See [searchRestMs].
      */
     private fun reopenAfterSearchTimeout(reason: String) {
         // Re-entrancy guard: if an open() is already in flight (or a reopen already nulled the channel),
@@ -496,9 +550,11 @@ class RawAntChannel(
         val dead = channel
         channel = null
         releaseChannel(dead)
-        Timber.i("RawAntChannel #%d search idle (%s) — retry in %dms", deviceNumber, reason, SEARCH_REST_MS)
-        nextOpenDueMs = System.currentTimeMillis() + SEARCH_REST_MS
-        scope.launch { delay(SEARCH_REST_MS); if (!stopped) open() }
+        val rest = searchRestMs(searchRests, everSawPage, SEARCH_REST_MS, MAX_SEARCH_REST_MS)
+        if (!everSawPage && rest < MAX_SEARCH_REST_MS) searchRests++
+        Timber.i("RawAntChannel #%d search idle (%s) — retry in %dms", deviceNumber, reason, rest)
+        nextOpenDueMs = System.currentTimeMillis() + rest
+        scope.launch { delay(rest); if (!stopped) open() }
     }
 
     private fun reopenAfterDeath() {
@@ -549,13 +605,20 @@ class RawAntChannel(
         }
     }
 
-    private companion object {
+    // internal (not private) so the unit test can assert against the REAL tuning constants instead of
+    // copies — a change to SEARCH_REST_MS / MAX_SEARCH_REST_MS must reach the test.
+    internal companion object {
         // ~10 retries with backoff growing 1s,2s,…,5s,5s gives ~40s of recovery attempts — enough
         // to ride out an ANT Radio Service restart (SERVICE_INITIALIZING) without giving up.
         const val MAX_FAILURES = 10
         const val REOPEN_BACKOFF_MS = 1000L
         const val MAX_BACKOFF_MS = 5000L
-        const val SEARCH_REST_MS = 5000L   // rest between low-priority search windows (duty cycle)
+        const val SEARCH_REST_MS = 5000L   // base rest between low-priority search windows (duty cycle)
+        // Ceiling for the exponential search rest (5s,10s,20s,40s,80s,120s), reached after ~305s of
+        // continuous silence. At the cap a 25s search window costs ~17% receiver duty instead of ~83%,
+        // and a meter that is genuinely absent is still re-checked twice a minute. Only ever applied to
+        // a channel that has never received a page — see [searchRestMs].
+        const val MAX_SEARCH_REST_MS = 120_000L
         const val REBIND_DELAY_MS = 2000L  // wait before re-binding the ANT Radio Service
         const val NO_CHANNEL_RETRY_MS = 15000L  // backstop retry if the provider broadcast is missed
         const val HEARTBEAT_TIMEOUT_MS = 30000L // recycle a tracking channel that has gone silent this long
