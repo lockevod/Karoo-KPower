@@ -76,17 +76,20 @@ class RideReplayTest {
     private fun replay(
         ticks: List<Tick>, riderMass: Double, gradeSrc: GradeSrc = GradeSrc.ALTITUDE,
         calibrator: FieldCalibrator? = null, powerLoss: Double = POWER_LOSS,
+        // null = los de producción para la fuente de altitud (PowerEstimationEngine.kt:117).
+        leadSeconds: Double? = null, tauMs: Double? = null,
     ): DoubleArray {
         val accelerationTracker = AccelerationTracker()
         val gradeHold = GradeHold()
-        // Parámetros EXACTOS de producción (PowerEstimationEngine.kt:117) para el brazo actual.
-        // Con grade de altitud el óptimo es leadSeconds=2; con el grade retrasado del Karoo hacía
-        // falta 4 (así lo dice el comentario de producción), así que los brazos que consumen el
-        // grade del Karoo usan ESE valor — si no, el A/B los penalizaría con un lead mal sintonizado
-        // en vez de comparar cada ruta en su mejor versión.
-        val gradeCompensator = if (gradeSrc == GradeSrc.ALTITUDE)
-            GradeLeadCompensator(tauMs = 1_000.0, leadSeconds = 2.0)
-        else GradeLeadCompensator(tauMs = 1_500.0, leadSeconds = 4.0)
+        // Por defecto, los parámetros EXACTOS de producción (PowerEstimationEngine.kt:117) en el
+        // brazo de altitud y (1500, 4) en los brazos que leen el grade del Karoo — que es como los
+        // sintonizó cada ruta en su momento. OJO: dar a cada brazo un lead distinto CONFUNDE el A/B
+        // (cambian dos variables a la vez), así que el A/B también publica la comparación a lead
+        // IGUALADO, que es la limpia. Ver `A/B de fuente a lead igualado`.
+        val gradeCompensator = GradeLeadCompensator(
+            tauMs = tauMs ?: if (gradeSrc == GradeSrc.ALTITUDE) 1_000.0 else 1_500.0,
+            leadSeconds = leadSeconds ?: if (gradeSrc == GradeSrc.ALTITUDE) 2.0 else 4.0,
+        )
         val altitudeGradeDeriver = AltitudeGradeDeriver()
         val cadenceGate = CadenceGate()
         // LEGACY = `GradeSmoother()` por defecto, idéntico a 48bd68f^:111 (verificado en git).
@@ -235,8 +238,15 @@ class RideReplayTest {
         val (alt, karooLead, legacy) = Triple(scores[0], scores[1], scores[2])
         println("  -> fix COMPLETO vs pre-fix: RMSE %.1f -> %.1f W (%+.1f %%), r(1s) %.3f -> %.3f".format(
             legacy.first, alt.first, 100.0 * alt.first / legacy.first - 100.0, legacy.second, alt.second))
-        println("  -> sólo la fuente altitud:  RMSE %.1f -> %.1f W (%+.1f %%)".format(
-            karooLead.first, alt.first, 100.0 * alt.first / karooLead.first - 100.0))
+        // La aportación de la FUENTE, a lead igualado (misma tau y mismo lead en ambos brazos).
+        // Comparar altitud@(1000,2) contra Karoo@(1500,4) mezclaría fuente y sintonía.
+        for ((tau, lead) in listOf(1_000.0 to 2.0, 1_500.0 to 4.0)) {
+            val a = idx.map { replay(ticks, RIDER_MASS, GradeSrc.ALTITUDE, leadSeconds = lead, tauMs = tau)[it] }
+            val k = idx.map { replay(ticks, RIDER_MASS, GradeSrc.KAROO_LEAD, leadSeconds = lead, tauMs = tau)[it] }
+            fun rmse(m: List<Double>) = sqrt(real.indices.sumOf { (m[it] - real[it]).pow(2) } / real.size)
+            println("  -> fuente, a lead igualado (tau=%.0f L=%.0f): Karoo %.1f -> altitud %.1f W (%+.1f %%)".format(
+                tau, lead, rmse(k), rmse(a), 100.0 * rmse(a) / rmse(k) - 100.0))
+        }
         assert(alt.first < legacy.first) { "el fix NO mejora el RMSE sobre pre-fix" }
         assert(alt.second > legacy.second) { "el fix NO mejora la correlación sobre pre-fix" }
     }
@@ -286,6 +296,23 @@ class RideReplayTest {
             if (mass == RIDER_MASS) {
                 val dev = 100.0 * model.sum() / real.sum() - 100.0
                 assert(abs(dev) < 8.0) { "desviacion de trabajo fuera de rango: $dev %" }
+            }
+
+            // DESGLOSE POR TERRENO — el que de verdad importa. El agregado es una media
+            // ponderada dominada por la subida, que se lleva ~91 % de la energía de la marcha y
+            // ya es exacta a <1 %. Todo el error del modelo vive en bajada y llano, y el número
+            // global lo esconde. No sustituir esto por el agregado al leer resultados.
+            println("  por TERRENO (energía, no muestras):")
+            for ((lo, hi, lbl) in listOf(
+                Triple(-99.0, -2.0, "bajada < -2 %"), Triple(-2.0, 2.0, "llano -2..2 %"),
+                Triple(2.0, 6.0, "subida 2-6 %"), Triple(6.0, 99.0, "subida > 6 %"),
+            )) {
+                val sel = idx.indices.filter { (ticks[idx[it]].grade ?: 0.0).let { g -> g >= lo && g < hi } }
+                if (sel.size < 30) continue
+                val rk = sel.sumOf { real[it] } / 1000.0
+                val mk = sel.sumOf { model[it] } / 1000.0
+                println("    %-16s n=%5d  real=%6.1f kJ  est=%6.1f kJ  -> %+.1f %%".format(
+                    lbl, sel.size, rk, mk, 100.0 * mk / rk - 100.0))
             }
 
             // Por banda de esfuerzo real (media de 30 s, para no puntuar ruido de 1 s).
