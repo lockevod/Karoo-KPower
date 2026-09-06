@@ -4,12 +4,26 @@
 Por qué existe: el replay puntúa el estimador contra un medidor real, así que el fixture
 tiene que ser reproducible y auditable — si no, es un CSV mágico que nadie puede verificar.
 
-Reconstruye además la meteo que el motor habría usado en marcha. KPower NO depende de la
-extensión Headwind: pide su propia meteo a Open-Meteo (Extensions.kt:396) con
-`wind_speed_unit=ms` y `surface_pressure`, y calcula el viento frontal en headwindFlow como
-`ws * cos(wind_dir_from - rumbo)` cuantizado a 0.1 m/s. Aquí se replica esa fórmula usando
-el rumbo derivado del GPS del propio FIT. Sin esto el replay corre a viento cero y aire ISA,
-lo que sesga la estimación A LA BAJA y se confunde con un déficit de masa o de transmisión.
+Reconstruye además una APROXIMACIÓN de la meteo que el motor usó en marcha, y conviene ser
+exacto sobre qué es y qué no es:
+
+  - Producción prefiere HEADWIND. `preferHeadwind` es true por defecto (ConfigData.kt:148) y,
+    si la extensión está instalada, KPower toma la meteo de su stream
+    (KpowerExtension.kt:556); Open-Meteo propio (Extensions.kt:396) es el FALLBACK.
+  - Producción pide `current=` en la posición GPS del momento y CONSERVA el snapshot hasta
+    moverse lo bastante o caducar (KpowerExtension.kt:543-551). Aquí se interpolan valores
+    HORARIOS de forma continua por tick, en un solo centroide de la ruta.
+  - Producción usa `coords.bearing` del GPS (Extensions.kt:547-555). Aquí el rumbo se deriva
+    de posiciones ±3 REGISTROS, que en una pausa larga puede mirar al futuro.
+
+Así que el viento aquí es una reconstrucción plausible, NO la que consumió el motor. Importa
+porque el resultado es sensible: escalar el viento ×0..×2 mueve el trabajo entre −5 % y +1 %.
+Aun así es mucho mejor que la alternativa (viento cero y aire ISA), que sesga la estimación
+A LA BAJA y se confunde con un déficit de masa o de transmisión. Trátalo como una banda de
+sensibilidad, no como una ejecución de producción.
+
+La fórmula del viento frontal sí replica headwindFlow: `ws * cos(wind_dir_from - rumbo)`
+cuantizado a 0.1 m/s.
 
 Uso:
     pip install fitdecode
@@ -52,7 +66,14 @@ def read_records(path):
 
 def fetch_weather(lat, lon, when):
     # past_days cubre la fecha de la marcha; el endpoint archive va con días de retraso.
-    past = min(92, max(1, (dt.datetime.now(dt.timezone.utc) - when).days + 1))
+    # El máximo que acepta la API es 92. Pasado ese plazo NO se puede recortar en silencio:
+    # devolvería horas que no son las de la marcha y `at()` saturaría al primer valor
+    # disponible, fabricando una meteo falsa sin avisar. Mejor fallar.
+    days = (dt.datetime.now(dt.timezone.utc) - when).days + 1
+    if days > 92:
+        sys.exit(f"la marcha tiene {days} dias; el endpoint forecast solo cubre 92 dias atras. "
+                 f"Usa el endpoint archive con start_date/end_date explicitos.")
+    past = max(1, days)
     with urllib.request.urlopen(WX_URL.format(lat=lat, lon=lon, past=past), timeout=30) as r:
         return json.load(r)["hourly"]
 

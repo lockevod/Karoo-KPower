@@ -47,10 +47,15 @@ class RideReplayTest {
     private data class Tick(
         val tMs: Long, val speed: Double?, val alt: Double?,
         val cadence: Double?, val tempC: Double?, val grade: Double?, val realW: Double?,
-        // Meteo reconstruida de Open-Meteo (misma fuente, mismos parametros y unidades que
-        // `makeOpenMeteoHttpRequest`: wind_speed_10m en m/s, surface_pressure en hPa) para la
-        // fecha/hora y el centroide GPS de la marcha. `headwind` aplica la MISMA formula que
-        // `headwindFlow`: ws * cos(wind_dir_from - rumbo GPS), cuantizado a 0.1 m/s.
+        // Meteo RECONSTRUIDA (no la que consumió el motor). Producción prefiere HEADWIND
+        // (`preferHeadwind` es true por defecto, ConfigData.kt:148) y sólo cae a su propio
+        // Open-Meteo si Headwind no está o no emite — y en el dispositivo del rider Headwind
+        // SÍ estaba instalado durante esta marcha. Además producción conserva un snapshot
+        // hasta moverse/caducar, mientras aquí se interpolan valores horarios por tick desde
+        // un único centroide. La fórmula del frontal sí es la de `headwindFlow`:
+        // ws * cos(wind_dir_from - rumbo), cuantizado a 0.1 m/s.
+        // Es una banda de sensibilidad razonable, NO una ejecución de producción: escalar el
+        // viento x0..x2 mueve el trabajo entre -5 % y +1 %. Ver tools/fit_to_replay_fixture.py.
         val headwind: Double?, val wxTempC: Double?, val wxPressureHpa: Double?,
     )
 
@@ -408,6 +413,28 @@ class RideReplayTest {
             println(row)
         }
         println("  (69 kg = bascula; 70 kg = + casco, telefono y vestimenta. bici = $BIKE_MASS kg)")
+
+        // ¿Un multiplicador global rompe las subidas? Se mide con el agrupamiento CORRECTO
+        // (pendiente usada). Con el bucketing viejo la respuesta parecia un si rotundo; hay
+        // que comprobarlo, porque las subidas quedan a -1,3/-2,2 % y eso deja margen.
+        println("  efecto en el TERRENO (masa ${(RIDER_MASS + BIKE_MASS)} kg):")
+        for (pl in listOf(0.025, 0.050)) {
+            val slopes = DoubleArray(ticks.size)
+            val e = replay(ticks, RIDER_MASS, powerLoss = pl, slopesOut = slopes)
+            val model = idx.map { e[it] }
+            val parts = listOf(
+                Triple(-99.0, -2.0, "bajada"), Triple(-2.0, 2.0, "llano"),
+                Triple(2.0, 6.0, "sub2-6"), Triple(6.0, 99.0, "sub>6"),
+            ).mapNotNull { (lo, hi, lbl) ->
+                val sel = idx.indices.filter { slopes[idx[it]] >= lo && slopes[idx[it]] < hi }
+                if (sel.size < 30) null else {
+                    val r = sel.sumOf { real[it] }; val m = sel.sumOf { model[it] }
+                    "%s %+.1f %%".format(lbl, 100.0 * m / r - 100.0)
+                }
+            }
+            println("    powerLoss %.1f %% -> total %+.1f %%  |  %s".format(
+                pl * 100, 100.0 * model.sum() / real.sum() - 100.0, parts.joinToString("  ")))
+        }
     }
 
     /** El peso del perfil no está en el FIT: barrido para ver cuánto depende el resultado de él. */
