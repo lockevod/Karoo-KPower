@@ -283,9 +283,11 @@ fun DetailScreen(configdata: ConfigData, onUpdate: (ConfigData) -> Unit, onDelet
             // ciclista lo toma KPower del perfil del Karoo (PowerEstimationEngine.kt:232), que es
             // de Hammerhead y el usuario rellenó pensando en su peso corporal. Sin el desglose,
             // todo el mundo pone el peso de catálogo de la bici y se deja bidones, herramientas,
-            // casco, ropa y mochila: un sesgo sistemático, universal y siempre en el mismo
-            // sentido (falta masa -> el estimador va corto). Se pide el número correcto en vez de
-            // sumar una constante oculta, que mentiría sobre lo que el rider escribió.
+            // casco, ropa y mochila. En llano, subida y aceleración —donde está casi toda la
+            // energía de una marcha— faltar masa sesga la estimación a la baja; en bajada o
+            // frenando puede sesgar al revés, así que el signo no es universal aunque el campo sí
+            // necesite toda la masa no corporal. Se pide el número correcto en vez de sumar una
+            // constante oculta, que mentiría sobre lo que el rider escribió.
             OutlinedTextField(value = bikeMass, modifier = Modifier.fillMaxWidth(),
                 onValueChange = { bikeMass = it },
                 label = { Text(stringResource(R.string.cfg_bike_mass)) }, suffix = { Text("kg") },

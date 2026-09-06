@@ -73,11 +73,47 @@ class SmoothersTest {
     }
 
     @Test
-    fun `un corte largo da el sensor por ausente y vuelve al movimiento`() {
+    fun `un corte largo vuelve al proxy de movimiento`() {
         val g = CadenceGate(maxHoldMs = 10_000L)
         assertTrue(g.update(80.0, 0L))
         assertTrue(g.updateAbsent(5_000L, movingFallback = false))      // hold: conserva ON
         assertFalse(g.updateAbsent(20_000L, movingFallback = false))    // caducado → fallback
-        assertTrue(g.updateAbsent(21_000L, movingFallback = true))      // ya es "sin sensor"
+        assertTrue(g.updateAbsent(21_000L, movingFallback = true))      // proxy de movimiento
+    }
+
+    // Los dos casos adversariales del hold, uno por sentido. Fijan el COSTE de la decisión, no
+    // sólo su beneficio: acotar el error a maxHoldMs se paga con hasta 10 s de error en ambas
+    // direcciones. Si alguien cambia maxHoldMs, estos tests dicen qué se está moviendo.
+
+    @Test
+    fun `corte con ultima lectura ON y el rider deja de pedalear`() {
+        val g = CadenceGate(maxHoldMs = 10_000L)
+        assertTrue(g.update(80.0, 0L))                                  // pedaleando fuerte
+        // El sensor muere aqui y el rider deja de pedalear justo despues: durante el hold el gate
+        // sigue diciendo ON. Es el precio del hold, acotado a 10 s.
+        assertTrue(g.updateAbsent(1_000L, movingFallback = true))
+        assertTrue(g.updateAbsent(9_000L, movingFallback = true))
+        assertTrue(g.updateAbsent(11_000L, movingFallback = true))      // caducado → proxy (rueda)
+    }
+
+    @Test
+    fun `corte con ultima lectura OFF y el rider arranca a pedalear`() {
+        val g = CadenceGate(maxHoldMs = 10_000L)
+        assertTrue(g.update(80.0, 0L))
+        assertFalse(g.update(0.0, 1_000L))                              // deja de pedalear
+        // El sensor muere y el rider arranca: durante el hold el gate dice OFF y se pierden
+        // vatios reales. Simetrico al test anterior, y tambien acotado a 10 s.
+        assertFalse(g.updateAbsent(2_000L, movingFallback = true))
+        assertTrue(g.updateAbsent(12_000L, movingFallback = true))      // caducado → proxy
+    }
+
+    @Test
+    fun `una fuente perdida no degrada a nunca vista`() {
+        val g = CadenceGate(maxHoldMs = 1_000L)
+        assertTrue(g.update(80.0, 0L))
+        assertFalse(g.updateAbsent(50_000L, movingFallback = false))    // perdida hace mucho
+        // Vuelve el sensor: rearma y manda la histeresis, no el proxy.
+        assertFalse(g.update(0.0, 51_000L))
+        assertTrue(g.update(80.0, 52_000L))
     }
 }

@@ -348,17 +348,19 @@ class CadenceGate(
     private val onRpm: Double = 25.0,
     private val offRpm: Double = 20.0,
     // Cuánto se conserva el último estado cuando el sensor DEJA de emitir. Un corte breve
-    // (interferencia, imán, batería) no debe cambiar la semántica del gate; uno largo sí,
-    // porque a partir de ahí el sensor está efectivamente ausente.
+    // (interferencia, imán, batería) no debe cambiar la semántica del gate.
     private val maxHoldMs: Long = 10_000L,
 ) {
+    /** Estados EXPLÍCITOS: "perdida" no puede degradar a "nunca hubo" — son cosas distintas. */
+    private enum class Source { NEVER_SEEN, LIVE, LOST }
+
     private var pedaling = false
-    private var everSeen = false
+    private var source = Source.NEVER_SEEN
     private var lastSeenMs = 0L
 
-    /** Con lectura de cadencia: histéresis normal. */
+    /** Con lectura de cadencia: histéresis normal. Rearma el sensor si estaba perdido. */
     fun update(cadenceRpm: Double, nowMs: Long): Boolean {
-        everSeen = true
+        source = Source.LIVE
         lastSeenMs = nowMs
         pedaling = when {
             cadenceRpm >= onRpm -> true
@@ -371,16 +373,32 @@ class CadenceGate(
     /**
      * Sin lectura de cadencia. [movingFallback] es el proxy por movimiento sostenido.
      *
-     * Si NUNCA hubo sensor, el movimiento es el único criterio posible — que es el caso para el
-     * que se escribió este fallback. Pero si SÍ lo hubo y acaba de cortarse, `moving` invierte la
-     * semántica: la bici sigue rodando mientras sueltas, así que un corte en plena bajada pasaría
-     * a "pedaleando" y fabricaría vatios. Por eso un corte reciente CONSERVA el último estado
-     * conocido, y sólo pasado [maxHoldMs] se da el sensor por ausente y se vuelve al proxy.
+     * NUNCA hubo sensor -> el movimiento es el único criterio posible, que es el caso para el que
+     * se escribió este fallback.
+     *
+     * Sensor PERDIDO hace poco -> se conserva el último estado. `moving` invierte la semántica
+     * justo aquí: la bici sigue rodando mientras sueltas, así que un corte en plena bajada pasaría
+     * a "pedaleando" y fabricaría vatios sin límite de tiempo.
+     *
+     * Sensor perdido hace MUCHO -> se vuelve al proxy de movimiento, que es exactamente lo que
+     * tendría un ciclista que nunca emparejó cadencia. El estado se queda en LOST, no en
+     * NEVER_SEEN: la distinción es real y no debe borrarse por el paso del tiempo.
+     *
+     * DECISIÓN CONTESTADA (revisión externa): la alternativa era fallar CERRADO (0 W) tras perder
+     * una fuente establecida. Se descarta a propósito: dejaría a 0 W el resto de la marcha a quien
+     * se le acabe la pila del sensor, mientras que el proxy de movimiento sólo lo iguala a un
+     * usuario sin cadencia, que es un modo soportado. El hold ACOTA a [maxHoldMs] un error que
+     * antes era ilimitado, y lo hace simétrico: última lectura ON y el rider suelta -> hasta 10 s
+     * de vatios de más; última OFF y el rider arranca -> hasta 10 s de menos. Sin datos de campo,
+     * acotar y degradar a un modo soportado parece mejor que anular la estimación.
      */
     fun updateAbsent(nowMs: Long, movingFallback: Boolean): Boolean {
-        if (!everSeen) return movingFallback
+        if (source == Source.NEVER_SEEN) return movingFallback
+        // La transición LIVE -> LOST NO puede devolver el estado sin más: si el primer tick sin
+        // cadencia llega mucho después de la última lectura (pausa del motor, hueco de streams),
+        // el hold ya está caducado y conservar el estado sería revivir una lectura vieja.
+        if (source == Source.LIVE) source = Source.LOST
         if (nowMs - lastSeenMs <= maxHoldMs) return pedaling
-        everSeen = false
         pedaling = false
         return movingFallback
     }

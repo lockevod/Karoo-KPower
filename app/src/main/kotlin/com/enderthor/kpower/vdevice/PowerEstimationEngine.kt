@@ -6,6 +6,7 @@ import io.hammerhead.karooext.models.DataType
 import io.hammerhead.karooext.models.RideState
 import io.hammerhead.karooext.models.StreamState
 import io.hammerhead.karooext.models.UserProfile
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
@@ -107,14 +108,11 @@ class PowerEstimationEngine(
         _estimateIsPrimary.value = virtualDeviceTokens.isNotEmpty()
     }
 
-    @Volatile private var accelerationTracker = AccelerationTracker()
     // Fuente PRIMARIA de pendiente: derivada del stream de ALTITUD (fresco), no del `grade` del Karoo
     // (retrasado ~6 s). Validado sobre FIT: corr 0,60→0,82, retardo 8→2 s — ver
     // docs/superpowers/specs/2026-07-12-estimator-grade-dynamics-design.md (Fase 1).
-    @Volatile private var altitudeGradeDeriver = AltitudeGradeDeriver()
     // Sobre esa pendiente (ya fresca) aplica un lead ligero para afinar el residual. leadSeconds=2 fue
     // el óptimo con grade-de-altitud (con el grade retrasado del Karoo hacía falta 4).
-    @Volatile private var gradeCompensator = newGradeCompensator()
     @Volatile private var lastGradeLogMs = 0L
 
     // Fase 2 (C): pendiente desde el perfil de elevación de la RUTA navegada — retardo ~0 y sin ruido de
@@ -127,24 +125,41 @@ class PowerEstimationEngine(
     @Volatile private var onRoute = false
     // maxDtMs corto: un hueco off-route real (>3 s) re-siembra el EMA con el grade de ruta fresco al
     // volver, en vez de mezclarlo con uno viejo de otra posición (revisión adversarial #2).
-    @Volatile private var routeGradeSmoother = newRouteGradeSmoother()
     // Last good grade %, held across stream dropouts, plus the re-seed decisions that go with it.
-    private val gradeHold = GradeHold(maxHoldMs = GRADE_MAX_HOLD_MS)
 
-    // Fábricas: stopPipeline RECONSTRUYE los filtros en vez de resetearlos campo a campo, así
-    // que añadir estado a cualquiera de estas clases no puede dejar un reset incompleto.
-    // Los parámetros viven aquí y solo aquí.
-    private fun newGradeCompensator() = GradeLeadCompensator(tauMs = 1_000.0, leadSeconds = 2.0)
-    private fun newRouteGradeSmoother() = GradeSmoother(tauMs = 1_000.0, maxDtMs = 3_000L)
+    /**
+     * Estado por EJECUCIÓN del pipeline: filtros con memoria y contadores que sólo tienen sentido
+     * dentro de una ejecución continua.
+     *
+     * Vive aquí, y no en campos del motor, a propósito. Antes eran campos que `stopPipeline`
+     * reconstruía desde OTRO hilo, y eso no era linealizable: `cancel()` sólo SOLICITA la
+     * cancelación, y el bloque `collect` no tiene puntos de suspensión, así que un tick ya en vuelo
+     * seguía hasta el final DESPUÉS del reset — repoblando filtros recién creados, mezclando en un
+     * mismo tick objetos de dos generaciones (cada acceso cargaba la referencia por separado) y
+     * convirtiendo el `movingTicks = 0` del reset en 1 con un `++` que no es atómico.
+     *
+     * Como estado local, una generación cancelada se lleva sus objetos a la basura y la siguiente
+     * arranca limpia por construcción: no hay reset que olvidar ni referencias que intercambiar.
+     */
+    private class PipelineState {
+        val accelerationTracker = AccelerationTracker()
+        val altitudeGradeDeriver = AltitudeGradeDeriver()
+        // leadSeconds=2 fue el óptimo con grade-de-altitud (con el grade retrasado del Karoo hacía
+        // falta 4). No tocar sin más de una marcha de evidencia.
+        val gradeCompensator = GradeLeadCompensator(tauMs = 1_000.0, leadSeconds = 2.0)
+        val routeGradeSmoother = GradeSmoother(tauMs = 1_000.0, maxDtMs = 3_000L)
+        val gradeHold = GradeHold(maxHoldMs = GRADE_MAX_HOLD_MS)
+        val cadenceGate = CadenceGate()
+        var movingTicks = 0
+        var lastGoodElevation = 0.0
+    }
     // ponytail: 0.0 here is a MEASUREMENT masquerading as "unknown" — with no elevation stream AND no
     // weather pressure, airDensity falls back to sea-level ISA and over-estimates aero ~25 % at 2000 m.
     // Seeding it from the weather response does NOT fix that: airDensity only reads elevation when
     // pressurePa is null, and pressurePa comes from the same response. A real fix needs an elevation
     // source that survives "no weather" — persist the last known elevation across rides.
-    @Volatile private var lastGoodElevation = 0.0
     // Consecutive 1 Hz ticks with speed above MIN_SPEED_FOR_POWER_MS (debounces GPS speed spikes). Only
     // touched on the single estimate-collect coroutine.
-    @Volatile private var movingTicks = 0
 
     // Field calibration: derives Crr & CdA from the REAL meter vs the model, accumulated over a
     // comparison session. realPowerProvider is set by the extension (active meter's live power, NaN if none).
@@ -156,7 +171,6 @@ class PowerEstimationEngine(
 
     /** Discard accumulated calibration samples (e.g. the active bike changed mid-ride). */
     fun resetCalibration() = fieldCalibrator.reset()
-    @Volatile private var cadenceGate = CadenceGate()
     private val surfaceReader by lazy { SurfaceConditionReader(context) }
 
     // Superficie + su timestamp en UN solo volatile: el lector empareja siempre valor y
@@ -164,7 +178,6 @@ class PowerEstimationEngine(
     @Volatile private var liveSurfaceSample: Pair<KarooSurface, Long>? = null
     @Volatile private var latestInstantW: Double = Double.NaN
 
-    private val ma3s = MovingAverage(windowSamples = 3)
     private val npCalc = NormalizedPowerCalculator()
     private val runningAvg = RunningAverage()
     // Encapsulates "reset only on a genuine new ride (Idle->Recording), freeze during pause" — see
@@ -225,6 +238,8 @@ class PowerEstimationEngine(
         val engineScope = CoroutineScope(Dispatchers.IO + job)
 
         pipelineJob = engineScope.launch {
+            // Estado propio de ESTA ejecución (ver PipelineState). Un stop/re-acquire crea otro.
+            val st = PipelineState()
             // Bounded: if the UserProfile consumer never emits (service not bound / transient AIDL
             // failure) we must NOT hang the whole estimation pipeline forever — degrade to a default
             // mass (FTP 0 → config's own ftp is used) so the estimate still runs.
@@ -368,28 +383,28 @@ class PowerEstimationEngine(
                     // flap moving→false mid-effort. `moving` is used ONLY as the no-cadence pedalling proxy
                     // below (which still respects the force-power toggle) — it is NOT a hard output gate.
                     if (bundle.values.speed is StreamState.Streaming) {
-                        if (speedMs >= MIN_SPEED_FOR_POWER_MS) { if (movingTicks < MIN_MOVING_TICKS) movingTicks++ } else movingTicks = 0
+                        if (speedMs >= MIN_SPEED_FOR_POWER_MS) { if (st.movingTicks < MIN_MOVING_TICKS) st.movingTicks++ } else st.movingTicks = 0
                     }
-                    val moving = movingTicks >= MIN_MOVING_TICKS
-                    val acceleration = accelerationTracker.update(speedMs, nowMs)
+                    val moving = st.movingTicks >= MIN_MOVING_TICKS
+                    val acceleration = st.accelerationTracker.update(speedMs, nowMs)
                     // HOLD the last good grade/elevation across stream dropouts instead of treating a
                     // missing stream as 0 — a momentary grade dropout would otherwise read as 0% (flat)
                     // and collapse the gravity term mid-climb (and elevation→0 = sea-level air density).
                     val slopeStream = bundle.values.slope
-                    val reseedForHold = gradeHold.update(
+                    val reseedForHold = st.gradeHold.update(
                         streaming = slopeStream is StreamState.Streaming,
                         streamValue = slopeStream.getValueOrDefault(),
                         nowMs = nowMs,
                     )
-                    val lastGoodSlope = gradeHold.slopePercent
+                    val lastGoodSlope = st.gradeHold.slopePercent
                     val elevStream = bundle.values.elevation
-                    if (elevStream is StreamState.Streaming) lastGoodElevation = elevStream.getValueOrDefault()
-                    val heldElevation = lastGoodElevation
+                    if (elevStream is StreamState.Streaming) st.lastGoodElevation = elevStream.getValueOrDefault()
+                    val heldElevation = st.lastGoodElevation
                     // Prioridad de pendiente: RUTA (C, retardo ~0) > ALTITUD (Fase 1, fresca) > grade del
                     // Karoo (retrasado, último recurso). El grade de ruta va por un EMA corto (sin lead, ya
                     // es instantáneo); altitud/Karoo por el compensador con lead.
                     val altGrade = if (elevStream is StreamState.Streaming)
-                        altitudeGradeDeriver.update(speedMs, heldElevation, nowMs) else null
+                        st.altitudeGradeDeriver.update(speedMs, heldElevation, nowMs) else null
                     val routePos = if (onRoute) RoutePositionTracker.distanceAlong(
                         routeDistanceM, distToDestM, onRoute, routeRejoinM
                     ) else null
@@ -409,13 +424,13 @@ class PowerEstimationEngine(
                     // the whole reason the altitude path exists). That switch is a step exactly like a
                     // stream gap, and it happens far more often: every stop-and-restart now guarantees
                     // one, because the speed guard clears the deriver's window.
-                    if (reseedForHold || gradeHold.noteAltGradeAvailable(altGrade != null))
-                        gradeCompensator.reseed()
-                    val compensated = gradeCompensator.update(altGrade ?: lastGoodSlope, nowMs)
+                    if (reseedForHold || st.gradeHold.noteAltGradeAvailable(altGrade != null))
+                        st.gradeCompensator.reseed()
+                    val compensated = st.gradeCompensator.update(altGrade ?: lastGoodSlope, nowMs)
                     val slopePercent: Double
                     val gradeSrc: String
                     if (routeGrade != null) {
-                        slopePercent = routeGradeSmoother.update(routeGrade, nowMs)
+                        slopePercent = st.routeGradeSmoother.update(routeGrade, nowMs)
                         gradeSrc = "route"
                     } else {
                         slopePercent = compensated
@@ -440,7 +455,7 @@ class PowerEstimationEngine(
                     val pressurePa: Double? = bundle.weatherPressureHpa?.times(100.0)
 
                     val est = calculatePowerBike(
-                        userMass, config, bundle.values, slopePercent, heldElevation, acceleration, tempC, pressurePa, userFtp, moving, nowMs
+                        userMass, config, bundle.values, slopePercent, heldElevation, acceleration, tempC, pressurePa, userFtp, moving, nowMs, st.cadenceGate
                     )
                     // calculateCyclingWattage returns the cap applied to the SIGNED total (so a big
                     // acceleration spike can't show an absurd instant value); we floor it to ≥0 here.
@@ -476,6 +491,10 @@ class PowerEstimationEngine(
                             fieldCalibrator.add(y, x1, x2, resolveSurfaceForCalc(config))
                         }
                     }
+                    // Un tick que empezó ANTES del cancel() llega hasta aquí (no hay puntos de
+                    // suspensión en el bloque). Sin esto publicaría potencia y hasSample DESPUÉS de
+                    // soltar el último consumidor. ensureActive() aborta la generación cancelada.
+                    ensureActive()
                     latestInstantW = instantW                  // floored → metrics (incl. NP) match a real meter
                     _instantW.value = instantW                 // instant field: non-negative display
                     // Only a REAL speed sample counts as "we have data". The first combine tick now
@@ -487,6 +506,11 @@ class PowerEstimationEngine(
         }
 
         metricJob = engineScope.launch {
+            // La ventana de 3 s es un valor LIVE, como instant: no debe cruzar un stop/re-acquire
+            // (si no, mezcla muestras separadas por una desconexión: [300,300] + 0 -> ~200 W).
+            // Local por la misma razón que PipelineState. npCalc/runningAvg NO: son agregados de
+            // SESIÓN y sobreviven a propósito dentro de la misma marcha (RideResetGate los limpia).
+            val ma3s = MovingAverage(windowSamples = 3)
             while (isActive) {
                 // Self-clock for the 1Hz metric tick. Acceptable here; the FIT-file
                 // cadence is driven separately by ELAPSED_TIME elsewhere.
@@ -524,23 +548,16 @@ class PowerEstimationEngine(
         // aggregates (gated on `recording`, reset via RideResetGate on Idle->Recording) and are left
         // alone here.
         _power3sW.value = Double.NaN
-        // Drop held grade/elevation so an acquire→release→acquire within one process doesn't resume
-        // with a stale grade if the first sample after re-acquire is a dropout.
-        gradeHold.reset(); lastGoodElevation = 0.0
-        // Drop route state too (a stale profile/position must not drive grade after a re-acquire).
+        // Los filtros con memoria y el contador de "moving" YA NO se resetean aquí: viven en
+        // PipelineState, dentro de la corrutina, así que la generación cancelada se los lleva y la
+        // siguiente arranca limpia. Resetearlos desde este hilo era la carrera que documenta
+        // PipelineState. Lo mismo la ventana de 3 s, ahora local al metricJob.
+        // Drop route state (a stale profile/position must not drive grade after a re-acquire).
         routeProfile = null; routeDistanceM = 0.0; routeRejoinM = null; distToDestM = Double.NaN; onRoute = false
-        // ...y el RESTO del estado instantáneo, que antes sobrevivía: la ventana de altitud del
-        // deriver, los EMA del compensador y del suavizado de ruta, la derivada de aceleración, la
-        // histéresis de cadencia y el contador de "moving". Todos son historia de la ejecución
-        // anterior, exactamente lo que las dos líneas de arriba dicen querer evitar. Se reconstruyen
-        // (no se resetean campo a campo) para que no se pueda olvidar ninguno.
+        // La superficie viva la escribe OTRA corrutina y se considera fresca 120 s: sin esto, un
+        // stop + desplazamiento + re-acquire sin GPS inmediato reutilizaría la superficie anterior.
+        liveSurfaceSample = null
         // Aparte quedan SOLO los agregados de sesión (_npW/_avgW), que gestiona RideResetGate.
-        accelerationTracker = AccelerationTracker()
-        altitudeGradeDeriver = AltitudeGradeDeriver()
-        gradeCompensator = newGradeCompensator()
-        routeGradeSmoother = newRouteGradeSmoother()
-        cadenceGate = CadenceGate()
-        movingTicks = 0
     }
 
     private fun calculatePowerBike(
@@ -555,6 +572,7 @@ class PowerEstimationEngine(
         userFtp: Int,
         moving: Boolean,
         nowMs: Long,
+        cadenceGate: CadenceGate,
     ): CyclingWattageEstimator {
         val speed = values.speed.getValueOrDefault()
         val finalHeadwind = values.headwind.getValueOrDefault()
