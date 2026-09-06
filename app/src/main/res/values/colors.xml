@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Battery severity tints (sunlight-readable). OK=green, low=amber, critical=red, unknown=grey. -->
+    <color name="battery_ok">#FF43A047</color>
+    <color name="battery_low">#FFFB8C00</color>
+    <color name="battery_critical">#FFE53935</color>
+    <color name="battery_unknown">#FF888888</color>
+
+    <!-- InRideAlert palette. backgroundColor/textColor on InRideAlert are @ColorRes (the host calls
+         Context.getColor on them); a packed ARGB literal crashes the ride app. Always reference these. -->
+    <color name="alert_text">#FFFFFFFF</color>
+    <color name="alert_bg_low">#FFFB8C00</color>
+    <color name="alert_bg_critical">#FFE53935</color>
+</resources>

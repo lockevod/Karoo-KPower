@@ -2,20 +2,26 @@ package com.enderthor.kpower.extension
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.pm.PackageManager
 
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 
 
+import com.enderthor.kpower.BuildConfig
 import com.enderthor.kpower.activity.dataStore
 import com.enderthor.kpower.data.GpsCoordinates
+import com.enderthor.kpower.data.KnownProfile
 import com.enderthor.kpower.data.OpenMeteoCurrentWeatherResponse
-import com.enderthor.kpower.data.OpenWeatherCurrentWeatherResponse
 import com.enderthor.kpower.data.HeadwindStats
 import com.enderthor.kpower.data.ConfigData
 import com.enderthor.kpower.data.OpenMeteoData
 import com.enderthor.kpower.data.RETRY_CHECK_STREAMS
 import com.enderthor.kpower.data.STREAM_TIMEOUT
+import com.enderthor.kpower.data.WEATHER_STREAM_FUTURE_SKEW_MS
+import com.enderthor.kpower.data.WEATHER_STREAM_MAX_AGE_MS
 import com.enderthor.kpower.data.StreamData
 import com.enderthor.kpower.data.WAIT_STREAMS_LONG
 import com.enderthor.kpower.data.WAIT_STREAMS_MEDIUM
@@ -24,6 +30,7 @@ import com.enderthor.kpower.data.defaultConfigData
 
 
 import io.hammerhead.karooext.KarooSystemService
+import io.hammerhead.karooext.models.ActiveRideProfile
 import io.hammerhead.karooext.models.DataPoint
 import io.hammerhead.karooext.models.DataType
 import io.hammerhead.karooext.models.HttpResponseState
@@ -31,14 +38,18 @@ import io.hammerhead.karooext.models.KarooEvent
 import io.hammerhead.karooext.models.OnHttpResponse
 import io.hammerhead.karooext.models.OnLocationChanged
 import io.hammerhead.karooext.models.OnStreamState
+import io.hammerhead.karooext.models.RideProfile
+import io.hammerhead.karooext.models.SavedDevices
 import io.hammerhead.karooext.models.StreamState
 
 
 
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.awaitClose
-import kotlinx.coroutines.channels.trySendBlocking
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -52,6 +63,7 @@ import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 
 
@@ -62,6 +74,11 @@ import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.single
 import kotlinx.coroutines.flow.timeout
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 
 import kotlinx.serialization.encodeToString
@@ -70,6 +87,7 @@ import timber.log.Timber
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.abs
 import kotlin.math.cos
+import kotlin.math.round
 import kotlin.time.Duration.Companion.milliseconds
 
 import kotlin.time.Duration.Companion.seconds
@@ -81,18 +99,181 @@ sealed class HeadingResponse {
 }
 
 
-val jsonWithUnknownKeys = Json { ignoreUnknownKeys = true }
+val jsonWithUnknownKeys = Json {
+    ignoreUnknownKeys = true
+    coerceInputValues = true
+    isLenient = true
+}
 
 val currentDataKey = stringPreferencesKey("current")
 val statsKey = stringPreferencesKey("stats")
 val lastKnownPositionKey = stringPreferencesKey("lastKnownPosition")
 
 val preferencesKey = stringPreferencesKey("configdata")
+val comparisonModeKey = booleanPreferencesKey("comparisonMode")
+val antMetersKey = stringPreferencesKey("antPowerMeters")
 
-suspend fun savePreferences(context: Context, configDatas: MutableList<ConfigData>) {
+suspend fun saveComparisonMode(context: Context, enabled: Boolean) {
+    context.dataStore.edit { it[comparisonModeKey] = enabled }
+}
+
+/** Toggle global (off por defecto): expone campos custom + escribe FIT de comparación. */
+fun Context.comparisonModeFlow(): Flow<Boolean> =
+    dataStore.data.map { it[comparisonModeKey] ?: false }.distinctUntilChanged()
+
+val diagnosticLogKey = booleanPreferencesKey("diagnosticLog")
+
+suspend fun saveDiagnosticLog(context: Context, enabled: Boolean) {
+    context.dataStore.edit { it[diagnosticLogKey] = enabled }
+}
+
+/** Toggle global (off por defecto): escribe logs de diagnóstico a fichero (FileLogTree). */
+fun Context.diagnosticLogFlow(): Flow<Boolean> =
+    dataStore.data.map { it[diagnosticLogKey] ?: false }.distinctUntilChanged()
+
+val batteryAlertKey = booleanPreferencesKey("batteryAlert")
+
+suspend fun saveBatteryAlert(context: Context, enabled: Boolean) {
+    context.dataStore.edit { it[batteryAlertKey] = enabled }
+}
+
+/** Toggle global (off por defecto): dispara un InRideAlert cuando la batería del meter grabado baja
+ *  (LOW) y otro si pasa a crítica (CRITICAL), como mucho uno por nivel y ride. */
+fun Context.batteryAlertFlow(): Flow<Boolean> =
+    dataStore.data.map { it[batteryAlertKey] ?: false }.distinctUntilChanged()
+
+// ── Meter-management screen activity signal (cross-component, via DataStore) ──────────────────────
+// ComparisonScreen and the extension service hold SEPARATE AntPowerManager instances but share the one
+// physical ANT radio. The service keeps the meter channel open off-ride (so the meter shows live in the
+// Karoo's native Sensors screen), but that open channel would STARVE ComparisonScreen's raw scan when the
+// rider goes there to add a meter. ComparisonScreen marks itself active here while it's using the radio;
+// the service's connect gate releases the meter channel whenever this is recent, freeing the radio.
+//
+// Stored as a wall-clock millis stamp (not a bool) so a screen killed without onDispose AUTO-EXPIRES after
+// [METER_SCREEN_ACTIVE_BACKSTOP_MS] instead of wedging the meter disconnected forever. Auto-expiry is
+// driven by [meterScreenActiveFlow] itself (a delay()+emit(false) armed on every new stamp), NOT by
+// recomputing freshness only when some unrelated upstream re-emits — with distinctUntilChanged on the
+// ride-gate combine, a stale stamp with no other change would otherwise leave connectMeters(emptyList())
+// standing for the rest of the ride.
+// ComparisonScreen heartbeats the stamp (re-stamps every ~45 s while open) so this 2-min window can't
+// expire mid-session; the short window bounds the killed-without-onDispose wedge to ≤2 min.
+const val METER_SCREEN_ACTIVE_BACKSTOP_MS = 2 * 60_000L
+val meterScreenActiveKey = longPreferencesKey("meterScreenActiveAt")
+
+/** Mark KPower's meter-management screen active (using the ANT radio) or not. `active=true` stamps now;
+ *  `false` clears. Call true on screen enter AND on each scan start (refreshes the backstop window). */
+suspend fun saveMeterScreenActive(context: Context, active: Boolean) {
+    context.dataStore.edit { it[meterScreenActiveKey] = if (active) System.currentTimeMillis() else 0L }
+}
+
+/** Raw "last marked active" stamp (0 = inactive), with no freshness/expiry logic of its own — building
+ *  block for [meterScreenActiveFlow], which is what callers should collect. */
+fun Context.meterScreenActiveAtFlow(): Flow<Long> =
+    dataStore.data.map { it[meterScreenActiveKey] ?: 0L }.distinctUntilChanged()
+
+/** Self-expiring "is the meter-management screen active" signal. `flatMapLatest` re-arms on every new
+ *  stamp (including a heartbeat re-stamp): a cleared (0L) or stale/future stamp emits `false`
+ *  immediately; a fresh stamp emits `true`, then `delay()`s the remaining backstop window and emits
+ *  `false` on its own — no further stamp write or upstream re-emission needed. This is what makes a
+ *  screen killed without onDispose (Activity stopped, not destroyed) release the meter channel again
+ *  once [METER_SCREEN_ACTIVE_BACKSTOP_MS] lapses, instead of wedging connectMeters(emptyList()) for
+ *  the rest of the ride. */
+@OptIn(ExperimentalCoroutinesApi::class)
+fun Context.meterScreenActiveFlow(): Flow<Boolean> =
+    meterScreenActiveAtFlow()
+        .flatMapLatest { stamp ->
+            flow {
+                val age = System.currentTimeMillis() - stamp
+                // age in [0, backstop): a stamp "in the future" (clock moved back) reads as NOT
+                // active, so the meter still connects rather than staying suppressed on a negative age.
+                if (stamp != 0L && age in 0 until METER_SCREEN_ACTIVE_BACKSTOP_MS) {
+                    emit(true)
+                    delay(METER_SCREEN_ACTIVE_BACKSTOP_MS - age)
+                    emit(false)
+                } else {
+                    emit(false)
+                }
+            }
+        }
+        .distinctUntilChanged()
+
+/**
+ * Atomic read-modify-write of the saved meters: decode the current value, apply [transform], and
+ * re-encode — all INSIDE one dataStore.edit {} transaction. Use this for every mutation (add,
+ * delete, rename, enable-toggle, brand auto-detect) so two concurrent writers (e.g. the background
+ * brand-detect collector and a manual rename) can't clobber each other with a stale snapshot.
+ */
+suspend fun updateAntMeters(
+    context: Context,
+    transform: (List<com.enderthor.kpower.ant.SavedMeter>) -> List<com.enderthor.kpower.ant.SavedMeter>,
+) {
+    context.dataStore.edit { prefs ->
+        val current = runCatching {
+            jsonWithUnknownKeys.decodeFromString<List<com.enderthor.kpower.ant.SavedMeter>>(prefs[antMetersKey] ?: "[]")
+        }.getOrDefault(emptyList())
+        val updated = transform(current)
+        // Skip the write (and its flow re-emission) when nothing changed — the brand/model auto-detect
+        // re-applies the same name on every reconnect/screen revisit, which would otherwise churn the
+        // DataStore and recompose every collector for no reason. (SavedMeter is a data class → eq.)
+        if (updated != current) prefs[antMetersKey] = Json.encodeToString(updated)
+    }
+}
+
+fun Context.antMetersFlow(): Flow<List<com.enderthor.kpower.ant.SavedMeter>> =
+    dataStore.data.map { json ->
+        try {
+            jsonWithUnknownKeys.decodeFromString<List<com.enderthor.kpower.ant.SavedMeter>>(json[antMetersKey] ?: "[]")
+        } catch (e: Throwable) {
+            Timber.e(e, "Failed to read antMeters")
+            emptyList()
+        }
+    }.distinctUntilChanged()
+
+val knownProfilesKey = stringPreferencesKey("knownProfiles")
+
+suspend fun saveKnownProfiles(context: Context, profiles: List<KnownProfile>) {
+    context.dataStore.edit { it[knownProfilesKey] = Json.encodeToString(profiles) }
+}
+
+fun Context.knownProfilesFlow(): Flow<List<KnownProfile>> =
+    dataStore.data.map { json ->
+        try {
+            jsonWithUnknownKeys.decodeFromString<List<KnownProfile>>(json[knownProfilesKey] ?: "[]")
+        } catch (e: Throwable) {
+            Timber.e(e, "Failed to read knownProfiles")
+            emptyList()
+        }
+    }.distinctUntilChanged()
+
+suspend fun savePreferences(context: Context, configDatas: List<ConfigData>) {
     context.dataStore.edit { t ->
         t[preferencesKey] = Json.encodeToString(configDatas)
     }
+}
+
+private val preferenceWrites = Channel<Pair<Context, List<ConfigData>>>(Channel.CONFLATED)
+private val preferenceWriteScope = CoroutineScope(Dispatchers.IO + SupervisorJob()).apply {
+    launch {
+        for ((context, configs) in preferenceWrites) {
+            try {
+                savePreferences(context, configs)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                // Throwable, not Exception: this is the process's ONLY settings writer and the
+                // SupervisorJob does not restart it, so letting an Error (OOM encoding a large bike
+                // list, LinkageError) escape means every later save is silently dropped — the editor
+                // shows the change and it is gone on the next launch.
+                Timber.e(t, "Failed to save bike settings")
+            }
+        }
+    }
+}
+
+/** Queue the latest whole-bike-list snapshot on a process-owned writer so leaving Compose cannot
+ * cancel the final save. Conflation is safe because every item is the complete current list. */
+fun queueSavePreferences(context: Context, configDatas: List<ConfigData>) {
+    preferenceWrites.trySend(context.applicationContext to configDatas)
 }
 
 suspend fun saveStats(context: Context, stats: HeadwindStats) {
@@ -101,23 +282,25 @@ suspend fun saveStats(context: Context, stats: HeadwindStats) {
     }
 }
 
+
 suspend fun saveCurrentData(context: Context, forecast: OpenMeteoCurrentWeatherResponse) {
     context.dataStore.edit { t ->
-        Timber.d("Saving current data forecast $forecast")
         t[currentDataKey] = Json.encodeToString(forecast)
-        Timber.d("Saved current data $t[currentDataKey]")
     }
 }
 
 fun KarooSystemService.streamDataFlow(dataTypeId: String): Flow<StreamState> {
     return callbackFlow {
+        // trySend + CONFLATED: the callback runs on the Karoo binder thread, so it must NOT block
+        // (trySendBlocking on a RENDEZVOUS channel would stall that foreign thread on a slow collector).
+        // For a streaming value, latest-wins (conflate) is the right drop policy.
         val listenerId = addConsumer(OnStreamState.StartStreaming(dataTypeId)) { event: OnStreamState ->
-            trySendBlocking(event.state)
+            trySend(event.state)
         }
         awaitClose {
             removeConsumer(listenerId)
         }
-    }
+    }.buffer(Channel.CONFLATED)
 }
 
 fun Context.streamCurrentWeatherData(): Flow<OpenMeteoCurrentWeatherResponse> {
@@ -129,7 +312,17 @@ fun Context.streamCurrentWeatherData(): Flow<OpenMeteoCurrentWeatherResponse> {
             Timber.e("Failed to stream current weather data $e")
             null
         }
-    }.filterNotNull().distinctUntilChanged().filter { it.current.time * 1000 >= System.currentTimeMillis() - (1000 * 60 * 60 ) }
+    }.filterNotNull().distinctUntilChanged().filter {
+        // A missing/zero observation timestamp can't be aged — ACCEPT it rather than silently starving
+        // the estimator to ISA defaults (the refresh loop owns actual freshness).
+        if (it.current.time <= 0L) return@filter true
+        // Otherwise accept weather whose observation time is recent-ish (generous: the API time lags
+        // fetch time) and not implausibly in the future (clock skew). Log drops — they're silent ISA.
+        val ageMs = System.currentTimeMillis() - it.current.time * 1000
+        val ok = ageMs in -WEATHER_STREAM_FUTURE_SKEW_MS..WEATHER_STREAM_MAX_AGE_MS
+        if (!ok) Timber.w("Dropping weather sample: age=${ageMs}ms (out of [-${WEATHER_STREAM_FUTURE_SKEW_MS}, ${WEATHER_STREAM_MAX_AGE_MS}])")
+        ok
+    }
 }
 
 fun Context.streamStats(): Flow<HeadwindStats> {
@@ -149,10 +342,7 @@ fun Context.loadPreferencesFlow(): Flow<List<ConfigData>> {
         try {
             jsonWithUnknownKeys.decodeFromString<List<ConfigData>>(
                 settingsJson[preferencesKey] ?: defaultConfigData
-            ).map { configData ->
-                configData.copy(surface = configData.surface)
-            }
-
+            )
         } catch(e: Throwable){
             Timber.tag("kpower").e(e, "Failed to read preferences Flow Extension")
             jsonWithUnknownKeys.decodeFromString<List<ConfigData>>(defaultConfigData)
@@ -160,48 +350,52 @@ fun Context.loadPreferencesFlow(): Flow<List<ConfigData>> {
     }.distinctUntilChanged()
 }
 
+// ── Bikes config export/import ────────────────────────────────────────────────────────────────────
+// A single fixed JSON file in the app's external files dir (same place as the diagnostic logs), so it
+// can be pulled/pushed with Hammerhead Companion or adb to move bikes between devices. Matches the
+// established Karoo file pattern — no document picker (which the Karoo may lack) is needed.
+fun Context.bikesConfigFile(): java.io.File =
+    java.io.File(getExternalFilesDir(null) ?: filesDir, "kpower_bikes.json")
+
+/** Write the bikes list to the export file; returns it (for showing its path). IO — call off-main. */
+fun Context.exportBikesConfig(configs: List<ConfigData>): java.io.File {
+    val f = bikesConfigFile()
+    f.writeText(Json.encodeToString(configs))
+    return f
+}
+
+/** Read + parse the export file. null if it's missing, empty, or malformed. IO — call off-main. */
+fun Context.importBikesConfig(): List<ConfigData>? {
+    val f = bikesConfigFile()
+    if (!f.exists()) return null
+    return try {
+        jsonWithUnknownKeys.decodeFromString<List<ConfigData>>(f.readText()).takeIf { it.isNotEmpty() }
+    } catch (e: Throwable) {
+        Timber.tag("kpower").e(e, "Failed to import bikes config")
+        null
+    }
+}
+
 
 
 fun Context.parseWeatherResponse(responseString: String): OpenMeteoCurrentWeatherResponse {
-    Timber.d("Decoded weather: $responseString")
-
-    val decoded = try {
-        if (responseString.contains("\"current\"")) {
-            jsonWithUnknownKeys.decodeFromString<OpenMeteoCurrentWeatherResponse>(responseString)
-        } else {
-            val weather = jsonWithUnknownKeys.decodeFromString<OpenWeatherCurrentWeatherResponse>(responseString)
-            Timber.d("Decoded weather: $weather")
-            OpenMeteoCurrentWeatherResponse(
-                current = OpenMeteoData(
-                    windSpeed = weather.wind.speed,
-                    windDirection = weather.wind.deg,
-                    time = weather.time,
-                    interval = 0
-                ),
-                latitude = weather.coord.lat,
-                longitude = weather.coord.lon,
-                timezone = "",
-                elevation = 0.0,
-                utfOffsetSeconds = 0
-            )
-        }
+    return try {
+        jsonWithUnknownKeys.decodeFromString<OpenMeteoCurrentWeatherResponse>(responseString)
     } catch (e: Exception) {
         throw IllegalArgumentException("Invalid response format parse weather", e)
-
     }
-
-    return decoded
 }
 
 
 @OptIn(FlowPreview::class)
-suspend fun KarooSystemService.makeOpenMeteoHttpRequest(gpsCoordinates: GpsCoordinates, isOpenWeather: Boolean, api: String): HttpResponseState.Complete {
+suspend fun KarooSystemService.makeOpenMeteoHttpRequest(gpsCoordinates: GpsCoordinates): HttpResponseState.Complete {
     return callbackFlow {
 
-        val url = if(isOpenWeather && api.trim().isNotEmpty())  "https://api.openweathermap.org/data/2.5/weather?lat=${gpsCoordinates.lat}&lon=${gpsCoordinates.lon}&appid=$api"
-        else "https://api.open-meteo.com/v1/forecast?latitude=${gpsCoordinates.lat}&longitude=${gpsCoordinates.lon}&current=wind_speed_10m,wind_direction_10m&timeformat=unixtime&wind_speed_unit=ms"
+        // Open-Meteo is the sole weather provider (free, no API key). Surface pressure (not sea-level)
+        // and m/s wind are requested so the estimator can use them directly.
+        val url = "https://api.open-meteo.com/v1/forecast?latitude=${gpsCoordinates.lat}&longitude=${gpsCoordinates.lon}&current=wind_speed_10m,wind_direction_10m,temperature_2m,surface_pressure&timeformat=unixtime&wind_speed_unit=ms"
 
-        Timber.d("Http request to ${url}...")
+        if (BuildConfig.DEBUG) Timber.d("Http request to %s", url)
 
         val listenerId = addConsumer(
             OnHttpResponse.MakeHttpRequest(
@@ -210,7 +404,6 @@ suspend fun KarooSystemService.makeOpenMeteoHttpRequest(gpsCoordinates: GpsCoord
                 waitForConnection = false,
             ),
         ) { event: OnHttpResponse ->
-            Timber.d("Http response event $event")
             if (event.state is HttpResponseState.Complete){
                 trySend(event.state as HttpResponseState.Complete)
                 close()
@@ -219,13 +412,114 @@ suspend fun KarooSystemService.makeOpenMeteoHttpRequest(gpsCoordinates: GpsCoord
         awaitClose {
             removeConsumer(listenerId)
         }
-    }.timeout(20.seconds).catch { e: Throwable ->
+    }.buffer(Channel.CONFLATED).timeout(20.seconds).catch { e: Throwable ->
         if (e is TimeoutCancellationException){
             emit(HttpResponseState.Complete(500, mapOf(), null, "Timeout"))
         } else {
             throw e
         }
     }.single()
+}
+
+/**
+ * Generic HTTP request through the Karoo's connectivity (phone tether / Wi-Fi), suspending until the
+ * response completes. Used by [LogReporter] to POST the diagnostic log to the developer's Telegram bot.
+ * Mirrors the karoo-ext request/response consumer pattern; trySend + CONFLATED keeps the binder callback
+ * non-blocking. Wrap the call in withTimeoutOrNull — this has no internal timeout.
+ */
+suspend fun KarooSystemService.httpRequest(
+    method: String,
+    url: String,
+    headers: Map<String, String> = emptyMap(),
+    body: ByteArray? = null,
+): HttpResponseState.Complete = callbackFlow {
+    val listenerId = addConsumer(
+        OnHttpResponse.MakeHttpRequest(method, url, headers = headers, body = body, waitForConnection = false),
+    ) { event: OnHttpResponse ->
+        (event.state as? HttpResponseState.Complete)?.let { trySend(it); close() }
+    }
+    awaitClose { removeConsumer(listenerId) }
+}.buffer(Channel.CONFLATED).first()
+
+/** Anonymous, stable per-install id (8 hex) so uploaded diagnostic logs can be correlated without any
+ *  personal data. Created once and persisted. */
+val installIdKey = stringPreferencesKey("installId")
+suspend fun Context.getOrCreateInstallId(): String {
+    dataStore.data.first()[installIdKey]?.let { return it }
+    val id = java.util.UUID.randomUUID().toString().replace("-", "").take(8)
+    runCatching { dataStore.edit { it[installIdKey] = id } }
+    return id
+}
+
+const val HEADWIND_PACKAGE = "de.timklge.karooheadwind"
+
+/** Headwind instalado en el Karoo. Requiere <package> en <queries> (Android 11+). */
+fun Context.isHeadwindInstalled(): Boolean = try {
+    packageManager.getPackageInfo(HEADWIND_PACKAGE, 0)
+    true
+} catch (e: PackageManager.NameNotFoundException) {
+    false
+} catch (e: Throwable) {
+    Timber.e(e, "isHeadwindInstalled check failed")
+    false
+}
+
+/**
+ * Toma un snapshot de la meteo publicada por Headwind por el stream system de karoo-ext
+ * (temperatura, presión, viento y dirección) y lo mapea al mismo modelo que la API propia,
+ * para que todo aguas abajo (streamCurrentWeatherData, headwindFlow) funcione sin cambios.
+ *
+ * Unidades: temperatura (°C) y presión (hPa) salen crudas de Headwind. El viento, en cambio,
+ * sale convertido a la unidad de viento que el usuario eligió en Headwind; asumimos su DEFAULT
+ * (km/h métrico / mph imperial, derivable del perfil del Karoo) y lo reconvertimos a m/s. Si el
+ * usuario cambió a mano esa unidad en Headwind a m/s o nudos, el viento saldrá mal (la UI avisa).
+ *
+ * Devuelve null si Headwind no emite datos completos antes del timeout → el caller hace fallback
+ * a su propia API.
+ */
+suspend fun KarooSystemService.fetchHeadwindWeatherSnapshot(
+    gps: GpsCoordinates,
+    isImperial: Boolean,
+    windUnit: com.enderthor.kpower.data.HeadwindWindUnit,
+): OpenMeteoCurrentWeatherResponse? {
+    // Nombre de la extensión karoo-ext de Headwind (DataTypeImpl("karoo-headwind", ...)),
+    // distinto de su package Android (de.timklge.karooheadwind).
+    fun id(typeId: String) = DataType.dataTypeId("karoo-headwind", typeId)
+    return try {
+        withTimeoutOrNull(STREAM_TIMEOUT) {
+            combine(
+                streamDataFlow(id("temperature")),
+                streamDataFlow(id("surfacePressure")),
+                streamDataFlow(id("windSpeed")),
+                streamDataFlow(id("windDirection")),
+            ) { temp, press, wind, dir ->
+                if (temp is StreamState.Streaming && press is StreamState.Streaming &&
+                    wind is StreamState.Streaming && dir is StreamState.Streaming
+                ) {
+                    val windRaw = wind.dataPoint.singleValue ?: 0.0
+                    val windMs = windUnit.toMetersPerSecond(windRaw, isImperial)
+                    OpenMeteoCurrentWeatherResponse(
+                        current = OpenMeteoData(
+                            time = System.currentTimeMillis() / 1000,
+                            interval = 0,
+                            windSpeed = windMs,
+                            windDirection = dir.dataPoint.singleValue ?: 0.0,
+                            temperature = temp.dataPoint.singleValue,
+                            surfacePressure = press.dataPoint.singleValue,
+                        ),
+                        latitude = gps.lat,
+                        longitude = gps.lon,
+                        timezone = "",
+                        elevation = 0.0,
+                        utfOffsetSeconds = 0,
+                    )
+                } else null
+            }.filterNotNull().first()
+        }
+    } catch (e: Throwable) {
+        Timber.e(e, "fetchHeadwindWeatherSnapshot failed")
+        null
+    }
 }
 
 fun KarooSystemService.getRelativeHeadingFlow(context: Context): Flow<HeadingResponse> {
@@ -238,9 +532,6 @@ fun KarooSystemService.getRelativeHeadingFlow(context: Context): Flow<HeadingRes
                 is HeadingResponse.Value -> {
                     val windBearing = data.current.windDirection + 180
                     val diff = signedAngleDifference(bearing.diff, windBearing)
-
-                    Timber.d("Wind bearing: $bearing vs $windBearing => $diff")
-
                     HeadingResponse.Value(diff)
                 }
 
@@ -259,17 +550,16 @@ fun KarooSystemService.getHeadingFlow(context: Context): Flow<HeadingResponse> {
     return getGpsCoordinateFlow(context)
         .map { coords ->
             val heading = coords?.bearing
-                Timber.d( "Updated gps bearing: $heading")
-            val headingValue = heading?.let { HeadingResponse.Value(it) }
-
-            headingValue ?: HeadingResponse.NoGps
+            heading?.let { HeadingResponse.Value(it) } ?: HeadingResponse.NoGps
         }
         .distinctUntilChanged()
 }
 
 fun signedAngleDifference(angle1: Double, angle2: Double): Double {
-    val a1 = angle1 % 360
-    val a2 = angle2 % 360
+    // Normalise into [0,360): Kotlin's % keeps the dividend's sign, so a negative bearing (e.g. wind
+    // direction math) would otherwise skew the result. (+360)%360 makes it non-negative.
+    val a1 = ((angle1 % 360) + 360) % 360
+    val a2 = ((angle2 % 360) + 360) % 360
     var diff = abs(a1 - a2)
 
     val sign = if (a1 < a2) {
@@ -324,15 +614,12 @@ fun KarooSystemService.getGpsCoordinateFlow(context: Context): Flow<GpsCoordinat
 }
 
 suspend fun KarooSystemService.updateLastKnownGps(context: Context) {
-    while (true) {
-        getGpsCoordinateFlow(context)
-            .filterNotNull()
-            .throttle(60 * 1_000) // Only update last known gps position once every minute
-            .collect { gps ->
-                saveLastKnownPosition(context, gps)
-            }
-        delay(1_000)
-    }
+    getGpsCoordinateFlow(context)
+        .filterNotNull()
+        .throttle(60 * 1_000) // Only update last known gps position once every minute
+        .collect { gps ->
+            saveLastKnownPosition(context, gps)
+        }
 }
 
 suspend fun Context.getLastKnownPosition(): GpsCoordinates? {
@@ -353,13 +640,14 @@ suspend fun Context.getLastKnownPosition(): GpsCoordinates? {
 
 fun KarooSystemService.streamLocation(): Flow<OnLocationChanged> {
     return callbackFlow {
+        // trySend + CONFLATED — don't block the binder thread; latest position wins. See streamDataFlow.
         val listenerId = addConsumer { event: OnLocationChanged ->
-            trySendBlocking(event)
+            trySend(event)
         }
         awaitClose {
             removeConsumer(listenerId)
         }
-    }
+    }.buffer(Channel.CONFLATED)
 }
 
 fun<T> Flow<T>.throttle(timeout: Long): Flow<T> = flow {
@@ -387,6 +675,10 @@ suspend fun saveLastKnownPosition(context: Context, gpsCoordinates: GpsCoordinat
 
 }
 inline fun <reified T : KarooEvent> KarooSystemService.consumerFlow(): Flow<T> {
+    // buffer(UNLIMITED) + trySend: the callback runs on the Karoo's binder thread, so it must NOT block
+    // (trySendBlocking on the default RENDEZVOUS channel would stall that foreign thread on a slow
+    // collector — e.g. a DataStore write). The unlimited buffer makes trySend always succeed (no dropped
+    // RideState transition) without ever blocking. Events here are low-rate, so the buffer stays tiny.
     return callbackFlow {
         val listenerId = addConsumer<T> {
             trySend(it)
@@ -394,15 +686,51 @@ inline fun <reified T : KarooEvent> KarooSystemService.consumerFlow(): Flow<T> {
         awaitClose {
             removeConsumer(listenerId)
         }
-    }
+    }.buffer(Channel.UNLIMITED)
 }
 
+fun KarooSystemService.streamRideProfile(): Flow<RideProfile> =
+    consumerFlow<ActiveRideProfile>().map { it.profile }
+
+/** The Karoo's saved/paired sensors (name + connection type + battery + serial). SavedDevices needs
+ *  an explicit Params, so it can't use the generic consumerFlow<T>() (no-params) helper. */
+fun KarooSystemService.savedDevicesFlow(): Flow<SavedDevices> = callbackFlow {
+    // trySend + buffer (never block the binder thread); see consumerFlow for the rationale.
+    val listenerId = addConsumer(SavedDevices.Params) { event: SavedDevices -> trySend(event) }
+    awaitClose { removeConsumer(listenerId) }
+}.buffer(Channel.UNLIMITED)
+
+/** True when a Karoo SavedDevice is (very likely) the ANT meter [dn]: an ANT connection whose id or
+ *  serial carries the device number as a standalone token. A BLE/other device that merely contains the
+ *  digits is excluded. The exact id format varies by firmware (the KAROODEV diag log captures it). */
+fun SavedDevices.SavedDevice.matchesAntNumber(dn: Int): Boolean {
+    val conn = connectionType ?: ""
+    if (conn.isNotBlank() && !conn.contains("ant", ignoreCase = true)) return false
+    val n = dn.toString()
+    val serial = details.serialNumber ?: ""
+    if (serial == n) return true
+    val token = Regex("(^|\\D)" + Regex.escape(n) + "(\\D|$)")
+    return token.containsMatchIn(id ?: "") || token.containsMatchIn(serial)
+}
+
+/** The Karoo's friendly name for ANT device [dn] among these saved devices, or null if unknown. */
+fun List<SavedDevices.SavedDevice>.karooNameForAnt(dn: Int): String? =
+    firstOrNull { it.matchesAntNumber(dn) }?.name?.trim()?.takeIf { it.isNotEmpty() }
 
 
+
+/**
+ * Stream-state monitor con timeout y back-off exponencial.
+ *
+ * - applyDistinct=false para SPEED (necesario para detección de GPS-stale aguas abajo:
+ *   ver `speedStreamWithStaleness`). Para slope/elevation/cadence se filtran duplicados.
+ * - noCheck=true se salta el back-off y delega directo en streamDataFlow.
+ */
 @OptIn(FlowPreview::class)
 fun KarooSystemService.streamDataMonitorFlow(
     dataTypeID: String,
-    noCheck: Boolean = false
+    noCheck: Boolean = false,
+    applyDistinct: Boolean = true
 ): Flow<StreamState> = flow {
 
     if (noCheck) {
@@ -410,43 +738,45 @@ fun KarooSystemService.streamDataMonitorFlow(
         return@flow
     }
 
+    monitorStreamData(
+        streamFactory = { streamDataFlow(dataTypeID) },
+        applyDistinct = applyDistinct,
+    ).collect { emit(it) }
+}
+
+@OptIn(FlowPreview::class)
+internal fun monitorStreamData(
+    streamFactory: () -> Flow<StreamState>,
+    applyDistinct: Boolean,
+    timeoutMs: Long = STREAM_TIMEOUT,
+    shortDelayMs: Long = WAIT_STREAMS_SHORT,
+    mediumDelayMs: Long = WAIT_STREAMS_MEDIUM,
+    longDelayMs: Long = WAIT_STREAMS_LONG,
+    retryLimit: Int = RETRY_CHECK_STREAMS,
+): Flow<StreamState> = flow {
     var retryAttempt = 0
-
-
-    val initialState = StreamState.Streaming(
-        DataPoint(
-            dataTypeId = dataTypeID,
-            values = mapOf(DataType.Field.SINGLE to 0.0)
-        )
-    )
-
-    emit(initialState)
-
+    emit(StreamState.NotAvailable)
     while (currentCoroutineContext().isActive) {
         try {
-            streamDataFlow(dataTypeID)
-                .distinctUntilChanged()
-                .timeout(STREAM_TIMEOUT.milliseconds)
+            val live = streamFactory().timeout(timeoutMs.milliseconds)
+            val source = if (applyDistinct) live.distinctUntilChanged() else live
+            source
                 .collect { state ->
                     when (state) {
                         is StreamState.Idle -> {
-                            Timber.w("Stream estado inactivo: $dataTypeID, esperando...")
-                            if (dataTypeID == DataType.Type.SPEED) emit(initialState)
-                            delay(WAIT_STREAMS_SHORT)
+                            emit(state)
+                            delay(shortDelayMs)
                         }
                         is StreamState.NotAvailable -> {
-                            Timber.w("Stream estado NotAvailable: $dataTypeID, esperando...")
-                            emit(initialState)
-                            delay(WAIT_STREAMS_SHORT * 2)
+                            emit(state)
+                            delay(shortDelayMs * 2)
                         }
                         is StreamState.Searching -> {
-                            Timber.w("Stream estado searching: $dataTypeID, esperando...")
-                            emit(initialState)
-                            delay(WAIT_STREAMS_SHORT/2)
+                            emit(state)
+                            delay(shortDelayMs / 2)
                         }
                         else -> {
                             retryAttempt = 0
-                            Timber.d("Stream estado: $state")
                             emit(state)
                         }
                     }
@@ -455,56 +785,100 @@ fun KarooSystemService.streamDataMonitorFlow(
         } catch (e: Exception) {
             when (e) {
                 is TimeoutCancellationException -> {
-                    if (retryAttempt++ < RETRY_CHECK_STREAMS) {
+                    emit(StreamState.NotAvailable)
+                    if (retryAttempt++ < retryLimit) {
                         val backoffDelay = (1000L * (1 shl retryAttempt))
-                            .coerceAtMost(WAIT_STREAMS_MEDIUM)
-                        Timber.w("Timeout/Cancel en stream $dataTypeID, reintento $retryAttempt en ${backoffDelay}ms. Motivo $e")
+                            .coerceAtMost(mediumDelayMs)
                         delay(backoffDelay)
                     } else {
-                        Timber.e("Máximo de reintentos alcanzado")
                         retryAttempt = 0
-                        delay(WAIT_STREAMS_LONG)
+                        delay(longDelayMs)
                     }
                 }
-                is CancellationException -> {
-                    Timber.d("Cancelación ignorada en streamDataFlow")
-                }
+                is CancellationException -> throw e
                 else -> {
-                    Timber.e(e, "Error en stream")
-                    delay(WAIT_STREAMS_LONG)
+                    Timber.e(e, "Error en monitor de stream")
+                    delay(longDelayMs)
                 }
             }
         }
     }
 }
 
+/**
+ * Speed stream con detección de GPS-stale.
+ *
+ * Cuando el GPS se pierde el SDK reemite el ÚLTIMO valor conocido en vez de cero.
+ * Si el valor no cambia durante [staleThresholdMs] y es > 0, lo tratamos como
+ * stale y emitimos 0.0 para que el cálculo de potencia no produzca lecturas
+ * fantasma en túneles/puentes.
+ *
+ * NOTA: no aplicar distinctUntilChanged aguas arriba (rompería la detección,
+ * por eso `streamDataMonitorFlow` se llama con applyDistinct=false para SPEED).
+ */
+fun KarooSystemService.speedStreamWithStaleness(
+    staleThresholdMs: Long = 5_000L
+): Flow<StreamState> = flow {
+    var lastValue = Double.NaN
+    var lastChangeMs = 0L
 
-
-fun KarooSystemService.headwindFlow(context: Context): Flow<StreamState> = flow {
-    try {
-        getRelativeHeadingFlow(context)
-            .combine(context.streamCurrentWeatherData()) { value, data -> StreamData(value, data) }
-            .filter { it.weatherResponse != null }
-            .onStart {
-                emit(StreamState.Streaming(
-                    DataPoint("headwindspeed", mapOf(DataType.Field.SINGLE to 0.0))
-                ))
+    streamDataMonitorFlow(DataType.Type.SPEED, applyDistinct = false).collect { state ->
+        if (state is StreamState.Streaming) {
+            val v = state.dataPoint.singleValue ?: 0.0
+            val now = System.currentTimeMillis()
+            if (v != lastValue || lastChangeMs == 0L) {
+                lastChangeMs = now
+                lastValue = v
             }
-            .collect { streamData ->
-                val windSpeed = streamData.weatherResponse?.current?.windSpeed ?: 0.0
-                val windDirection = (streamData.headingResponse as? HeadingResponse.Value)?.diff ?: 0.0
-                val headwindSpeed = cos((windDirection + 180) * Math.PI / 180.0) * windSpeed
-
-                emit(StreamState.Streaming(DataPoint("headwindspeed", mapOf(DataType.Field.SINGLE to headwindSpeed))))
-                delay(1000L)
+            val stale = (now - lastChangeMs) > staleThresholdMs && v > 0.0
+            if (stale) {
+                emit(
+                    StreamState.Streaming(
+                        DataPoint(DataType.Type.SPEED, mapOf(DataType.Field.SINGLE to 0.0))
+                    )
+                )
+            } else {
+                emit(state)
             }
-    } catch (e: Exception) {
-        Timber.e(e, "Error en headwindFlow")
-        emit(StreamState.Streaming(
-            DataPoint("headwindspeed", mapOf(DataType.Field.SINGLE to 0.0))
-        ))
-        delay(WAIT_STREAMS_SHORT/2)
-        // No lanzamos la excepción para permitir que el flujo continúe
+        } else {
+            lastValue = Double.NaN
+            lastChangeMs = 0L
+            emit(state)
+        }
     }
 }
 
+
+
+/**
+ * Viento frontal efectivo (m/s, negativo = cola) a partir del heading GPS y la meteo.
+ * Se cuantiza a 0.1 m/s + distinctUntilChanged para no despertar el combine() del
+ * estimador con micro-variaciones de rumbo: solo emite cuando el viento efectivo
+ * cambia de verdad (cambio de rumbo apreciable o meteo nueva).
+ */
+fun KarooSystemService.headwindFlow(context: Context): Flow<StreamState> =
+    getRelativeHeadingFlow(context)
+        .combine(context.streamCurrentWeatherData()) { value, data -> StreamData(value, data) }
+        .filter { it.weatherResponse != null }
+        .map { streamData ->
+            val windSpeed = streamData.weatherResponse?.current?.windSpeed ?: 0.0
+            val windDirection = (streamData.headingResponse as? HeadingResponse.Value)?.diff ?: 0.0
+            round(cos((windDirection + 180) * Math.PI / 180.0) * windSpeed * 10.0) / 10.0
+        }
+        .distinctUntilChanged()
+        .map { headwindSpeed ->
+            StreamState.Streaming(
+                DataPoint("headwindspeed", mapOf(DataType.Field.SINGLE to headwindSpeed))
+            ) as StreamState
+        }
+        .onStart {
+            emit(StreamState.Streaming(
+                DataPoint("headwindspeed", mapOf(DataType.Field.SINGLE to 0.0))
+            ))
+        }
+        .catch { e ->
+            Timber.e(e, "Error en headwindFlow")
+            emit(StreamState.Streaming(
+                DataPoint("headwindspeed", mapOf(DataType.Field.SINGLE to 0.0))
+            ))
+        }

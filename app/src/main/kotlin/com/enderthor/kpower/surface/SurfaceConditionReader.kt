@@ -1,0 +1,159 @@
+package com.enderthor.kpower.surface
+
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Environment
+import com.enderthor.kpower.data.KarooSurface
+import org.mapsforge.core.model.BoundingBox
+import org.mapsforge.core.model.Tile
+import org.mapsforge.map.reader.MapFile
+import timber.log.Timber
+import java.io.File
+
+/**
+ * Dado (lat,lon) devuelve la KarooSurface bajo el ciclista, o null = Unknown
+ * (sin mapfile de la zona / fuera de vía / sin permiso) -> el llamador mantiene el preset.
+ *
+ * Barato por diseño:
+ *  - Escaneo de mapfiles lazy y refrescado solo cada SCAN_INTERVAL_MS.
+ *  - Reader MapFile abierto y cacheado (cap MAX_OPEN_READERS).
+ *  - readMapData solo al cambiar de tile (zoom 16 ~ 600 m).
+ *
+ * Se invoca desde un único coroutine colector (sin concurrencia interna).
+ */
+class SurfaceConditionReader(private val context: Context) {
+
+    private data class MapFileInfo(val file: File, val box: BoundingBox)
+    private class WaySnapshot(
+        val segments: Array<Array<org.mapsforge.core.model.LatLong>>,
+        val surface: String?,
+        val tracktype: String?,
+        val highway: String?,
+    )
+
+    private var knownMapfiles: List<MapFileInfo>? = null
+    private var lastScanMs = 0L
+    // access-order LRU (true) so trimming evicts the LEAST-RECENTLY-USED reader, not the oldest-inserted —
+    // otherwise a point covered by overlapping mapfiles could evict the hot one and reopen it (header
+    // parse = real I/O) every tile.
+    private val openReaders = LinkedHashMap<File, MapFile>(8, 0.75f, true)
+    private var cachedTileKey: Long = Long.MIN_VALUE
+    private var cachedWays: List<WaySnapshot> = emptyList()
+
+    @Synchronized fun classifyAt(lat: Double, lon: Double): KarooSurface? {
+        ensureMapfiles()
+        val covering = knownMapfiles?.filter { it.box.contains(lat, lon) }?.map { it.file }.orEmpty()
+        if (covering.isEmpty()) return null
+
+        val (tx, ty) = TileUtils.locationToTileXY(lat, lon, ZOOM)
+        val tileKey = (tx.toLong() shl 32) or (ty.toLong() and 0xffffffffL)
+        if (tileKey != cachedTileKey) {
+            cachedWays = readWays(covering, tx, ty)
+            cachedTileKey = tileKey
+        }
+
+        var best: WaySnapshot? = null
+        var bestDist = Double.MAX_VALUE
+        for (way in cachedWays) {
+            for (segment in way.segments) {
+                for (i in 1 until segment.size) {
+                    val a = segment[i - 1]; val b = segment[i]
+                    val d = GeoUtils.distancePointToSegmentMeters(
+                        lat, lon, a.latitude, a.longitude, b.latitude, b.longitude
+                    )
+                    if (d < bestDist) { bestDist = d; best = way }
+                }
+            }
+        }
+
+        if (best == null || bestDist > MAX_DIST_M) return null
+        return SurfaceTagClassifier.classifyWay(best.surface, best.tracktype, best.highway)
+    }
+
+    private fun ensureMapfiles() {
+        // Una vez encontrados, no reescanear durante la ruta (los .map no aparecen a mitad);
+        // close() resetea knownMapfiles=null, así que una reconexión sí reescanea.
+        if (knownMapfiles?.isNotEmpty() == true) return
+        val now = System.currentTimeMillis()
+        if (knownMapfiles != null && now - lastScanMs < SCAN_INTERVAL_MS) return
+        lastScanMs = now
+
+        if (!hasReadPermission()) { knownMapfiles = emptyList(); return }
+
+        val dir = File(File(Environment.getExternalStorageDirectory(), "offline"), "maps")
+        if (!dir.exists() || !dir.isDirectory) { knownMapfiles = emptyList(); return }
+
+        val files = dir.listFiles { f -> f.isFile && f.extension.equals("map", true) } ?: emptyArray()
+        // Never log the NAME: mapfiles are named after their region ("catalunya.map") and this log is
+        // uploaded, so a filename is a coarse home location. Size identifies which file (stably, unlike
+        // a list index) without naming it. The THROWABLE is dropped for the same reason — mapsforge's
+        // MapFileException and FileNotFoundException both embed the full path in their message, and
+        // FileLogTree appends the stack trace verbatim.
+        knownMapfiles = files.mapNotNull { file ->
+            try {
+                val mf = MapFile(file)
+                try { MapFileInfo(file, mf.mapFileInfo.boundingBox) } finally { mf.close() }
+            } catch (e: Exception) {
+                Timber.e("Surface: cannot read mapfile (%d MB): %s", file.length() shr 20, e.javaClass.simpleName)
+                null
+            }
+        }
+    }
+
+    private fun readWays(files: List<File>, tx: Int, ty: Int): List<WaySnapshot> {
+        val out = ArrayList<WaySnapshot>()
+        val tile = Tile(tx, ty, ZOOM.toByte(), 256)
+        for (file in files) {
+            try {
+                val reader = openReaders.getOrPut(file) { MapFile(file) }
+                val result = reader.readMapData(tile) ?: continue
+                for (way in result.ways) {
+                    val tags = way.tags
+                    val highway = tags.find { it.key.equals("highway", true) }?.value?.lowercase()
+                        ?: continue
+                    out.add(
+                        WaySnapshot(
+                            segments = way.latLongs,
+                            surface = tags.find { it.key.equals("surface", true) }?.value?.lowercase(),
+                            tracktype = tags.find { it.key.equals("tracktype", true) }?.value?.lowercase(),
+                            highway = highway,
+                        )
+                    )
+                }
+            } catch (e: Exception) {
+                Timber.e("Surface: readMapData failed for mapfile (%d MB): %s", file.length() shr 20, e.javaClass.simpleName)
+                runCatching { openReaders.remove(file)?.close() }
+            }
+        }
+        trimOpenReaders()
+        return out
+    }
+
+    private fun trimOpenReaders() {
+        while (openReaders.size > MAX_OPEN_READERS) {
+            val eldest = openReaders.entries.iterator().next()
+            runCatching { eldest.value.close() }
+            openReaders.remove(eldest.key)
+        }
+    }
+
+    private fun hasReadPermission(): Boolean =
+        context.checkCallingOrSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) ==
+            PackageManager.PERMISSION_GRANTED
+
+    @Synchronized fun close() {
+        openReaders.values.forEach { runCatching { it.close() } }
+        openReaders.clear()
+        knownMapfiles = null
+        lastScanMs = 0L
+        cachedTileKey = Long.MIN_VALUE
+        cachedWays = emptyList()
+    }
+
+    companion object {
+        private const val ZOOM = 16
+        private const val MAX_DIST_M = 30.0
+        private const val SCAN_INTERVAL_MS = 5L * 60L * 1000L
+        private const val MAX_OPEN_READERS = 4   // ≥ typical overlapping-mapfile count so we don't thrash
+    }
+}

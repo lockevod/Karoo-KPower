@@ -1,140 +1,87 @@
-# Karoo Power Extension
+# ⚡ KPower — Karoo Power Extension
 
-Break change: You need to uninstall current version (if it's < 1.9.5) and install the new one.
+### Power *without* a power meter — and advanced pedalling dynamics *with* one.
 
-This extension for Karoo devices adds a device simulates a virtual power meter. You only need to add this power meter (settings -> sensors) and you can use all power fields.
+KPower turns your **Hammerhead Karoo 2 / 3** into a power meter by **estimating your watts from physics**
+(slope, rolling resistance, real-air-density aero and acceleration, minus drivetrain losses). And if you
+own a real ANT+ meter, it unlocks the **advanced cycling dynamics the Karoo can't record on its own** —
+written straight into your ride FIT.
 
-Compatible with Karoo 2 and Karoo 3 devices running Karoo OS version 1.524.2003 and later (only tested with Karoo 3 if you detect issues with Karoo 2, please open an issue)
+🇪🇸 **Guía rápida en español:** [docs/guia-rapida.md](docs/guia-rapida.md) · Karoo OS ≥ 1.524.2003 (tested on Karoo 3).
 
-<a href="https://www.buymeacoffee.com/enderthor" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/default-orange.png" alt="Buy Me A Coffee" height="41" width="174"></a>
+## Two tools in one
 
-## Installation
+**1 · Estimated power — no sensor needed**
+- Pair **“KPW Estimated”** and the Karoo records power, NP, TSS and zones **natively**, just like a real meter.
+- Physics model with **real temperature/pressure/wind** (Open-Meteo, or [Headwind](https://github.com/timklge/karoo-headwind) if installed), tyre/surface rolling resistance, height-based aero and an acceleration term.
+- **Multiple bikes**, auto-selected per Karoo ride profile.
+- On-screen fields: **Est. Power / 3s / NP**.
 
-You can sideload the app using the following steps for Karoo 2
+**2 · Advanced cycling dynamics — with a real ANT+ meter**
+KPower reads your meter's raw ANT+ broadcast and records the dynamics the Karoo can't, into the ride FIT (view them in [intervals.icu](https://intervals.icu)):
+- **Torque** (overall + per leg)
+- **Power phase** & **peak power phase** (left/right)
+- **Platform centre offset (PCO)** + rider position + **torque barycenter**
+- **L/R balance**, **torque effectiveness**, **pedal smoothness**
 
-1. Download the APK from the releases .
-2. Prepare your Karoo for sideloading by following the [step-by-step guide](https://www.dcrainmaker.com/2021/02/how-to-sideload-android-apps-on-your-hammerhead-karoo-1-karoo-2.html) by DC Rainmaker.
-3. Install the app using the command `adb install app-release.apk`.
+> **Where to look:** intervals.icu shows every field automatically. Garmin Connect shows native TE/PS/
+> balance, but keeps KPower's own fields (torque, power phase, PCO, barycenter) as separate
+> developer-data charts, not inside its "Cycling Dynamics" section — no arc graphic there (SDK
+> limitation, not a bug). Strava ignores developer fields. Details: **[docs/real-meter-and-fit.md](docs/real-meter-and-fit.md#where-to-see-it-after-the-ride)**.
 
+Plus **auto-naming** (brand + model), **battery level & low-battery alert**, and optional **estimate-vs-real logging** to compare both in the FIT. Details: **[docs/real-meter-and-fit.md](docs/real-meter-and-fit.md)**.
 
-If you've Karoo 3 and v > 1.527 you can sideload the app using the following steps:
+> Power is an **estimation**, not a measurement — the parameters matter. Setup: **[docs/configuration.md](docs/configuration.md)**.
 
-1. Link with apk (releases link) from your mobile (https://github.com/lockevod/Karoo-KPower/releases/latest/download/kpower.apk)
-2. Share with Hammerhead companion app
-3. Install the app using the Hammerhead companion app.
+## Quick start
 
+New here? Pick your setup in the quick guide:
+**🇬🇧 [Quick start](docs/quick-start.md)** · **🇪🇸 [Guía rápida](docs/guia-rapida.md)**
 
-## Usage
+> **Heads-up — the ANT+ rule:** a meter **can't** be read over ANT+ by the Karoo and KPower at the same
+> time (they share the one ANT+ radio; whichever locks it first keeps it). To use both, pair the meter to
+> the Karoo over **BLE** (ANT+ stays free for KPower), or pick one. All valid pairing combinations —
+> including how to get your **offset** into the recording — are in the quick guide and
+> **[docs/real-meter-and-fit.md](docs/real-meter-and-fit.md#how-to-pair-the-power-source--and-the-ant-rule)**.
 
-1. After installing this app on your Karoo, you need to configure the power extension in the settings.
-Please read the Help tab in configuration, there are some useful information because it's very important to configure with correct parameters.
-Power is an estimation and you need this parameters correct to get a good estimation.
+## Install (sideload)
 
-To calculate cycling wattage, you need to provide the following parameters:
+**Karoo 3 (v ≥ 1.527):** open the [latest APK](https://github.com/lockevod/Karoo-KPower/releases/latest/download/kpower.apk)
+link on your phone → share to the **Hammerhead Companion** app → install.
 
-- **Weight of Bike**: Include the weight of your bike along with any additional gear (in kg).
-- **Rolling Resistance Coefficient**: Depends on the type of surface and the tires you are using. You can use info from here https://www.bicyclerollingresistance.com/ 
-- **Surfaces**: You can select the surface you are riding on. The app will adapt the rolling resistance coefficient for this type of surface (if you don't know, or if you want to use only the value in rolling coefficient, use standard surface ).
-- **Aerodynamic Drag Coefficient**: Depends on your position on the bike and your frontal area
-- **Frontal Area**: The area of your body that is exposed to the wind (m2)
-- **Power Losses**: Includes losses due to chain resistance and derailleur pulleys.
-- **FTP**: Your Functional Threshold Power (in watts). If you don't know your FTP, you can use the default value of 200 watts.
-- **Wind API Key**: You can use openweathermap to get the wind speed. You need to get an API key from openweathermap (free but you need to create an account) and introduce it in the configuration. Openweathermap is most acurate than Openmeteo
+**Karoo 2:** enable sideloading ([DC Rainmaker guide](https://www.dcrainmaker.com/2021/02/how-to-sideload-android-apps-on-your-hammerhead-karoo-1-karoo-2.html)),
+then `adb install app-release.apk`.
 
-Kpower  will get the wind speed from openweathermap (you need to select openweather option also) or openmeteo automatically. 
+> Upgrading from **< 1.9.5**? Uninstall the old version first (incompatible data format).
 
-Kpower virtual sensor gives 0.0 power when your cadence is below 22 rpm, but you can force to ignore it (configuration option).
+## Settings
 
-Here are some typical values for these parameters:
-
-**Air Drag / Frontal Area**
-
-0.25 / 0.30 AEROBARS COM BIKE
-
-0.35 / 0.40 DROPS BIKE
-
-0.45 / 0.55 HOODS BIKE
-
-0.60 / 0.75 TOPS BIKE
-
-0.80 / 0.90 MTB BIKE 
-
-**Rolling Resistance**
-
-0.0045 TOP RANGE ROAD TIRES
-
-0.0065 MEDIUM RANGE ROAD TIRES 
-
-0.0085 LOW RANGE ROAD TIRES 
-
-0.0095 MTB TIRES 
-
-Check https://www.bicyclerollingresistance.com/ for better values for your tires.
-
-**Power Losses**
-
-1.0% SRAM CERAMIC / FORCE
-
-1.3% SHIMANO ULTEGRA - DURACE
-
-2.0% SRAM EAGLE
-
-2.2% SHIMANO XTR
-
-3%-4% SHIMANO OTHER
-
-
-FTP is necessary to smooth the power estimation. If you don't know your FTP, you can use the following formula to get an estimation:
-FTP = 0.95 * 20 minutes power  or use a value between 150 and 200 watts and adjust it later.
-
-Surfaces:
-
-2- Kpower emulates a real power meter, then you need to add this power meter in the sensors configuration. 
-Start scan and  you'll see a new category (looks like a puzzle piece), select the powermeter.
-
-3- Kpower will show you the power estimation in the power fields. You can use the power fields in the data screens, in the workout builder, etc. It's like a real power meter.
-
-
-## Features
-
-This release has the following old  features:
-- Updated power estimation formula.
-- Added wind speed parameter with openmeteo (from Timklge repository headwind).
-- Added FTP to smooth the power estimation.
-- Added wind speed using openweathermap.
-- Added cadence to discard some power estimations (cadence lower than 22 rpm ). Cadence is better estimator than speed, but we cannot use directly because we need to know torque (and don't have this value) but we can use cadence to discard some bad estimations (when you go down a hill, for example, and you don't pedal). There is an option (v1.9.1) to force power calculation in any situation (with low cadences)
+Two tabs: **Estimator** (your bikes — weight, tyres, aero, FTP, power offset; Simple or Advanced mode) and
+**Real meter** (add/enable a real ANT+ meter, battery alert, “log estimate to FIT”, diagnostics).
+Full reference: **[docs/configuration.md](docs/configuration.md)** ·
+real meter & FIT: **[docs/real-meter-and-fit.md](docs/real-meter-and-fit.md)**.
 
 ## Known issues
 
-- Power meter is not 100% accurate, it is only a estimation based in power formula. It is not possible to get the real power data from the Karoo without a power meter.
-There is currently a big important parameter in the power estimation, the wind. The wind can change the power needed to maintain a speed. 
-You can use openmeteo or openweathermap If you want to use openweathermap (better because they use near stations), you need to get an API key from openweathermap (free but you need to create an account) and introduce it in the configuration.
-
-- Power meter use values from Karoo (real), sometimes Karoo has some "delays/lags" or Karoo expose bad information (for example, current slope grade) then Power Meter will estimate not accurate values. Most of times 5-10 seconds later all is fine ;)
-
-- I recommend to use Power3s field.
-  
-- Tested only with Karoo 3 and Metric configuration, but can be used with Imperial configuration also (not tested)
-
-- Sometimes it's necessary to rescan virtual power sensor when you update this extension. If you don't see the power meter active, remove current power meter and re-add.
-
-- If your cadence sensor doesn't work fine or you want to have a power value always, check force power option.
-
+- It's an estimate: the biggest unknown is **wind**. KPower pulls wind/temperature/pressure from
+  Open-Meteo automatically (or from the [Headwind](https://github.com/timklge/karoo-headwind) extension
+  if installed) — nothing to configure. Dial in Crr/CdA from references (Advanced mode).
+- The Karoo can lag on slope/speed for a few seconds → brief inaccurate estimates; it self-corrects.
+- Use the **Power 3s** field for a steadier reading.
+- Tested on Karoo 3 / metric. After updating, you may need to re-pair the virtual sensor.
 
 ## Credits
 
-- Made possible by the generous usage terms of timklge. He has a great development and I use part of his code to create this extension.
-  https://github.com/timklge?tab=repositories
-- Power estimation https://www.gribble.org/cycling/power_v_speed.html
-- SRAM and Hammerhead coypyright are describer in Karoo file.
-- KPower doesn't save or share any information for it's use, but it use firebase crashlytics service only for crashes in app (and firebase use this crash information). I only use this information to prevent new crashes in the app. Please if you isn't agree with Firebase use (this conditions are in firebase web and can change, please read it), please you cannot use kpower app. If you use kpower you are agree with all conditions and copyrights.
+- Built on the work of **timklge** ([repos](https://github.com/timklge?tab=repositories)) — parts of his
+  code make this extension possible.
+- Power model: <https://www.gribble.org/cycling/power_v_speed.html>
+- KPower has no account or backend. Weather lookup sends the current position to Open-Meteo; when the
+  off-by-default diagnostic log is enabled in a developer-configured build, anonymized GPS-stripped
+  logs are sent automatically to the developer through Telegram.
 
 ## Links
 
-[karoo-ext source](https://github.com/hammerheadnav/karoo-ext)
-[openmeteo](https://open-meteo.com/)
-[openweathermap](https://openweathermap.org/)
-[headwind](https://headwind.app/)
-[rolling resistance](https://www.bicyclerollingresistance.com/)
-https://sites.google.com/view/powerbikepro/configuration
-```
+[karoo-ext](https://github.com/hammerheadnav/karoo-ext) ·
+[Open-Meteo](https://open-meteo.com/) ·
+[Headwind](https://github.com/timklge/karoo-headwind) ·
+[bicyclerollingresistance.com](https://www.bicyclerollingresistance.com/)

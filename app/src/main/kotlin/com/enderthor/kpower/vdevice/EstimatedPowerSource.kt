@@ -1,139 +1,70 @@
 package com.enderthor.kpower.vdevice
 
-import android.content.Context
-import io.hammerhead.karooext.KarooSystemService
 import io.hammerhead.karooext.internal.Emitter
 import io.hammerhead.karooext.models.*
 import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.filter
 import timber.log.Timber
-import com.enderthor.kpower.data.ConfigData
-import com.enderthor.kpower.data.RealKarooValues
-import com.enderthor.kpower.data.previewConfigData
-import com.enderthor.kpower.extension.*
-
+import com.enderthor.kpower.BuildConfig
 
 class EstimatedPowerSource(
     extension: String,
     private val hr: Int,
-    private val karooSystem: KarooSystemService,
-    private val context: Context
+    private val engine: PowerEstimationEngine,
 ) {
     val source by lazy {
-        Device(
-            extension,
-            "estimated-power-$hr",
-            listOf(DataType.Source.POWER),
-            "Estimated Power $hr Source"
-        )
+        Device(extension, "estimated-power-$hr", listOf(DataType.Source.POWER), "KPW Estimated")
     }
 
-    private var lastRandomPowerTime = 0L
-    private var currentRandomPower = 150.0  // Valor inicial
-    private val randomPowerUpdateInterval = 5000L  // Cambiar
+    @Volatile private var activeScope: CoroutineScope? = null
 
-    private fun getRandomPower(): Double {
-        val currentTime = System.currentTimeMillis()
-
-        // Si han pasado más de X segundos desde la última actualización, generar un nuevo valor
-        if (currentTime - lastRandomPowerTime > randomPowerUpdateInterval) {
-            currentRandomPower = (100..259).random().toDouble()
-            lastRandomPowerTime = currentTime
-        }
-
-        return currentRandomPower
-    }
-
-    @OptIn(FlowPreview::class)
     fun connect(emitter: Emitter<DeviceEvent>, extension: String) {
         Timber.d("Init Connect Power Estimator")
-        val scope = CoroutineScope(Dispatchers.IO)
+        activeScope?.cancel()
+        val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        activeScope = scope
+        // Fresh token PER connect (not `this`): if the host rebinds (a new connect before the old
+        // emitter's cancellable runs), the engine's acquire/release set then holds two distinct tokens,
+        // so the old cancellable releases only ITS token and can't stop the engine / mark the device
+        // disconnected while the new connection is still live.
+        val token = Any()
+        engine.acquire(token)
+        engine.setVirtualDeviceConnected(token, true)
 
         scope.launch {
             try {
-
                 emitter.onNext(OnConnectionStatus(ConnectionStatus.SEARCHING))
                 delay(2000)
                 emitter.onNext(OnConnectionStatus(ConnectionStatus.CONNECTED))
                 delay(1000)
                 emitter.onNext(OnBatteryStatus(BatteryStatus.GOOD))
                 delay(1000)
-                emitter.onNext(OnManufacturerInfo(ManufacturerInfo("Enderthor", "1234", "POWER-EXT-1")))
-                delay(1000)
+                // Readable identity in the Karoo pairing screen (was a meaningless "1234 / POWER-EXT-1").
+                emitter.onNext(OnManufacturerInfo(ManufacturerInfo("Enderthor", "Estimate", "KPOWER")))
 
-
-                val userProfile = karooSystem.consumerFlow<UserProfile>().first()
-                val (userMass, factorMass, factorDistance, factorElevation) = getUserProfileFactors(userProfile)
-
-
-                val powerConfigFlow = context.loadPreferencesFlow()
-                    .catch { e ->
-                        Timber.e(e, "Error loading power configs")
-                        emit(previewConfigData)
-                    }
-                    .stateIn(
-                        scope = scope,
-                        started = SharingStarted.Eagerly,
-                        initialValue = previewConfigData
-                    )
-
-                combine(
-                    karooSystem.streamDataMonitorFlow(DataType.Type.SPEED),
-                    karooSystem.streamDataMonitorFlow(DataType.Type.ELEVATION_GRADE),
-                    karooSystem.streamDataMonitorFlow(DataType.Type.PRESSURE_ELEVATION_CORRECTION),
-                    karooSystem.streamDataMonitorFlow(DataType.Type.CADENCE,true),
-                    karooSystem.headwindFlow(context),
-                    powerConfigFlow
-                ) { streams: Array<*> ->
-                    Timber.d("Streams: ${streams.joinToString { it.toString() }}")
-
-                    val speed = streams[0] as StreamState
-                    val slope = streams[1] as StreamState
-                    val elevation = streams[2] as StreamState
-                    val cadence = streams[3] as StreamState
-                    val headwind = streams[4] as StreamState
-
-                    Timber.w(" Despues del FLOW COMBINE Speed: $speed, Slope: $slope, Elevation: $elevation, Cadence: $cadence, Headwind: $headwind")
-
-                    @Suppress("UNCHECKED_CAST")
-                    val configs = streams[5] as List<ConfigData>
-                    val karooValues = RealKarooValues(
-                        speed = speed,
-                        slope = slope,
-                        elevation = elevation,
-                        cadence = cadence,
-                        headwind = headwind
-                    )
-                    Pair(karooValues, configs)
-                }.throttle(900L)
-                    .collect { (karooValues, configs) ->
-                        if (configs.isNotEmpty()) {
-                            val powerBike = calculatePowerBike(
-                                userMass,
-                                factorMass,
-                                factorDistance,
-                                factorElevation,
-                                configs,
-                                karooValues
-                            )
-
-                            val powerValue = powerBike.calculateCyclingWattage()
-                            //val powerValue = getRandomPower()
-                            emitter.onNext(
-                                OnDataPoint(
-                                    DataPoint(
-                                        source.dataTypes.first(),
-                                        values = mapOf(DataType.Field.POWER to powerValue),
-                                        sourceId = source.uid
-                                    )
+                // INSTANT power, like a real meter: an ANT+ meter broadcasts instantaneous samples and
+                // the Karoo applies its own field smoothing (3s/10s/… per the rider's field choice).
+                // Broadcasting a pre-smoothed EMA here (the old powerEmaW, τ=3s) meant DOUBLE smoothing
+                // — the estimate read seconds late and never reached the peaks of a variable effort.
+                // Trade-off accepted: the upstream EMAs (acceleration, grade) only partially damp
+                // sensor noise, so an UNSMOOTHED Karoo power field will visibly swing more than the
+                // old EMA did — same as a real meter's instant watts; riders wanting a steady readout
+                // pick a smoothed field (3s), exactly as they would with a real meter.
+                engine.instantW
+                    .filter { !it.isNaN() }
+                    .collect { powerValue ->
+                        emitter.onNext(
+                            OnDataPoint(
+                                DataPoint(
+                                    source.dataTypes.first(),
+                                    values = mapOf(DataType.Field.POWER to powerValue),
+                                    sourceId = source.uid,
                                 )
                             )
-                        }
+                        )
                     }
-
-                awaitCancellation()
             } catch (e: CancellationException) {
-                Timber.w("Connect coroutine was cancelled")
+                if (BuildConfig.DEBUG) Timber.w("Connect coroutine was cancelled")
             } catch (e: Exception) {
                 Timber.e(e, "Error in connect function")
                 emitter.onError(e)
@@ -141,59 +72,21 @@ class EstimatedPowerSource(
         }
 
         emitter.setCancellable {
-            Timber.w("Stopping connect coroutine")
+            if (BuildConfig.DEBUG) Timber.w("Stopping connect coroutine")
+            engine.release(token)
+            engine.setVirtualDeviceConnected(token, false)
             scope.cancel()
+            if (activeScope === scope) activeScope = null
         }
     }
-
-    private fun calculatePowerBike(
-        userMass: Double,
-        factorMass: Double,
-        factorDistance: Double,
-        factorElevation: Double,
-        powerConfigs: List<ConfigData>,
-        values: RealKarooValues
-    ): CyclingWattageEstimator {
-        val speed = values.speed.getValueOrDefault()
-
-        val slope = values.slope.getValueOrDefault()
-        val elevation = values.elevation.getValueOrDefault()
-        val finalHeadwind = values.headwind.getValueOrDefault()
-
-        var cadence = 0.0
-        var isforcepower = powerConfigs[0].isforcepower
-
-        if( values.cadence is StreamState.Streaming) cadence = values.cadence.getValueOrDefault()
-        else isforcepower = true
-
-
-        //Timber.w("VALUES  Speed: $speed, Cadence: $cadence, Slope: $slope, Elevation: $elevation, Headwind: $finalHeadwind")
-
-        return CyclingWattageEstimator(
-            slope = slope / 100,
-            totalMass = (userMass + powerConfigs[0].bikeMass.toDoubleLocale()) * factorMass,
-            rollingResistanceCoefficient = powerConfigs[0].rollingResistanceCoefficient.toDoubleLocale(),
-            dragCoefficient = powerConfigs[0].dragCoefficient.toDoubleLocale(),
-            speed = speed * factorDistance,
-            elevation = elevation * factorElevation,
-            windSpeed = finalHeadwind,
-            powerLoss = powerConfigs[0].powerLoss.toDoubleLocale() / 100,
-            frontalArea = powerConfigs[0].frontalArea.toDoubleLocale(),
-            ftp = powerConfigs[0].ftp.toDoubleLocale(),
-            cadence = cadence,
-            surface = powerConfigs[0].surface.factor,
-            isforcepower = isforcepower
-        )
-    }
-
 
     companion object {
-        fun fromUid(extension: String, uid: String, karooSystem: KarooSystemService, context: Context): EstimatedPowerSource? {
-            return uid.substringAfterLast("-").toIntOrNull()?.let {
-                EstimatedPowerSource(extension, it, karooSystem, context)
+        fun buildDevice(extension: String, hr: Int, engine: PowerEstimationEngine): EstimatedPowerSource =
+            EstimatedPowerSource(extension, hr, engine)
+
+        fun fromUid(extension: String, uid: String, engine: PowerEstimationEngine): EstimatedPowerSource? =
+            uid.substringAfterLast("-").toIntOrNull()?.let {
+                EstimatedPowerSource(extension, it, engine)
             }
-        }
     }
 }
-
-

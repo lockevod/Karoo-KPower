@@ -1,0 +1,139 @@
+<resources>
+    <string name="app_name">KPower</string>
+    <string name="extension_name">KPower</string>
+    <string name="profile_power_source_hint">Para mostrar potencia, añade el sensor “KPOWER Estim.” como fuente de potencia en este perfil de ruta del Karoo.</string>
+    <string name="est_instant_name">Pot. est.</string>
+    <string name="est_instant_desc">Potencia instantánea estimada por KPower. Añádela a una página para verla en directo; grabarla en el FIT es aparte (“Grabar estimada”).</string>
+    <string name="est_3s_name">Pot. est. 3s</string>
+    <string name="est_3s_desc">Potencia 3s estimada por KPower. Añádela a una página para verla en directo; grabarla en el FIT es aparte (“Grabar estimada”).</string>
+    <string name="est_np_name">NP est.</string>
+    <string name="est_np_desc">Potencia normalizada estimada por KPower. Añádela a una página para verla en directo; grabarla en el FIT es aparte (“Grabar estimada”).</string>
+    <string name="real1_name">Pot. real</string>
+    <string name="real1_desc">Potencia real grabada del potenciómetro ANT+ (requiere un medidor grabado)</string>
+    <string name="real1_3s_name">Pot. real 3s</string>
+    <string name="real1_3s_desc">Potencia 3s real grabada del potenciómetro (requiere un medidor grabado)</string>
+    <string name="real1_np_name">NP real</string>
+    <string name="real1_np_desc">Potencia normalizada real grabada del potenciómetro (requiere un medidor grabado)</string>
+    <string name="real1_balance_name">Balance real I/D</string>
+    <string name="real1_balance_desc">Balance izquierda/derecha en vivo del medidor real (ej. 48/52). Útil con fuente KPW-virtual, donde el Karoo no muestra dinámicas nativas.</string>
+    <string name="real1_balance_avg_name">Balance real I/D medio</string>
+    <string name="real1_balance_avg_desc">Balance izquierda/derecha medio de la sesión del medidor real (mientras graba).</string>
+    <string name="meter_double_pair_warning">Consejo: para enviar este potenciómetro al Karoo, empareja el sensor llamado “KPOWER …” (el nombre de tu potenciómetro con el prefijo KPOWER) en tu perfil de ruta — no emparejes además el potenciómetro de forma nativa, o la potencia se grabará dos veces.</string>
+    <string name="diagnostic_log_label">Registro de diagnóstico</string>
+    <string name="diagnostic_log_desc">Graba diagnósticos detallados de la salida y ANT+. En compilaciones configuradas por el desarrollador, al activarlo también envía registros anonimizados y sin GPS al desarrollador por Telegram durante/después de la salida y tras emparejar o calibrar. Off por defecto — consume más batería, almacenamiento y datos.</string>
+
+    <!-- Tabs -->
+    <string name="tab_bikes">Estimador</string>
+    <string name="tab_comparison">Medidor real</string>
+
+    <!-- Main / bikes list -->
+    <string name="bikes_add">Añadir</string>
+    <string name="bikes_empty">Aún no hay bicis — toca + para añadir una.</string>
+    <string name="bikes_subtitle">KPower estima tu potencia. Añade una bici y luego empareja el sensor “KPOWER Estim.” como fuente de potencia en tu perfil de ruta del Karoo.</string>
+    <string name="menu_more">Más</string>
+    <string name="menu_export">Exportar configuración</string>
+    <string name="menu_import">Importar configuración</string>
+    <string name="export_done">Exportado a %1$s</string>
+    <string name="import_done">Importadas %1$d bicis</string>
+    <string name="import_failed">No se encontró un archivo de configuración válido</string>
+
+    <!-- Comparison screen -->
+    <string name="comparison_mode_label">Grabar estimada (FIT)</string>
+    <string name="comparison_mode_desc">Graba la potencia estimada de KPower en el FIT como campos extra (est_power, est_np…) para compararla con un medidor real, Y calibra en campo el Crr/CdA de tu bici a partir del medidor real (la sugerencia aparece luego en el editor de bici). Requiere un medidor grabando. Off por defecto.</string>
+    <string name="dynamics_auto_info">Las dinámicas de pedaleo de un medidor activado se graban en el FIT automáticamente (el Karoo no puede grabarlas).</string>
+    <string name="diagnostic_log_path_prefix">Registro: </string>
+
+    <!-- ANT+ scan -->
+    <string name="ant_meters_title">Potenciómetros ANT+</string>
+    <string name="ant_meters_subtitle">Graba un potenciómetro ANT+ junto con la estimación (solo uno graba a la vez).</string>
+    <string name="ant_recorded_meters">Potenciómetros grabados</string>
+    <string name="ant_no_meters">Aún no hay potenciómetros grabados — elige uno abajo.</string>
+    <string name="ant_available">Disponibles</string>
+    <string name="ant_scan">Scan</string>
+    <string name="ant_stop">Stop</string>
+    <string name="ant_scan_warning">No busques mientras grabas una salida — puede interrumpir el potenciómetro que estás grabando.</string>
+    <string name="ant_max_meters">Máximo: %1$d potenciómetro</string>
+    <string name="ant_scanning">Buscando…</string>
+    <string name="ant_identifying">Identificando…</string>
+    <string name="ant_tap_scan">Toca Scan para encontrar potenciómetros.</string>
+    <string name="ant_remove">Quitar</string>
+    <string name="ant_rename">Renombrar</string>
+    <string name="ant_add">Añadir</string>
+    <string name="meter_status_recording">grabando</string>
+    <string name="meter_status_off">sin grabar</string>
+
+    <!-- Panel de detalle del meter + batería -->
+    <string name="meter_details">Detalles</string>
+    <string name="btn_calibrate">Calibrar</string>
+    <string name="btn_close">Cerrar</string>
+    <string name="calibrate_title">Calibración</string>
+    <string name="calibrate_running">Calibrando…</string>
+    <string name="calibrate_instruction">Mantén las bielas quietas (sin pedalear) durante la calibración. No calibres mientras grabas una ruta.</string>
+    <string name="calibrate_success">Calibración OK (offset cero %1$d)</string>
+    <string name="calibrate_success_no_value">Calibración OK</string>
+    <string name="calibrate_failed">Calibración fallida. Asegúrate de que el potenciómetro está despierto y las bielas quietas.</string>
+    <string name="calibrate_unreachable">No se pudo contactar con el potenciómetro (dormido o en uso). Inténtalo de nuevo, o emparéjalo antes en el Karoo.</string>
+    <string name="calibrate_timeout">Sin respuesta del potenciómetro. Asegúrate de que está despierto e inténtalo de nuevo.</string>
+    <string name="battery_ok">Batería OK</string>
+    <string name="battery_low">Batería baja</string>
+    <string name="battery_critical">Batería crítica</string>
+    <string name="battery_unknown">Batería desconocida</string>
+
+    <!-- Toggle de aviso de batería + alerta en ruta -->
+    <string name="battery_alert_label">Avisar de batería baja/crítica</string>
+    <string name="battery_alert_desc">Muestra un aviso en ruta (una sola vez) cuando la batería del potenciómetro grabado baja, y otro si pasa a crítica (como mucho dos por ruta). El estado de batería solo se actualiza con el potenciómetro despierto.</string>
+    <string name="battery_alert_low_title">Batería del potenciómetro baja</string>
+    <string name="battery_alert_critical_title">Batería del potenciómetro crítica</string>
+    <string name="battery_alert_low_detail">La batería de %1$s está baja — cárgala o cámbiala pronto.</string>
+    <string name="battery_alert_critical_detail">La batería de %1$s está crítica — cámbiala ya.</string>
+
+    <!-- Detail screen -->
+    <string name="cfg_title_edit">Perfil de estimador</string>
+    <string name="section_bike">Bici</string>
+    <string name="cfg_name">Nombre</string>
+    <string name="cfg_color">Color</string>
+    <string name="btn_back">Atrás</string>
+    <string name="dropdown_none">Por defecto</string>
+    <string name="profile_link_hint">Vincula este perfil a un perfil de ruta del Karoo para que KPower lo elija solo al rodar con ese perfil. “Por defecto” = se usa para cualquier perfil de ruta que no hayas vinculado.</string>
+    <string name="dropdown_link_profile">Vincular al perfil del Karoo</string>
+    <string name="no_profiles_hint">Un perfil de ruta del Karoo solo aparece aquí después de abrirlo (o iniciar una salida con él) una vez — KPower aprende los perfiles según los usas.</string>
+    <string name="dropdown_position">Posición</string>
+    <string name="simple_mode_label">Modo simple (ocultar avanzado)</string>
+    <string name="cfg_bike_mass">Peso bici + equipo</string>
+    <string name="cfg_bike_mass_hint">La bici como la ruedas (pedales, bidones llenos, herramientas) más casco, ropa, zapatillas y mochila. Tu peso corporal sale del perfil del Karoo.</string>
+    <string name="section_tyres_surface">Neumáticos y superficie</string>
+    <string name="cfg_rider_height">Altura del ciclista</string>
+    <string name="cfg_tyre_width">Ancho del neumático (mm / pulgadas)</string>
+    <string name="cfg_tyre_pressure">Presión del neumático</string>
+    <string name="rear_tyre_hint">Si el delantero y el trasero difieren, introduce el neumático trasero — soporta la mayor parte del peso y domina la resistencia a la rodadura.</string>
+    <string name="dropdown_tread">Dibujo</string>
+    <string name="tubeless_label">¿Neumáticos tubeless?</string>
+    <string name="dropdown_default_surface">Superficie por defecto (se usa si no se puede leer el mapa)</string>
+    <string name="dropdown_surface">Superficie</string>
+    <string name="auto_surface_label">Superficie automática desde mapas offline</string>
+    <string name="auto_surface_desc">KPower lee la superficie OSM bajo ti desde los mapas offline (/offline/maps) y ajusta el Crr en directo (asfalto/estándar/grava/arena). Necesita mapas offline de la zona y permiso de almacenamiento; si no, mantiene la superficie que elegiste arriba.</string>
+    <string name="section_rider_ftp">Ciclista y FTP</string>
+    <string name="use_profile_ftp_label">¿Usar el FTP del perfil del Karoo?</string>
+    <string name="cfg_ftp_from_profile">FTP (del perfil del Karoo)</string>
+    <string name="cfg_ftp">FTP</string>
+    <string name="section_weather">Meteorología</string>
+    <string name="use_headwind_label">Usar meteorología de Headwind si está instalado</string>
+    <string name="headwind_detected_hint">Headwind detectado: KPower tomará de él temperatura, presión y viento, y omitirá sus propias consultas meteorológicas. El viento asume la unidad por defecto de Headwind (km/h métrico / mph imperial); si lo configuras en m/s o nudos en Headwind, el viento será incorrecto.</string>
+    <string name="headwind_not_installed_hint">Headwind no instalado: KPower usa su propia meteorología (Open-Meteo, automática — sin configuración ni API key).</string>
+    <string name="headwind_wind_unit_label">Unidad de viento de Headwind</string>
+    <string name="section_advanced">Avanzado</string>
+    <string name="cfg_frontal_area">Área frontal</string>
+    <string name="cfg_power_loss">Pérdida de potencia</string>
+    <string name="offset_section">Ajuste de potencia</string>
+    <string name="offset_formula_hint">Corregida = P × (1 + Factor/100) + Offset. Deja ambos a 0 para no aplicar nada.</string>
+    <string name="offset_factor_pct">Factor (%)</string>
+    <string name="offset_watts">Offset (W)</string>
+    <string name="use_karoo_temp_label">¿Usar el sensor de temperatura del Karoo como respaldo?</string>
+    <string name="ignore_low_cadence_label">¿Ignorar cadencia baja (calcular siempre la potencia)?</string>
+    <string name="btn_save">Guardar</string>
+    <string name="btn_cancel">Cancelar</string>
+    <string name="btn_delete_bike">Borrar bici</string>
+    <string name="delete_bike_confirm_title">¿Borrar esta bici?</string>
+    <string name="delete_bike_confirm_text">Esto elimina la configuración de la bici. No se puede deshacer.</string>
+    <string name="btn_delete">Borrar</string>
+</resources>
