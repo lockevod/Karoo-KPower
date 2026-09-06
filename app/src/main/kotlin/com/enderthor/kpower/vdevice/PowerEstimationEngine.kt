@@ -107,14 +107,14 @@ class PowerEstimationEngine(
         _estimateIsPrimary.value = virtualDeviceTokens.isNotEmpty()
     }
 
-    private val accelerationTracker = AccelerationTracker()
+    @Volatile private var accelerationTracker = AccelerationTracker()
     // Fuente PRIMARIA de pendiente: derivada del stream de ALTITUD (fresco), no del `grade` del Karoo
     // (retrasado ~6 s). Validado sobre FIT: corr 0,60→0,82, retardo 8→2 s — ver
     // docs/superpowers/specs/2026-07-12-estimator-grade-dynamics-design.md (Fase 1).
-    private val altitudeGradeDeriver = AltitudeGradeDeriver()
+    @Volatile private var altitudeGradeDeriver = AltitudeGradeDeriver()
     // Sobre esa pendiente (ya fresca) aplica un lead ligero para afinar el residual. leadSeconds=2 fue
     // el óptimo con grade-de-altitud (con el grade retrasado del Karoo hacía falta 4).
-    private val gradeCompensator = GradeLeadCompensator(tauMs = 1_000.0, leadSeconds = 2.0)
+    @Volatile private var gradeCompensator = newGradeCompensator()
     @Volatile private var lastGradeLogMs = 0L
 
     // Fase 2 (C): pendiente desde el perfil de elevación de la RUTA navegada — retardo ~0 y sin ruido de
@@ -127,9 +127,15 @@ class PowerEstimationEngine(
     @Volatile private var onRoute = false
     // maxDtMs corto: un hueco off-route real (>3 s) re-siembra el EMA con el grade de ruta fresco al
     // volver, en vez de mezclarlo con uno viejo de otra posición (revisión adversarial #2).
-    private val routeGradeSmoother = GradeSmoother(tauMs = 1_000.0, maxDtMs = 3_000L)
+    @Volatile private var routeGradeSmoother = newRouteGradeSmoother()
     // Last good grade %, held across stream dropouts, plus the re-seed decisions that go with it.
     private val gradeHold = GradeHold(maxHoldMs = GRADE_MAX_HOLD_MS)
+
+    // Fábricas: stopPipeline RECONSTRUYE los filtros en vez de resetearlos campo a campo, así
+    // que añadir estado a cualquiera de estas clases no puede dejar un reset incompleto.
+    // Los parámetros viven aquí y solo aquí.
+    private fun newGradeCompensator() = GradeLeadCompensator(tauMs = 1_000.0, leadSeconds = 2.0)
+    private fun newRouteGradeSmoother() = GradeSmoother(tauMs = 1_000.0, maxDtMs = 3_000L)
     // ponytail: 0.0 here is a MEASUREMENT masquerading as "unknown" — with no elevation stream AND no
     // weather pressure, airDensity falls back to sea-level ISA and over-estimates aero ~25 % at 2000 m.
     // Seeding it from the weather response does NOT fix that: airDensity only reads elevation when
@@ -138,7 +144,7 @@ class PowerEstimationEngine(
     @Volatile private var lastGoodElevation = 0.0
     // Consecutive 1 Hz ticks with speed above MIN_SPEED_FOR_POWER_MS (debounces GPS speed spikes). Only
     // touched on the single estimate-collect coroutine.
-    private var movingTicks = 0
+    @Volatile private var movingTicks = 0
 
     // Field calibration: derives Crr & CdA from the REAL meter vs the model, accumulated over a
     // comparison session. realPowerProvider is set by the extension (active meter's live power, NaN if none).
@@ -150,7 +156,7 @@ class PowerEstimationEngine(
 
     /** Discard accumulated calibration samples (e.g. the active bike changed mid-ride). */
     fun resetCalibration() = fieldCalibrator.reset()
-    private val cadenceGate = CadenceGate()
+    @Volatile private var cadenceGate = CadenceGate()
     private val surfaceReader by lazy { SurfaceConditionReader(context) }
 
     // Superficie + su timestamp en UN solo volatile: el lector empareja siempre valor y
@@ -434,7 +440,7 @@ class PowerEstimationEngine(
                     val pressurePa: Double? = bundle.weatherPressureHpa?.times(100.0)
 
                     val est = calculatePowerBike(
-                        userMass, config, bundle.values, slopePercent, heldElevation, acceleration, tempC, pressurePa, userFtp, moving
+                        userMass, config, bundle.values, slopePercent, heldElevation, acceleration, tempC, pressurePa, userFtp, moving, nowMs
                     )
                     // calculateCyclingWattage returns the cap applied to the SIGNED total (so a big
                     // acceleration spike can't show an absurd instant value); we floor it to ≥0 here.
@@ -523,6 +529,18 @@ class PowerEstimationEngine(
         gradeHold.reset(); lastGoodElevation = 0.0
         // Drop route state too (a stale profile/position must not drive grade after a re-acquire).
         routeProfile = null; routeDistanceM = 0.0; routeRejoinM = null; distToDestM = Double.NaN; onRoute = false
+        // ...y el RESTO del estado instantáneo, que antes sobrevivía: la ventana de altitud del
+        // deriver, los EMA del compensador y del suavizado de ruta, la derivada de aceleración, la
+        // histéresis de cadencia y el contador de "moving". Todos son historia de la ejecución
+        // anterior, exactamente lo que las dos líneas de arriba dicen querer evitar. Se reconstruyen
+        // (no se resetean campo a campo) para que no se pueda olvidar ninguno.
+        // Aparte quedan SOLO los agregados de sesión (_npW/_avgW), que gestiona RideResetGate.
+        accelerationTracker = AccelerationTracker()
+        altitudeGradeDeriver = AltitudeGradeDeriver()
+        gradeCompensator = newGradeCompensator()
+        routeGradeSmoother = newRouteGradeSmoother()
+        cadenceGate = CadenceGate()
+        movingTicks = 0
     }
 
     private fun calculatePowerBike(
@@ -536,6 +554,7 @@ class PowerEstimationEngine(
         pressurePa: Double?,
         userFtp: Int,
         moving: Boolean,
+        nowMs: Long,
     ): CyclingWattageEstimator {
         val speed = values.speed.getValueOrDefault()
         val finalHeadwind = values.headwind.getValueOrDefault()
@@ -546,9 +565,10 @@ class PowerEstimationEngine(
         // we no longer force power on — without cadence, not-moving counts as not-pedalling, so the toggle
         // (isforcepower=false) correctly yields 0 on a stationary unit. With the toggle OFF (isforcepower
         // =true) power is computed regardless, exactly as before.
+        // Un CORTE del sensor no es lo mismo que NO TENER sensor: ver CadenceGate.updateAbsent.
         val isPedaling = if (values.cadence is StreamState.Streaming) {
-            cadenceGate.update(values.cadence.getValueOrDefault())
-        } else moving
+            cadenceGate.update(values.cadence.getValueOrDefault(), nowMs)
+        } else cadenceGate.updateAbsent(nowMs, moving)
 
         val ftp = if (config.useProfileFtp && userFtp > 0) userFtp.toDouble()
         else config.ftp.toDoubleLocale()

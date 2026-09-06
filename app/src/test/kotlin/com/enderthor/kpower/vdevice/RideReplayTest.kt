@@ -136,7 +136,8 @@ class RideReplayTest {
                 legacySmoother.update(lastGoodSlope, nowMs) else compensated
             slopesOut?.set(i, slopePercent)
 
-            val isPedaling = if (t.cadence != null) cadenceGate.update(t.cadence) else moving
+            val isPedaling = if (t.cadence != null) cadenceGate.update(t.cadence, nowMs)
+                else cadenceGate.updateAbsent(nowMs, moving)
 
             val est = CyclingWattageEstimator(
                 slope = slopePercent / 100,

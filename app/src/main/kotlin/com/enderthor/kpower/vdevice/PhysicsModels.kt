@@ -347,15 +347,41 @@ class GradeLeadCompensator(
 class CadenceGate(
     private val onRpm: Double = 25.0,
     private val offRpm: Double = 20.0,
+    // Cuánto se conserva el último estado cuando el sensor DEJA de emitir. Un corte breve
+    // (interferencia, imán, batería) no debe cambiar la semántica del gate; uno largo sí,
+    // porque a partir de ahí el sensor está efectivamente ausente.
+    private val maxHoldMs: Long = 10_000L,
 ) {
     private var pedaling = false
+    private var everSeen = false
+    private var lastSeenMs = 0L
 
-    fun update(cadenceRpm: Double): Boolean {
+    /** Con lectura de cadencia: histéresis normal. */
+    fun update(cadenceRpm: Double, nowMs: Long): Boolean {
+        everSeen = true
+        lastSeenMs = nowMs
         pedaling = when {
             cadenceRpm >= onRpm -> true
             cadenceRpm <= offRpm -> false
             else -> pedaling
         }
         return pedaling
+    }
+
+    /**
+     * Sin lectura de cadencia. [movingFallback] es el proxy por movimiento sostenido.
+     *
+     * Si NUNCA hubo sensor, el movimiento es el único criterio posible — que es el caso para el
+     * que se escribió este fallback. Pero si SÍ lo hubo y acaba de cortarse, `moving` invierte la
+     * semántica: la bici sigue rodando mientras sueltas, así que un corte en plena bajada pasaría
+     * a "pedaleando" y fabricaría vatios. Por eso un corte reciente CONSERVA el último estado
+     * conocido, y sólo pasado [maxHoldMs] se da el sensor por ausente y se vuelve al proxy.
+     */
+    fun updateAbsent(nowMs: Long, movingFallback: Boolean): Boolean {
+        if (!everSeen) return movingFallback
+        if (nowMs - lastSeenMs <= maxHoldMs) return pedaling
+        everSeen = false
+        pedaling = false
+        return movingFallback
     }
 }

@@ -44,11 +44,40 @@ class SmoothersTest {
     @Test
     fun `gate has hysteresis around the cutoff`() {
         val g = CadenceGate(onRpm = 25.0, offRpm = 20.0)
-        assertFalse(g.update(0.0))     // arranque: sin pedalear
-        assertTrue(g.update(30.0))     // supera ON → pedaleando
-        assertTrue(g.update(22.0))     // zona muerta → mantiene ON
-        assertFalse(g.update(19.0))    // por debajo de OFF → parado
-        assertFalse(g.update(23.0))    // zona muerta → mantiene OFF
-        assertTrue(g.update(26.0))     // supera ON de nuevo
+        assertFalse(g.update(0.0, 0L))      // arranque: sin pedalear
+        assertTrue(g.update(30.0, 1_000L))  // supera ON → pedaleando
+        assertTrue(g.update(22.0, 2_000L))  // zona muerta → mantiene ON
+        assertFalse(g.update(19.0, 3_000L)) // por debajo de OFF → parado
+        assertFalse(g.update(23.0, 4_000L)) // zona muerta → mantiene OFF
+        assertTrue(g.update(26.0, 5_000L))  // supera ON de nuevo
+    }
+
+    @Test
+    fun `sin sensor nunca visto, manda el movimiento`() {
+        val g = CadenceGate()
+        // Comportamiento original intacto: si no hay sensor de cadencia, el único criterio
+        // posible es el movimiento sostenido.
+        assertTrue(g.updateAbsent(1_000L, movingFallback = true))
+        assertFalse(g.updateAbsent(2_000L, movingFallback = false))
+    }
+
+    @Test
+    fun `un corte del sensor NO convierte soltar en pedalear`() {
+        val g = CadenceGate(maxHoldMs = 10_000L)
+        assertTrue(g.update(80.0, 0L))                                  // pedaleando
+        assertFalse(g.update(0.0, 1_000L))                              // deja de pedalear
+        // El sensor se cae mientras vas soltando y la bici SIGUE rodando (bajada).
+        // Con el fallback antiguo esto daba "pedaleando" y fabricaba vatios.
+        assertFalse(g.updateAbsent(2_000L, movingFallback = true))
+        assertFalse(g.updateAbsent(11_000L, movingFallback = true))     // dentro del hold
+    }
+
+    @Test
+    fun `un corte largo da el sensor por ausente y vuelve al movimiento`() {
+        val g = CadenceGate(maxHoldMs = 10_000L)
+        assertTrue(g.update(80.0, 0L))
+        assertTrue(g.updateAbsent(5_000L, movingFallback = false))      // hold: conserva ON
+        assertFalse(g.updateAbsent(20_000L, movingFallback = false))    // caducado → fallback
+        assertTrue(g.updateAbsent(21_000L, movingFallback = true))      // ya es "sin sensor"
     }
 }
