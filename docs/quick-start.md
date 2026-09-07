@@ -20,9 +20,9 @@ with one important **pairing catch** (below).
 |---|---|---|
 | **No power meter** | **KPW Estimated** | none (Karoo shows power/NP); optional Est. Power / 3s / NP |
 | **Real meter + want the estimate (compare)** | the real meter (native — BLE or ANT+) | Est. Power / 3s / NP |
-| **Two meters at once** | meter A (native) | Real Power / 3s / NP / Cadence (show the 2nd meter) |
+| **Two meters at once** | meter A (native) | Real Power / 3s / NP (show the 2nd meter) |
 | **Real meter + FIT extras** (torque, power phase, PCO) | the meter to the Karoo over **BLE**, **and enabled in KPower** (ANT+) | none on-screen; KPower enriches the FIT. ANT+-only → use the offset row |
-| **Offset applied to the recording** | **KPW &lt;brand model&gt;** (meter in KPower only) | none; the Karoo records the corrected power |
+| **Offset applied to the recording** | **KPW &lt;your meter&gt;** (meter in KPower only) | none; the Karoo records the corrected power |
 
 ## Steps
 
@@ -41,7 +41,7 @@ with one important **pairing catch** (below).
 
 **3) Two meters at once (A vs B)**
 The Karoo records **one** power source: pair **A natively** and **enable B in KPower**. The
-**Real Power / 3s / NP / Cadence** fields show **B** → so you see A (native) and B (KPower) at once. Rare.
+**Real Power / 3s / NP** fields show **B** → so you see A (native) and B (KPower) at once. Rare.
 (They're **different** meters, so no ANT+ conflict.)
 
 **4) Real meter + FIT extras (torque, power phase, PCO…)**
@@ -54,15 +54,15 @@ The Karoo records **one** power source: pair **A natively** and **enable B in KP
 
 **5) Offset applied to the recorded power**
 The **split** (setup 4) records the meter **raw** on the Karoo, so the offset **never** reaches the recording.
-To fix that: pair the meter **in KPower only** and set **“KPW &lt;brand model&gt;”** as the Karoo's source.
+To fix that: pair the meter **in KPower only** and set **“KPW &lt;your meter&gt;”** (e.g. *KPW Rally 200*) as the Karoo's source.
 KPower applies the offset and re-broadcasts → the Karoo records the **corrected** power (no native dynamics;
 KPower records them all as dev fields).
 
 ## Important
 
 **The Karoo already shows balance / torque effectiveness / pedal smoothness / torque natively** with a
-natively-paired meter, so KPower doesn't duplicate those on-screen — **except a Balance L/R field** (instant
-+ power-weighted average), for the **KPW-virtual (offset)** case where the Karoo shows no native dynamics.
+natively-paired meter, so KPower doesn't duplicate those on-screen — **except two Balance L/R fields** (instant
+and power-weighted session average), for the **KPW-virtual (offset)** case where the Karoo shows no native dynamics.
 With a real meter, KPower's value is in the **FIT**: torque, power phase, PCO, barycenter (the Karoo doesn't record those). Details:
 **[real-meter-and-fit.md](real-meter-and-fit.md)**.
 

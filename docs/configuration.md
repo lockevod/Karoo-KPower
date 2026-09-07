@@ -14,10 +14,16 @@ Pick what you know; the app derives the rest:
 - **Tyre** — width (mm; inches for MTB e.g. `2.3`), pressure (bar), tread, tubeless. Derives **rolling
   resistance (Crr)**; the pressure penalty scales with your load and tyre width (Frank Berto tables),
   so wide tyres correctly want lower pressure. If front/rear differ, enter the **rear** tyre.
-- **Surface** — asphalt / mixed / gravel / off-road; scales Crr.
+- **Surface** — asphalt / concrete · smooth gravel / hardpack · gravel / dirt · sand / mud / soft;
+  scales Crr.
+- **Auto surface from offline maps** (on by default) — KPower reads the surface under you from your
+  offline maps and adjusts Crr as you ride. With no maps for the area (or no storage permission) it
+  falls back to the surface you picked above, which is then labelled **Default surface**.
 - **FTP** — taken from your Karoo profile automatically (turn off to type it manually). Used to smooth
   the estimate and to scale the power cap.
-- **Bike weight** (kg) — bike + gear.
+- **Bike + gear weight** (kg) — the bike as you ride it (pedals, full bottles, tools) *plus* helmet,
+  clothing, shoes and any pack. Your body weight comes from your Karoo profile, so this field is the
+  only place your kit's weight enters the model.
 
 ## Power offset (both modes)
 
@@ -72,7 +78,8 @@ No FTP? Use `0.95 × 20-min power`, or start at 150–200 W and adjust.
   which unit Headwind sends wind in — set it if you changed Headwind to m/s or knots.
 
 The virtual sensor gives 0 W when not pedalling (cadence gate: off < 20 rpm, on > 25 rpm); you can
-force power at low cadence in the config.
+force power at low cadence in the config. With **no cadence sensor paired**, sustained movement stands
+in for pedalling, and a brief sensor dropout holds the last state instead of reading as "stopped".
 
 ## Multiple bikes & Karoo profiles
 
@@ -96,6 +103,9 @@ Editing is **auto-saved** (no Save/Cancel): **+** creates and opens a bike, the 
   first, then tap Import.
 
 ## Upgrading
+
+**Coming from an earlier 3.0.0 build?** The weight field now asks for the bike **plus your gear**.
+Existing bikes keep the number you typed before, so check it once — most riders are 2–5 kg short.
 
 Existing profiles keep working unchanged: stored values (Crr, Cd, area, power loss, FTP, surface) are
 used as before; upgraded profiles open in **Advanced** mode and keep your configured FTP. Simple mode /

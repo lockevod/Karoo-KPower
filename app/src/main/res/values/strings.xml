@@ -1,7 +1,7 @@
 <resources>
     <string name="app_name">KPower</string>
     <string name="extension_name">KPower</string>
-    <string name="profile_power_source_hint">To show power, add the “KPOWER Estim.” sensor as the power source in this Karoo ride profile.</string>
+    <string name="profile_power_source_hint">To show power, add the “KPW Estimated” sensor as the power source in this Karoo ride profile.</string>
     <string name="est_instant_name">Est. Power</string>
     <string name="est_instant_desc">KPower estimated instantaneous power. Add it to a page to show it live; logging to the FIT is separate (“Log estimated power”).</string>
     <string name="est_3s_name">Est. Power 3s</string>
@@ -18,7 +18,7 @@
     <string name="real1_balance_desc">Live left/right balance of the real meter (e.g. 48/52). Useful with a KPW-virtual source, where the Karoo shows no native dynamics.</string>
     <string name="real1_balance_avg_name">Real Balance L/R avg</string>
     <string name="real1_balance_avg_desc">Session-average left/right balance of the real meter (while recording).</string>
-    <string name="meter_double_pair_warning">Tip: to feed this meter to the Karoo, pair the sensor named “KPOWER …” (your meter\'s name with a KPOWER prefix) in your ride profile — don\'t also pair the meter natively, or power will be recorded twice.</string>
+    <string name="meter_double_pair_warning">Tip: to feed this meter to the Karoo, pair the sensor named “KPW …” (your meter\'s name with a KPW prefix) in your ride profile — don\'t also pair the meter natively, or power will be recorded twice.</string>
     <string name="diagnostic_log_label">Diagnostic logging</string>
     <string name="diagnostic_log_desc">Records detailed ride and ANT+ diagnostics. In developer-configured builds, enabling it also sends anonymized, GPS-stripped logs to the developer via Telegram during/after rides and after pairing or calibration. Off by default — it uses extra battery, storage and data.</string>
 
@@ -29,7 +29,7 @@
     <!-- Main / bikes list -->
     <string name="bikes_add">Add</string>
     <string name="bikes_empty">No bikes yet — tap + to add one.</string>
-    <string name="bikes_subtitle">KPower estimates your power. Add a bike, then pair the “KPOWER Estim.” sensor as the power source in your Karoo ride profile.</string>
+    <string name="bikes_subtitle">KPower estimates your power. Add a bike, then pair the “KPW Estimated” sensor as the power source in your Karoo ride profile.</string>
     <string name="menu_more">More</string>
     <string name="menu_export">Export config</string>
     <string name="menu_import">Import config</string>

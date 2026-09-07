@@ -1,5 +1,7 @@
 # KPower — Guía rápida (español)
 
+*[English version](quick-start.md)*
+
 KPower es un medidor de potencia para **Karoo 2 / 3** que funciona **sin potenciómetro**: *estima* la
 potencia con un modelo físico (pendiente + resistencia a la rodadura + aerodinámica con densidad real
 del aire + aceleración, menos pérdidas de transmisión). Y si **tienes** un potenciómetro real, KPower
@@ -19,9 +21,9 @@ puede leerlo para enriquecer el FIT grabado — con un **matiz de emparejamiento
 |---|---|---|
 | **Sin potenciómetro** | **KPW Estimated** | ninguno (el Karoo ya da potencia/NP); opcional Est. Power / 3s / NP |
 | **Medidor real + quiero el estimado (comparar)** | el medidor real (nativo, BLE o ANT+) | Est. Power / 3s / NP |
-| **Dos medidores a la vez** | medidor A (nativo) | Real Power / 3s / NP / Cadencia (muestran el 2º medidor) |
+| **Dos medidores a la vez** | medidor A (nativo) | Real Power / 3s / NP (muestran el 2º medidor) |
 | **Medidor real + extras al FIT** (par, power phase, PCO) | el medidor real por **BLE** al Karoo, y **activo en KPower** (ANT+) | ninguno en pantalla; KPower enriquece el FIT. Solo ANT+ → usa la fila de offset |
-| **Offset aplicado a lo grabado** | **KPW &lt;marca modelo&gt;** (medidor solo en KPower) | ninguno; el Karoo graba la potencia corregida |
+| **Offset aplicado a lo grabado** | **KPW &lt;tu medidor&gt;** (medidor solo en KPower) | ninguno; el Karoo graba la potencia corregida |
 
 ## Pasos
 
@@ -40,7 +42,7 @@ puede leerlo para enriquecer el FIT grabado — con un **matiz de emparejamiento
 
 **3) Dos medidores a la vez (A vs B)**
 El Karoo graba **una** fuente de potencia: empareja **A nativo** y **activa B en KPower**. Los campos
-**Real Power / 3s / NP / Cadencia** muestran **B** → así ves A (nativo) y B (KPower) a la vez. Caso raro.
+**Real Power / 3s / NP** muestran **B** → así ves A (nativo) y B (KPower) a la vez. Caso raro.
 (Son medidores **distintos**, así que no hay conflicto ANT+.)
 
 **4) Medidor real + extras al FIT (par, power phase, PCO…)**
@@ -53,15 +55,15 @@ El Karoo graba **una** fuente de potencia: empareja **A nativo** y **activa B en
 
 **5) Offset aplicado a la potencia grabada**
 El **split** (setup 4) graba el medidor **crudo** en el Karoo, así que el offset **no** llega a la grabación.
-Para que sí: empareja el medidor **solo en KPower** y pon **“KPW &lt;marca modelo&gt;”** como fuente del Karoo.
+Para que sí: empareja el medidor **solo en KPower** y pon **“KPW &lt;tu medidor&gt;”** (p. ej. *KPW Rally 200*) como fuente del Karoo.
 KPower aplica el offset y reemite → el Karoo graba la potencia **corregida** (sin dinámicas nativas; KPower
 las graba todas como dev fields).
 
 ## Importante
 
 **El Karoo ya muestra balance / eficacia del par / suavidad / par de forma nativa** con un medidor
-emparejado nativo, así que KPower **no** los duplica en pantalla — **salvo un campo Balance I/D** (instant
-+ media ponderada por potencia), para el caso **KPW-virtual (offset)** donde el Karoo no muestra dinámicas
+emparejado nativo, así que KPower **no** los duplica en pantalla — **salvo dos campos Balance I/D** (instantáneo
+y media de sesión ponderada por potencia), para el caso **KPW-virtual (offset)** donde el Karoo no muestra dinámicas
 nativas. Con medidor real, lo que aporta KPower está en el **FIT**: par, power phase, PCO, barycenter (el Karoo no los graba). Detalle:
 **[real-meter-and-fit.md](real-meter-and-fit.md)** (en inglés).
 

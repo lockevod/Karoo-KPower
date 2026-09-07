@@ -1,7 +1,7 @@
 <resources>
     <string name="app_name">KPower</string>
     <string name="extension_name">KPower</string>
-    <string name="profile_power_source_hint">Para mostrar potencia, añade el sensor “KPOWER Estim.” como fuente de potencia en este perfil de ruta del Karoo.</string>
+    <string name="profile_power_source_hint">Para mostrar potencia, añade el sensor “KPW Estimated” como fuente de potencia en este perfil de ruta del Karoo.</string>
     <string name="est_instant_name">Pot. est.</string>
     <string name="est_instant_desc">Potencia instantánea estimada por KPower. Añádela a una página para verla en directo; grabarla en el FIT es aparte (“Grabar estimada”).</string>
     <string name="est_3s_name">Pot. est. 3s</string>
@@ -18,7 +18,7 @@
     <string name="real1_balance_desc">Balance izquierda/derecha en vivo del medidor real (ej. 48/52). Útil con fuente KPW-virtual, donde el Karoo no muestra dinámicas nativas.</string>
     <string name="real1_balance_avg_name">Balance real I/D medio</string>
     <string name="real1_balance_avg_desc">Balance izquierda/derecha medio de la sesión del medidor real (mientras graba).</string>
-    <string name="meter_double_pair_warning">Consejo: para enviar este potenciómetro al Karoo, empareja el sensor llamado “KPOWER …” (el nombre de tu potenciómetro con el prefijo KPOWER) en tu perfil de ruta — no emparejes además el potenciómetro de forma nativa, o la potencia se grabará dos veces.</string>
+    <string name="meter_double_pair_warning">Consejo: para enviar este potenciómetro al Karoo, empareja el sensor llamado “KPW …” (el nombre de tu potenciómetro con el prefijo KPW) en tu perfil de ruta — no emparejes además el potenciómetro de forma nativa, o la potencia se grabará dos veces.</string>
     <string name="diagnostic_log_label">Registro de diagnóstico</string>
     <string name="diagnostic_log_desc">Graba diagnósticos detallados de la salida y ANT+. En compilaciones configuradas por el desarrollador, al activarlo también envía registros anonimizados y sin GPS al desarrollador por Telegram durante/después de la salida y tras emparejar o calibrar. Off por defecto — consume más batería, almacenamiento y datos.</string>
 
@@ -29,7 +29,7 @@
     <!-- Main / bikes list -->
     <string name="bikes_add">Añadir</string>
     <string name="bikes_empty">Aún no hay bicis — toca + para añadir una.</string>
-    <string name="bikes_subtitle">KPower estima tu potencia. Añade una bici y luego empareja el sensor “KPOWER Estim.” como fuente de potencia en tu perfil de ruta del Karoo.</string>
+    <string name="bikes_subtitle">KPower estima tu potencia. Añade una bici y luego empareja el sensor “KPW Estimated” como fuente de potencia en tu perfil de ruta del Karoo.</string>
     <string name="menu_more">Más</string>
     <string name="menu_export">Exportar configuración</string>
     <string name="menu_import">Importar configuración</string>

@@ -39,9 +39,10 @@ dynamics, and KPower adds torque / power-phase / PCO / barycenter as FIT develop
 **Needs a dual-band (ANT+ & BLE) meter.**
 
 ### 3. Want your **offset** (%/W) applied to the recorded power?
-Pair the meter in **KPower only** (ANT+) and pair **“KPW &lt;brand model&gt;”** as the Karoo's power
-source — do **not** pair the meter to the Karoo. KPower applies the offset and re-broadcasts, so the
-Karoo records the **corrected** power. A virtual sensor carries only **power + cadence**, so the Karoo
+Set the offset in *Real meter* → tap the meter → **Factor %** / **Offset W**
+(`Corrected = P × (1 + Factor/100) + Offset`; 0 = no change). Then pair the meter in **KPower only**
+(ANT+) and pair **“KPW &lt;your meter&gt;”** as the Karoo's power source — do **not** pair the meter to
+the Karoo. KPower applies the offset and re-broadcasts, so the Karoo records the **corrected** power. A virtual sensor carries only **power + cadence**, so the Karoo
 gets **no native dynamics** — but KPower's dev fields then record **all** of them (including the exotics).
 This is the one thing the split (setup 2) can't give you: in the split the Karoo records the meter **raw**,
 so the offset never reaches the recording.
@@ -91,6 +92,9 @@ fields).
 | **Power phase** start/end + peak, L/R | `dyn_pp_*`, `dyn_peak_*` (dev) | **yes** |
 | **PCO** left/right | `left/right_pco` (standard) | **yes** (Karoo doesn't record PCO) |
 | Pedal centre offset rider position, **torque barycenter** | `dyn_rider_pos`, `dyn_baryc` (dev) | **yes** |
+
+> `dyn_baryc` stays empty with **Garmin Rally** pedals — they never send the ANT+ page that carries it.
+> That's the pedals, not a KPower bug; every other column above is filled normally.
 | Balance, TE, PS | `dyn_balance_l/r`, `dyn_te_l/r`, `dyn_ps_l/r` (dev) | redundant when native; the only copy when KPW-virtual |
 | Estimate (when “Log estimated power” on) | `est_power`, `est_power_3s` (record); `est_np`, `est_avg` (session) | yes |
 
@@ -152,9 +156,12 @@ and `pm1_power` are the two series you overlay.
 
 ## Calibration & crank length
 
-KPower reads the power the meter has **already computed**, so zero-offset calibration and crank length
-live **in the meter** — set them once (Garmin Connect / a head unit / native pairing); they persist in
-the pedals. KPower doesn't need them to read power.
+KPower can run a **zero-offset calibration** itself: *Real meter* → tap the meter → **Calibrate**, with
+the cranks still and not while recording. KPower shows the offset the meter returns.
+
+**Crank length** still lives in the meter — set it once (Garmin Connect / a head unit / native
+pairing) and it persists in the pedals. KPower reads the power the meter has already computed, so it
+doesn't need the crank length to read power.
 
 ## Field calibration (diagnostic only)
 

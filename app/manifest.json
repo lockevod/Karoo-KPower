@@ -4,9 +4,9 @@
   "latestApkUrl": "https://github.com/lockevod/Karoo-KPower/releases/latest/download/kpower.apk",
   "iconUrl": "https://github.com/lockevod/Karoo-KPower/releases/latest/download/karoo-power_hr.png",
   "latestVersion": "3.0.0",
-  "latestVersionCode": 202606131,
+  "latestVersionCode": 202609071,
   "developer": "Enderthor",
-  "description": "Adds a virtual power meter to your Karoo, estimating power from a physics model when you don't have a real power meter.",
-  "releaseNotes": "More accurate power. New: multi-bike per ride profile. New feature: real ANT+ meter with Cycling Dynamics. New: power offset (virtual and real). Coming from <1.9.5? Uninstall first.",
+  "description": "Adds a virtual power meter to your Karoo, estimating power from a physics model when you don't have a real power meter. With a real ANT+ meter, it records the Cycling Dynamics the Karoo can't.",
+  "releaseNotes": "More accurate power: fresher grade + auto surface from offline maps. New: multi-bike per ride profile, real ANT+ meter with Cycling Dynamics, power offset. Less battery use. The weight field now means bike + gear — re-check yours. Coming from <1.9.5? Uninstall first.",
   "tags": ["entertainment","health","performance"]
 }

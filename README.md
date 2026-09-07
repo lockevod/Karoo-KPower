@@ -66,7 +66,9 @@ real meter & FIT: **[docs/real-meter-and-fit.md](docs/real-meter-and-fit.md)**.
 - It's an estimate: the biggest unknown is **wind**. KPower pulls wind/temperature/pressure from
   Open-Meteo automatically (or from the [Headwind](https://github.com/timklge/karoo-headwind) extension
   if installed) — nothing to configure. Dial in Crr/CdA from references (Advanced mode).
-- The Karoo can lag on slope/speed for a few seconds → brief inaccurate estimates; it self-corrects.
+- Grade lag is much smaller than it used to be: on a loaded route KPower reads the grade from the route
+  profile, otherwise from the fresh altitude stream. A few seconds can still slip through on sharp
+  transitions; it self-corrects.
 - Use the **Power 3s** field for a steadier reading.
 - Tested on Karoo 3 / metric. After updating, you may need to re-pair the virtual sensor.
 
