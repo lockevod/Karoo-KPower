@@ -6,6 +6,7 @@ import io.hammerhead.karooext.models.DataType
 import io.hammerhead.karooext.models.RideState
 import io.hammerhead.karooext.models.StreamState
 import io.hammerhead.karooext.models.UserProfile
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -18,8 +19,13 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.map
@@ -83,6 +89,12 @@ class PowerEstimationEngine(
     private val context: Context,
     private val scope: CoroutineScope,
     private val activeProfileIdFlow: kotlinx.coroutines.flow.StateFlow<String?>,
+    /** Shared, CONFLATED `OnLocationChanged` stream owned by the service — see `sharedLocation` in
+     *  KpowerExtension. Required, not defaulted: the engine opening its own was one of three
+     *  duplicate host consumers for the same GPS fix, and a default would let that come back
+     *  silently. The conflation matters here — this engine is the SLOW consumer (the surface
+     *  classifier reads a mapfile), so it must be free to skip stale fixes. */
+    private val location: kotlinx.coroutines.flow.Flow<io.hammerhead.karooext.models.OnLocationChanged>,
 ) {
     private val _instantW = MutableStateFlow(Double.NaN)
     private val _power3sW = MutableStateFlow(Double.NaN)
@@ -248,7 +260,7 @@ class PowerEstimationEngine(
         fieldCalibrator.reset()   // a new ride → a fresh calibration session
     }
 
-    @OptIn(FlowPreview::class)
+    @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
     private fun startPipeline() {
         if (pipelineJob != null) return
         Timber.d("PowerEstimationEngine: start")
@@ -285,20 +297,34 @@ class PowerEstimationEngine(
                     var lastLat = Double.NaN
                     var lastLon = Double.NaN
                     var lastMs = 0L
-                    karooSystem.streamLocation()
-                        .filter { it.orientation != null }
+                    // The `useRouteSurface` gate lives UPSTREAM of the GPS subscription, not inside the
+                    // collector: checked inside, a rider who turned route-surface OFF still paid the
+                    // full 1 Hz location delivery all ride just to `return@collect`. flatMapLatest
+                    // drops the subscription entirely while the toggle is off.
+                    // NOTE: useRouteSurface DEFAULTS TO TRUE (ConfigData), so this only saves work for
+                    // riders who opted out — it is not a saving on the default profile.
+                    combine(powerConfigFlow, activeProfileIdFlow) { cfgs, id ->
+                        com.enderthor.kpower.data.resolveActiveConfig(cfgs, id)?.useRouteSurface == true
+                    }
+                        .distinctUntilChanged()
+                        .onEach { if (!it) liveSurfaceSample = null }
+                        .flatMapLatest { on -> if (on) location.filter { it.orientation != null } else emptyFlow() }
                         .collect { loc ->
-                            val cfg = com.enderthor.kpower.data.resolveActiveConfig(powerConfigFlow.value, activeProfileIdFlow.value)
-                            if (cfg?.useRouteSurface != true) {
-                                liveSurfaceSample = null
-                                return@collect
-                            }
                             val now = System.currentTimeMillis()
                             val movedM = if (lastLat.isNaN()) Double.MAX_VALUE
                                 else GpsCoordinates(lastLat, lastLon)
                                     .distanceTo(GpsCoordinates(loc.lat, loc.lng)) * 1000.0
                             if (movedM >= SURFACE_MIN_MOVE_M && now - lastMs >= SURFACE_MIN_INTERVAL_MS) {
                                 val classified = surfaceReader.classifyAt(loc.lat, loc.lng)
+                                // classifyAt is a BLOCKING mapfile read with no suspension point, so a
+                                // generation cancelled while it ran (the rider turned route-surface off,
+                                // or the pipeline stopped) still reaches this line and would republish a
+                                // sample with a FRESH timestamp — after onEach already cleared it, and
+                                // with no inner flow left to clear it again. Toggling back on within
+                                // SURFACE_MAX_AGE_MS would then feed the calc a surface from wherever the
+                                // rider was when the classification started. Same guard, same reason, as
+                                // the ensureActive() in the estimate collector below.
+                                currentCoroutineContext().ensureActive()
                                 liveSurfaceSample = classified?.let { it to now }
                                 if (FileLogTree.enabled) Timber.tag("SURFACE").d(
                                     "classifyAt(%.5f,%.5f) -> %s",
@@ -373,7 +399,7 @@ class PowerEstimationEngine(
                 // movement-based pedalling proxy below, which is right before the real stream arrives.
                 karooSystem.streamDataMonitorFlow(DataType.Type.CADENCE, noCheck = true)
                     .onStart { emit(StreamState.NotAvailable) },
-                karooSystem.headwindFlow(context),
+                karooSystem.headwindFlow(context, location),
                 powerConfigFlow,
                 weatherEnvFlow,
                 karooTempFlow,

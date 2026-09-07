@@ -39,7 +39,6 @@ const val WEATHER_STREAM_FUTURE_SKEW_MS = 60L * 60L * 1000L   // 1 hour (device-
 const val WEATHER_CHECK_INTERVAL_MS = 60L * 1000L    // tick every minute
 const val WEATHER_RETRY_DELAY_MS = 5L * 60L * 1000L  // 5 min after a failure
 
-data class StreamData(val headingResponse: HeadingResponse, val weatherResponse: OpenMeteoCurrentWeatherResponse?)
 
 @Serializable
 data class KnownProfile(val id: String, val name: String)

@@ -34,12 +34,14 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
+import kotlin.math.roundToInt
 
 import com.enderthor.kpower.activity.mirrorSettingsToBackup
 import com.enderthor.kpower.BuildConfig
@@ -112,8 +114,37 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
 
     private val activeProfileIdFlow = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
 
+    /**
+     * ONE host consumer for `OnLocationChanged`, fanned out to every service-scope collector that
+     * needs a GPS fix: the last-known-position writer, the estimator's surface reader and the
+     * headwind heading chain.
+     *
+     * Each `addConsumer` is an independent registration with the Karoo host, so three of them meant
+     * the host delivered — and karoo-ext deserialised — every fix three times, at 1 Hz, for the whole
+     * life of the service (~54.000 callbacks in a 5 h ride instead of 18.000). Same `shareIn` pattern
+     * as [sharedMeters]; `WhileSubscribed` still releases the host consumer once the last collector
+     * goes, so a "dynamics only, no estimator" setup keeps paying for just the one.
+     *
+     * The trailing `.conflate()` is LOAD-BEARING, not tidiness. Sharing couples the collectors, and
+     * `shareIn` does NOT inherit the CONFLATED policy of `streamLocation()`'s own channel: fusion
+     * needs the upstream to override `dropChannelOperators()`, and `callbackFlow{}.buffer(CONFLATED)`
+     * fuses back into another `CallbackFlowBuilder`, which doesn't. Without `.conflate()` the shared
+     * flow is a 64-slot SUSPEND buffer, so the surface classifier stalling on a cold mapfile tile
+     * would (a) make every consumer replay up to 64 STALE positions instead of jumping to the current
+     * fix, and (b) past 64 samples, suspend the sharing coroutine and stall the headwind chain and
+     * the position writer too. `.conflate()` gives each collector its own DROP_OLDEST channel, which
+     * is exactly what the three separate `callbackFlow`s had before. Measured: with a pinned slow
+     * collector the fast one freezes at sample 64 without it and tracks the newest with it — see
+     * SharedLocationBackpressureTest.
+     */
+    private val sharedLocation by lazy {
+        karooSystem.streamLocation()
+            .shareIn(serviceScope, SharingStarted.WhileSubscribed(5_000))
+            .conflate()
+    }
+
     private val engine: PowerEstimationEngine by lazy {
-        PowerEstimationEngine(karooSystem, applicationContext, serviceScope, activeProfileIdFlow)
+        PowerEstimationEngine(karooSystem, applicationContext, serviceScope, activeProfileIdFlow, sharedLocation)
     }
 
     private val antManager: com.enderthor.kpower.ant.AntPowerManager by lazy {
@@ -234,7 +265,7 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
         }
 
         serviceScope.launch {
-            karooSystem.updateLastKnownGps(this@KpowerExtension)
+            karooSystem.updateLastKnownGps(this@KpowerExtension, sharedLocation)
         }
 
         // Mirror the durable settings so a corrupted store (process killed mid-write at ride end)
@@ -550,7 +581,7 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                 // the weather policy (preferHeadwind) is read from the wrong bike whenever the active one
                 // isn't first, and the estimator consumes mismatched weather.
                 val cfg = com.enderthor.kpower.data.resolveActiveConfig(preferences, activeProfileIdFlow.value) ?: preferences[0]
-                val gps = karooSystem.getGpsCoordinateFlow(this@KpowerExtension)
+                val gps = karooSystem.getGpsCoordinateFlow(this@KpowerExtension, sharedLocation)
                     .firstOrNull()
                 if (gps == null) {
                     delay(WEATHER_CHECK_INTERVAL_MS)
@@ -672,9 +703,9 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
         }
     }
 
-    /** Friendly Karoo display name for a real meter: "KPOWER <name>". When the rider hasn't named it, use
-     *  the detected brand+model ("KPOWER Garmin Rally 200") if the 0x50 page has been seen this service
-     *  lifetime, else the bare number ("KPOWER #<deviceNumber>") — never just a number when we know it. */
+    /** Friendly Karoo display name for a real meter: "KPW <name>". When the rider hasn't named it, use
+     *  the detected SHORT brand/model ("KPW Rally 200") if the 0x50 page has been seen this service
+     *  lifetime, else the bare number ("KPW #<deviceNumber>") — never just a number when we know it. */
     private fun meterDisplayName(deviceNumber: Int, label: String?): String {
         val clean = label?.trim().orEmpty()
         // SHORT name so it fits the Karoo Sensors screen: "KPW Rally 200" (model) / "KPW Garmin" (brand) /
@@ -820,8 +851,16 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
             // detiene en pausa -> escritura sin drift y sin samples fantasma (patrón KSafe).
             // Sesión = "last write wins": solo emitimos cuando NP/media cambian, para no
             // churnar un Binder round-trip + allocation cada segundo.
-            var lastSesNp = Double.NaN
-            var lastSesAvg = Double.NaN
+            // Rounded to the whole watt, which is the resolution the FIT session summary is read at.
+            // Comparing the raw Doubles never deduped anything: NP and the running average move by
+            // fractions on almost every 1 Hz tick, so the "only emit when they change" guard let
+            // ~18.000 extra WriteToSessionMesg binder round-trips through per 5 h comparison ride.
+            // Session fields are last-write-wins, so emitting only on an integer change costs just
+            // under 1 W of precision in the summary (the value written is whichever member of
+            // [key-0.5, key+0.5) arrived FIRST) and nothing at all in the per-second records.
+            // Int.MIN_VALUE = "nothing emitted yet" (a real watt value can never be it).
+            var lastSesNp = Int.MIN_VALUE
+            var lastSesAvg = Int.MIN_VALUE
             var lastEstGateLogMs = 0L
             kotlinx.coroutines.flow.combine(
                 // Subscribe to ELAPSED_TIME (1Hz while recording) when the comparison-mode toggle is
@@ -940,14 +979,18 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                     if (shouldWriteEstimateToFit(comparisonMode, estPrimary)) {
                         val np = engine.npW.value
                         val avg = engine.avgW.value
-                        if (np != lastSesNp || avg != lastSesAvg) {
+                        // NaN keeps its own sentinel so a NaN->value transition still emits, and a
+                        // NaN that stays NaN never does.
+                        val npKey = if (np.isNaN()) Int.MIN_VALUE + 1 else np.roundToInt()
+                        val avgKey = if (avg.isNaN()) Int.MIN_VALUE + 1 else avg.roundToInt()
+                        if (npKey != lastSesNp || avgKey != lastSesAvg) {
                             val sessionValues = buildList {
                                 if (!np.isNaN()) add(FieldValue(fieldEstNp, np))
                                 if (!avg.isNaN()) add(FieldValue(fieldEstAvg, avg))
                             }
                             if (sessionValues.isNotEmpty()) emitter.onNext(WriteToSessionMesg(sessionValues))
-                            lastSesNp = np
-                            lastSesAvg = avg
+                            lastSesNp = npKey
+                            lastSesAvg = avgKey
                         }
                     }
                 }

@@ -22,7 +22,6 @@ import com.enderthor.kpower.data.RETRY_CHECK_STREAMS
 import com.enderthor.kpower.data.STREAM_TIMEOUT
 import com.enderthor.kpower.data.WEATHER_STREAM_FUTURE_SKEW_MS
 import com.enderthor.kpower.data.WEATHER_STREAM_MAX_AGE_MS
-import com.enderthor.kpower.data.StreamData
 import com.enderthor.kpower.data.WAIT_STREAMS_LONG
 import com.enderthor.kpower.data.WAIT_STREAMS_MEDIUM
 import com.enderthor.kpower.data.WAIT_STREAMS_SHORT
@@ -219,15 +218,49 @@ suspend fun updateAntMeters(
     }
 }
 
-fun Context.antMetersFlow(): Flow<List<com.enderthor.kpower.ant.SavedMeter>> =
-    dataStore.data.map { json ->
-        try {
-            jsonWithUnknownKeys.decodeFromString<List<com.enderthor.kpower.ant.SavedMeter>>(json[antMetersKey] ?: "[]")
-        } catch (e: Throwable) {
-            Timber.e(e, "Failed to read antMeters")
-            emptyList()
+/**
+ * Decodifica un documento de DataStore deduplicando por la CADENA CRUDA, no por el objeto decodificado.
+ *
+ * `dataStore.data` reemite el snapshot COMPLETO de Preferences en cada escritura de CUALQUIER clave
+ * (la posición GPS una vez por minuto, un update de stats, un toggle...). Con el decode aguas arriba
+ * del dedup, cada una de esas escrituras reparseaba este documento para cada colector vivo; leyendo
+ * primero la cadena, una escritura ajena cuesta una búsqueda en un mapa y un `String.equals` (que
+ * además acierta por identidad, porque DataStore devuelve la misma instancia).
+ *
+ * Un decode FALLIDO no pasa a ser la clave de dedup, a propósito. Si lo fuera, un fallo transitorio
+ * —el `catch (Throwable)` de los llamadores también traga OOM— dejaría al colector clavado en su
+ * valor de reserva durante toda la sesión: DataStore seguiría ofreciendo la MISMA cadena y el dedup
+ * seguiría descartándola, así que el decode no se reintentaría nunca. Antes de mover el dedup aguas
+ * arriba, la siguiente emisión reintentaba; esto conserva esa auto-recuperación.
+ *
+ * `internal` (no `private`) para que DecodeDedupedTest pruebe ESTA función y no una copia — mismo
+ * patrón que `monitorStreamData` / StreamMonitorTest.
+ */
+internal fun <R, T> Flow<R>.decodeDeduped(
+    decode: (R) -> T,
+    onError: (Throwable) -> T,
+): Flow<T> = flow {
+    var lastDecoded: R? = null
+    var hasLastDecoded = false
+    collect { raw ->
+        if (hasLastDecoded && raw == lastDecoded) return@collect
+        val decoded = try {
+            decode(raw).also { lastDecoded = raw; hasLastDecoded = true }
+        } catch (t: Throwable) {
+            hasLastDecoded = false   // reintenta ESTA misma cadena en la siguiente emisión
+            onError(t)
         }
-    }.distinctUntilChanged()
+        emit(decoded)
+    }
+}
+
+/** Ver [decodeDeduped]: dedup por la cadena cruda, decode sólo cuando esta clave cambia de verdad. */
+fun Context.antMetersFlow(): Flow<List<com.enderthor.kpower.ant.SavedMeter>> =
+    dataStore.data.map { it[antMetersKey] ?: "[]" }
+        .decodeDeduped(
+            decode = { jsonWithUnknownKeys.decodeFromString<List<com.enderthor.kpower.ant.SavedMeter>>(it) },
+            onError = { Timber.e(it, "Failed to read antMeters"); emptyList() },
+        )
 
 val knownProfilesKey = stringPreferencesKey("knownProfiles")
 
@@ -235,15 +268,13 @@ suspend fun saveKnownProfiles(context: Context, profiles: List<KnownProfile>) {
     context.dataStore.edit { it[knownProfilesKey] = Json.encodeToString(profiles) }
 }
 
+/** Ver [decodeDeduped]. */
 fun Context.knownProfilesFlow(): Flow<List<KnownProfile>> =
-    dataStore.data.map { json ->
-        try {
-            jsonWithUnknownKeys.decodeFromString<List<KnownProfile>>(json[knownProfilesKey] ?: "[]")
-        } catch (e: Throwable) {
-            Timber.e(e, "Failed to read knownProfiles")
-            emptyList()
-        }
-    }.distinctUntilChanged()
+    dataStore.data.map { it[knownProfilesKey] ?: "[]" }
+        .decodeDeduped(
+            decode = { jsonWithUnknownKeys.decodeFromString<List<KnownProfile>>(it) },
+            onError = { Timber.e(it, "Failed to read knownProfiles"); emptyList() },
+        )
 
 suspend fun savePreferences(context: Context, configDatas: List<ConfigData>) {
     context.dataStore.edit { t ->
@@ -303,16 +334,14 @@ fun KarooSystemService.streamDataFlow(dataTypeId: String): Flow<StreamState> {
     }.buffer(Channel.CONFLATED)
 }
 
+/** Ver [decodeDeduped]. Este era el peor fan-out: la respuesta meteorológica se deserializaba una
+ *  vez por colector vivo en cada escritura de preferencias no relacionada. */
 fun Context.streamCurrentWeatherData(): Flow<OpenMeteoCurrentWeatherResponse> {
-    return dataStore.data.map { settingsJson ->
-        try {
-            val data = settingsJson[currentDataKey]
-            data?.let { d -> jsonWithUnknownKeys.decodeFromString<OpenMeteoCurrentWeatherResponse>(d) }
-        } catch (e: Throwable) {
-            Timber.e("Failed to stream current weather data $e")
-            null
-        }
-    }.filterNotNull().distinctUntilChanged().filter {
+    return dataStore.data.map { it[currentDataKey] }
+        .decodeDeduped(
+            decode = { data -> data?.let { jsonWithUnknownKeys.decodeFromString<OpenMeteoCurrentWeatherResponse>(it) } },
+            onError = { Timber.e("Failed to stream current weather data $it"); null },
+        ).filterNotNull().filter {
         // A missing/zero observation timestamp can't be aged — ACCEPT it rather than silently starving
         // the estimator to ISA defaults (the refresh loop owns actual freshness).
         if (it.current.time <= 0L) return@filter true
@@ -325,29 +354,29 @@ fun Context.streamCurrentWeatherData(): Flow<OpenMeteoCurrentWeatherResponse> {
     }
 }
 
+/** Ver [decodeDeduped]. */
 fun Context.streamStats(): Flow<HeadwindStats> {
-    return dataStore.data.map { statsJson ->
-        try {
-            jsonWithUnknownKeys.decodeFromString<HeadwindStats>(
-                statsJson[statsKey] ?: HeadwindStats.defaultStats
-            )
-        } catch(e: Throwable){
-            Timber.e("Failed to read stats $e")
-            jsonWithUnknownKeys.decodeFromString<HeadwindStats>(HeadwindStats.defaultStats)
-        }
-    }.distinctUntilChanged()
+    return dataStore.data.map { it[statsKey] ?: HeadwindStats.defaultStats }
+        .decodeDeduped(
+            decode = { jsonWithUnknownKeys.decodeFromString<HeadwindStats>(it) },
+            onError = {
+                Timber.e("Failed to read stats $it")
+                jsonWithUnknownKeys.decodeFromString<HeadwindStats>(HeadwindStats.defaultStats)
+            },
+        )
 }
+
+/** Ver [decodeDeduped]. La lista de bicis es el documento más grande del store y el estimador
+ *  mantiene un colector sobre ella durante toda la marcha. */
 fun Context.loadPreferencesFlow(): Flow<List<ConfigData>> {
-    return dataStore.data.map { settingsJson ->
-        try {
-            jsonWithUnknownKeys.decodeFromString<List<ConfigData>>(
-                settingsJson[preferencesKey] ?: defaultConfigData
-            )
-        } catch(e: Throwable){
-            Timber.tag("kpower").e(e, "Failed to read preferences Flow Extension")
-            jsonWithUnknownKeys.decodeFromString<List<ConfigData>>(defaultConfigData)
-        }
-    }.distinctUntilChanged()
+    return dataStore.data.map { it[preferencesKey] ?: defaultConfigData }
+        .decodeDeduped(
+            decode = { jsonWithUnknownKeys.decodeFromString<List<ConfigData>>(it) },
+            onError = {
+                Timber.tag("kpower").e(it, "Failed to read preferences Flow Extension")
+                jsonWithUnknownKeys.decodeFromString<List<ConfigData>>(defaultConfigData)
+            },
+        )
 }
 
 // ── Bikes config export/import ────────────────────────────────────────────────────────────────────
@@ -522,32 +551,14 @@ suspend fun KarooSystemService.fetchHeadwindWeatherSnapshot(
     }
 }
 
-fun KarooSystemService.getRelativeHeadingFlow(context: Context): Flow<HeadingResponse> {
-    val currentWeatherData = context.streamCurrentWeatherData()
-
-    return getHeadingFlow(context)
-        .combine(currentWeatherData) { bearing, data -> bearing to data }
-        .map { (bearing, data) ->
-            when (bearing) {
-                is HeadingResponse.Value -> {
-                    val windBearing = data.current.windDirection + 180
-                    val diff = signedAngleDifference(bearing.diff, windBearing)
-                    HeadingResponse.Value(diff)
-                }
-
-                is HeadingResponse.NoGps -> HeadingResponse.NoGps
-                is HeadingResponse.NoWeatherData -> HeadingResponse.NoWeatherData
-                else -> bearing
-            }
-        }
-}
-
-
 @SuppressLint("SuspiciousIndentation")
-fun KarooSystemService.getHeadingFlow(context: Context): Flow<HeadingResponse> {
+fun KarooSystemService.getHeadingFlow(
+    context: Context,
+    location: Flow<OnLocationChanged>,
+): Flow<HeadingResponse> {
     // return flowOf(HeadingResponse.Value(20.0))
 
-    return getGpsCoordinateFlow(context)
+    return getGpsCoordinateFlow(context, location)
         .map { coords ->
             val heading = coords?.bearing
             heading?.let { HeadingResponse.Value(it) } ?: HeadingResponse.NoGps
@@ -596,7 +607,14 @@ fun<T> Flow<T>.dropNullsIfNullEncountered(): Flow<T?> = flow {
 
 
 @OptIn(FlowPreview::class)
-fun KarooSystemService.getGpsCoordinateFlow(context: Context): Flow<GpsCoordinates?> {
+fun KarooSystemService.getGpsCoordinateFlow(
+    context: Context,
+    // OBLIGATORIO a propósito: todos los colectores del servicio deben compartir UNA sola
+    // suscripción al host (ver `sharedLocation` en KpowerExtension). Con un valor por defecto,
+    // olvidar el argumento abriría un segundo consumidor de GPS en silencio, que es justo la
+    // duplicación que este cambio elimina.
+    location: Flow<OnLocationChanged>,
+): Flow<GpsCoordinates?> {
 
     val initialFlow = flow {
         val lastKnownPosition = context.getLastKnownPosition()
@@ -604,7 +622,7 @@ fun KarooSystemService.getGpsCoordinateFlow(context: Context): Flow<GpsCoordinat
         emit(lastKnownPosition)
     }
 
-    val gpsFlow = streamLocation()
+    val gpsFlow = location
         .filter { it.orientation != null }
         .map { GpsCoordinates(it.lat, it.lng, it.orientation) }
 
@@ -613,8 +631,11 @@ fun KarooSystemService.getGpsCoordinateFlow(context: Context): Flow<GpsCoordinat
     return concatenatedFlow.dropNullsIfNullEncountered()
 }
 
-suspend fun KarooSystemService.updateLastKnownGps(context: Context) {
-    getGpsCoordinateFlow(context)
+suspend fun KarooSystemService.updateLastKnownGps(
+    context: Context,
+    location: Flow<OnLocationChanged>,
+) {
+    getGpsCoordinateFlow(context, location)
         .filterNotNull()
         .throttle(60 * 1_000) // Only update last known gps position once every minute
         .collect { gps ->
@@ -851,19 +872,43 @@ fun KarooSystemService.speedStreamWithStaleness(
 
 
 /**
+ * Viento frontal efectivo en m/s (negativo = cola) para un rumbo GPS y una meteo dados.
+ *
+ * Extraído del flow para poder fijarlo con un test: [headwindFlow] pasó de encadenar
+ * `getRelativeHeadingFlow` (que leía la meteo) con OTRA lectura de la meteo, a una sola lectura,
+ * y esta función es la que garantiza que la aritmética del refactor no cambió.
+ *
+ * [bearingDeg] null = sin rumbo GPS. Entonces el ángulo relativo cae a 0, y cos(180°) = -1 da
+ * viento de cola completo. NO es un valor neutro, pero es exactamente lo que hacía el
+ * `(x as? HeadingResponse.Value)?.diff ?: 0.0` anterior, y cambiarlo movería el estimador.
+ */
+fun effectiveHeadwindMs(bearingDeg: Double?, windDirectionDeg: Double, windSpeedMs: Double): Double {
+    val relativeDeg =
+        if (bearingDeg != null) signedAngleDifference(bearingDeg, windDirectionDeg + 180) else 0.0
+    return round(cos((relativeDeg + 180) * Math.PI / 180.0) * windSpeedMs * 10.0) / 10.0
+}
+
+/**
  * Viento frontal efectivo (m/s, negativo = cola) a partir del heading GPS y la meteo.
  * Se cuantiza a 0.1 m/s + distinctUntilChanged para no despertar el combine() del
  * estimador con micro-variaciones de rumbo: solo emite cuando el viento efectivo
  * cambia de verdad (cambio de rumbo apreciable o meteo nueva).
  */
-fun KarooSystemService.headwindFlow(context: Context): Flow<StreamState> =
-    getRelativeHeadingFlow(context)
-        .combine(context.streamCurrentWeatherData()) { value, data -> StreamData(value, data) }
-        .filter { it.weatherResponse != null }
-        .map { streamData ->
-            val windSpeed = streamData.weatherResponse?.current?.windSpeed ?: 0.0
-            val windDirection = (streamData.headingResponse as? HeadingResponse.Value)?.diff ?: 0.0
-            round(cos((windDirection + 180) * Math.PI / 180.0) * windSpeed * 10.0) / 10.0
+fun KarooSystemService.headwindFlow(
+    context: Context,
+    location: Flow<OnLocationChanged>,
+): Flow<StreamState> =
+    getHeadingFlow(context, location)
+        // UNA sola lectura de meteo. Antes eran dos suscripciones a streamCurrentWeatherData()
+        // (una aquí y otra dentro de getRelativeHeadingFlow), y cada una es un
+        // dataStore.data.map { decode(...) }: la respuesta meteorológica se deserializaba dos
+        // veces por emisión. El ángulo relativo y el viento frontal se calculan del MISMO dato.
+        .combine(context.streamCurrentWeatherData()) { bearing, data ->
+            effectiveHeadwindMs(
+                bearingDeg = (bearing as? HeadingResponse.Value)?.diff,
+                windDirectionDeg = data.current.windDirection,
+                windSpeedMs = data.current.windSpeed,
+            )
         }
         .distinctUntilChanged()
         .map { headwindSpeed ->
