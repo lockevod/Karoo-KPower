@@ -49,20 +49,31 @@ Type the physics values directly (preset/height/tyre inputs are hidden so nothin
 
 ### Typical values
 
-| Position | Cd / Area |
-|---|---|
-| Aerobars | 0.25 / 0.30 |
-| Drops | 0.35 / 0.40 |
-| Hoods | 0.45 / 0.55 |
-| Tops | 0.60 / 0.75 |
-| MTB | 0.80 / 0.90 |
+These are the values **Simple mode already uses**, so switching Simple → Advanced won't jump.
 
-| Tyres | Crr |
-|---|---|
-| Top road | 0.0045 |
-| Mid road | 0.0065 |
-| Low road | 0.0085 |
-| MTB | 0.0095 |
+**Cd and frontal area.** What the model actually uses is the product **Cd × area**. A rider+bike has a
+Cd of roughly 0.7–0.9 in every position — getting aero shrinks your *area*, not your Cd. KPower
+estimates the area from your height and weight (Bassett et al. 1999) and scales it per position:
+
+| Position | Cd | Area scale | Area¹ | Cd × area¹ |
+|---|---|---|---|---|
+| Road – hoods | 0.80 | 1.09 | 0.42 | 0.34 |
+| Road – drops | 0.80 | 1.00 | 0.39 | 0.31 |
+| Time trial | 0.72 | 0.84 | 0.33 | 0.23 |
+| Gravel | 0.85 | 1.12 | 0.43 | 0.37 |
+| MTB | 0.90 | 1.45 | 0.56 | 0.51 |
+
+¹ For a 1.78 m / 75 kg rider (base area 0.387 m²). **Yours will differ** — taller or heavier means a
+bigger area. To get your own: area = (0.0293 × height_m × weight_kg^0.425 + 0.0604) × the scale above.
+
+**Crr.** Simple mode derives it from tread, width, pressure and tubeless; the pressure penalty grows as
+you move away from the optimum for your width and load (Frank Berto). Typical results:
+
+| Tyre | With tube | Tubeless |
+|---|---|---|
+| Road slick, 28 mm @ 5.0 bar | 0.0052 | 0.0046 |
+| Gravel semi-slick, 40 mm @ 3.0 bar | 0.0081 | 0.0070 |
+| MTB knobby, 2.3" @ 2.0 bar | 0.0122 | 0.0097 |
 
 Drivetrain loss: SRAM ceramic/Force 1.0% · Shimano Ultegra/Dura-Ace 1.3% · SRAM Eagle 2.0% ·
 Shimano XTR 2.2% · other 3–4%.
