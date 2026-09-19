@@ -328,8 +328,13 @@ fun KarooSystemService.streamDataFlow(dataTypeId: String): Flow<StreamState> {
         val listenerId = addConsumer(OnStreamState.StartStreaming(dataTypeId)) { event: OnStreamState ->
             trySend(event.state)
         }
+        // El log de karoo-ext solo dice `addConsumer <uuid>=<lambda>`, sin el DataType, asi que un
+        // ciclo de alta/baja no se puede atribuir: el 2026-09-12, despues del stopFit, algo se
+        // resuscribio 101 veces cada ~22 s durante 19 min y no habia forma de saber que stream era.
+        if (FileLogTree.enabled) Timber.d("stream open %s", dataTypeId)
         awaitClose {
             removeConsumer(listenerId)
+            if (FileLogTree.enabled) Timber.d("stream close %s", dataTypeId)
         }
     }.buffer(Channel.CONFLATED)
 }
@@ -778,6 +783,8 @@ internal fun monitorStreamData(
     var retryAttempt = 0
     emit(StreamState.NotAvailable)
     while (currentCoroutineContext().isActive) {
+        // Cuando empezo ESTA suscripcion. Ver el reset condicionado de retryAttempt mas abajo.
+        val subscribedAtMs = System.currentTimeMillis()
         try {
             val live = streamFactory().timeout(timeoutMs.milliseconds)
             val source = if (applyDistinct) live.distinctUntilChanged() else live
@@ -797,7 +804,17 @@ internal fun monitorStreamData(
                             delay(shortDelayMs / 2)
                         }
                         else -> {
-                            retryAttempt = 0
+                            // Solo cuenta como sano un stream que lleva vivo MAS que la ventana de
+                            // timeout. Al re-suscribir, el host REPRODUCE el ultimo estado, asi que
+                            // un stream muerto entrega un valor viejo al instante; resetear con eso
+                            // dejaba el back-off exponencial clavado en su primer escalon para
+                            // siempre y nunca se llegaba a WAIT_STREAMS_LONG. Medido el 2026-09-12:
+                            // al terminar la ruta, 101 ciclos de alta/baja cada ~22 s (20 s de
+                            // timeout + 2 s de espera, siempre la misma) durante 19 min, hasta que
+                            // el SO mato el proceso.
+                            if (System.currentTimeMillis() - subscribedAtMs >= timeoutMs) {
+                                retryAttempt = 0
+                            }
                             emit(state)
                         }
                     }
