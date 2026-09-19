@@ -112,6 +112,8 @@
     <string name="dropdown_surface">Surface</string>
     <string name="auto_surface_label">Auto surface from offline maps</string>
     <string name="auto_surface_desc">KPower reads the OSM surface under you from the offline maps (/offline/maps) and adjusts the Crr live (paved/standard/gravel/sand). Needs offline maps for the area and storage permission; otherwise it keeps the surface you selected above.</string>
+    <string name="auto_surface_no_permission">No storage permission: KPower cannot read the offline maps, so it keeps the surface selected above. Grant it in Android settings, Apps, KPower, Permissions.</string>
+    <string name="auto_surface_grant">Grant storage permission</string>
     <string name="section_rider_ftp">Rider &amp; FTP</string>
     <string name="use_profile_ftp_label">Use FTP from Karoo profile?</string>
     <string name="cfg_ftp_from_profile">FTP (from Karoo profile)</string>

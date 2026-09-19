@@ -78,10 +78,23 @@ class SurfaceConditionReader(private val context: Context) {
         if (knownMapfiles != null && now - lastScanMs < SCAN_INTERVAL_MS) return
         lastScanMs = now
 
-        if (!hasReadPermission()) { knownMapfiles = emptyList(); return }
+        // Registrar el MOTIVO de una lista vacia. Sin esto los cuatro caminos que devuelven null
+        // (sin permiso / sin directorio / punto fuera de cobertura / lejos de toda via) escriben la
+        // misma linea `-> Unknown(->preset)` en el log del llamante, y una feature MUERTA es
+        // indistinguible de una marcha legitimamente campo a traves: el 2026-09-12 estuvo 1.138 de
+        // 1.138 muestras sin permiso y el log no lo dijo en ninguna linea. Corre una vez por
+        // escaneo, no por muestra. Nunca el NOMBRE ni la RUTA: el mapfile se llama como la region
+        // del ciclista y este log se sube.
+        if (!hasReadPermission()) {
+            Timber.w("Surface: no storage permission -> live surface OFF, preset in use")
+            knownMapfiles = emptyList(); return
+        }
 
         val dir = File(File(Environment.getExternalStorageDirectory(), "offline"), "maps")
-        if (!dir.exists() || !dir.isDirectory) { knownMapfiles = emptyList(); return }
+        if (!dir.exists() || !dir.isDirectory) {
+            Timber.w("Surface: no offline map directory -> live surface OFF, preset in use")
+            knownMapfiles = emptyList(); return
+        }
 
         val files = dir.listFiles { f -> f.isFile && f.extension.equals("map", true) } ?: emptyArray()
         // Never log the NAME: mapfiles are named after their region ("catalunya.map") and this log is
@@ -97,6 +110,11 @@ class SurfaceConditionReader(private val context: Context) {
                 Timber.e("Surface: cannot read mapfile (%d MB): %s", file.length() shr 20, e.javaClass.simpleName)
                 null
             }
+        }
+        if (knownMapfiles.isNullOrEmpty()) {
+            Timber.w("Surface: no readable mapfiles (%d candidates) -> preset in use", files.size)
+        } else {
+            Timber.i("Surface: %d mapfile(s) readable -> live surface ON", knownMapfiles?.size ?: 0)
         }
     }
 

@@ -254,11 +254,25 @@ fun Main(
 }
 
 class MainActivity : ComponentActivity() {
+    // Pedir el permiso de almacenamiento AL ABRIR la app, no solo al activar la superficie viva.
+    // Un Karoo no tiene un lanzador de ajustes comodo, asi que mandar al ciclista a "Ajustes,
+    // Aplicaciones, KPower, Permisos" es un callejon: el dialogo del sistema es la unica via
+    // practica. Android deja de mostrarlo tras la segunda negativa, asi que esto son como mucho
+    // dos dialogos en la vida de la instalacion; despues el lanzador vuelve denegado al instante
+    // y el boton de la pantalla de la bici abre la ficha de la app.
+    private val requestStorage =
+        registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // The settings edited on these screens are mirrored from here too — the extension service
         // (the other mirror site) may not be running while the rider is in the app.
         mirrorSettingsToBackup()
+        if (checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            requestStorage.launch(android.Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
         setContent { Main() }
     }
 }

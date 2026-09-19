@@ -79,6 +79,43 @@ fun DetailScreen(configdata: ConfigData, onUpdate: (ConfigData) -> Unit, onDelet
     var preferHeadwind by remember(configdata.id) { mutableStateOf(configdata.preferHeadwind) }
     var headwindWindUnit by remember(configdata.id) { mutableStateOf(configdata.headwindWindUnit) }
     var useRouteSurface by remember(configdata.id) { mutableStateOf(configdata.useRouteSurface) }
+    // Permiso de lectura para /offline/maps. Se siembra al entrar en la pantalla y lo actualiza el
+    // callback del lanzador; si el ciclista lo concede desde los ajustes de Android, se relee al
+    // volver a entrar. Vale el permiso CLASICO porque la app compila con targetSdk 28 a proposito
+    // (almacenamiento heredado); ver el comentario en app/build.gradle.kts.
+    var hasStoragePermission by remember {
+        mutableStateOf(
+            ctx.checkCallingOrSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+        )
+    }
+    val storagePermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasStoragePermission = granted
+        // Denegado -> apagar el interruptor. Dejarlo encendido es exactamente el fallo silencioso
+        // que se arregla aqui.
+        if (!granted) {
+            useRouteSurface = false
+            // Denegado PARA SIEMPRE: Android ya no muestra el dialogo, el lanzador vuelve denegado
+            // al instante y el boton se queda muerto. Abrir la ficha de la app deja el permiso a un
+            // toque, en vez de pedirle al ciclista que navegue los ajustes del Karoo a mano.
+            val act = ctx as? android.app.Activity
+            if (act != null && !act.shouldShowRequestPermissionRationale(
+                    android.Manifest.permission.READ_EXTERNAL_STORAGE
+                )
+            ) {
+                runCatching {
+                    ctx.startActivity(
+                        android.content.Intent(
+                            android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            android.net.Uri.fromParts("package", ctx.packageName, null)
+                        )
+                    )
+                }
+            }
+        }
+    }
     var karooProfileId by remember(configdata.id) { mutableStateOf(configdata.karooProfileId) }
     var dotColor by remember(configdata.id) { mutableStateOf(configdata.dotColorArgb) }
     var estPowerFactorPct by remember(configdata.id) { mutableStateOf(configdata.estPowerFactorPct) }
@@ -356,7 +393,22 @@ fun DetailScreen(configdata: ConfigData, onUpdate: (ConfigData) -> Unit, onDelet
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Switch(checked = useRouteSurface, onCheckedChange = { useRouteSurface = it })
+                Switch(
+                    checked = useRouteSurface,
+                    // Pedir el permiso AL ACTIVAR. Sin esto el interruptor queda en "on" y la
+                    // feature no hace nada: el lector se encuentra sin permiso, deja la lista de
+                    // mapfiles vacia y devuelve Unknown en cada muestra, asi que el ciclista cree
+                    // que tiene superficie viva y en realidad rueda con el preset (salida del
+                    // 2026-09-12). Nadie pedia el permiso en ninguna pantalla.
+                    onCheckedChange = { on ->
+                        useRouteSurface = on
+                        if (on && !hasStoragePermission) {
+                            storagePermissionLauncher.launch(
+                                android.Manifest.permission.READ_EXTERNAL_STORAGE
+                            )
+                        }
+                    }
+                )
                 Spacer(modifier = Modifier.width(10.dp))
                 Text(stringResource(R.string.auto_surface_label))
             }
@@ -367,6 +419,21 @@ fun DetailScreen(configdata: ConfigData, onUpdate: (ConfigData) -> Unit, onDelet
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                if (!hasStoragePermission) {
+                    Text(
+                        text = stringResource(R.string.auto_surface_no_permission),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    // El aviso por si solo no sirve: el interruptor ya estaba encendido de una
+                    // sesion anterior, asi que onCheckedChange nunca vuelve a correr y no habia
+                    // ninguna forma de volver a pedir el permiso desde la app.
+                    Button(onClick = {
+                        storagePermissionLauncher.launch(
+                            android.Manifest.permission.READ_EXTERNAL_STORAGE
+                        )
+                    }) { Text(stringResource(R.string.auto_surface_grant)) }
+                }
             }
 
             Text(stringResource(R.string.section_rider_ftp), style = MaterialTheme.typography.titleSmall)

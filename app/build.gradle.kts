@@ -22,7 +22,19 @@ android {
     defaultConfig {
         applicationId = "com.enderthor.kpower"
         minSdk = 26   // Karoo 2 = Android 8 (API 26); lets FileLogTree's java.time work without desugaring
-        targetSdk = 34
+        // DELIBERADO, NO SUBIR sin sustituir antes la lectura de mapfiles. La superficie viva lee
+        // /offline/maps/*.map por RUTA con mapsforge, y un .map no es un fichero de medios: desde
+        // targetSdk 29 el almacenamiento con ambito es obligatorio y no se puede desactivar, asi
+        // que READ_EXTERNAL_STORAGE, incluso CONCEDIDO, no abre esa ruta — solo el directorio
+        // propio de la app y los medios que ella creo. Con 28 se aplica el almacenamiento heredado
+        // y el permiso normal vale. Es lo que hace routegraph (tambien 28) con el mismo mapsforge,
+        // la misma ruta y el mismo permiso; con 34 la feature estuvo MUERTA en silencio (la salida
+        // del 2026-09-12: 1.138 de 1.138 clasificaciones a Unknown con spain.map presente).
+        // Alternativa si algun dia hay que subir: SAF, el ciclista elige la carpeta una vez y
+        // MapFile se abre desde el FileChannel del descriptor, sin permiso ninguno.
+        // KPower no usa notificaciones, PendingIntent, AlarmManager ni servicio en primer plano,
+        // que es lo que suele cambiar al bajar el target.
+        targetSdk = 28
         versionCode = 202609071
         versionName = "3.0.0"
 
@@ -54,6 +66,13 @@ android {
         viewBinding = true
         compose = true
         buildConfig = true
+    }
+
+    lint {
+        // KPower se distribuye por sideload (Companion / GitHub Releases), NUNCA por Google Play,
+        // asi que su fecha limite de targetSdk no aplica; sin esto lintVitalRelease tumba el build
+        // de release. El target esta en 28 a proposito, ver el comentario en defaultConfig.
+        disable += "ExpiredTargetSdkVersion"
     }
 }
 
