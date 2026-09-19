@@ -158,6 +158,9 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
     // weather loop so it skips the expensive GPS/stats/HTTP work when not recording.
     @Volatile private var isRecording = false
 
+    /** Karoo POWER stream, NaN unless a real meter's power is usable for the field calibration. */
+    @Volatile private var karooRealPowerW = Double.NaN
+
     // Diagnostic-log Telegram upload state (KGhost pattern). Uploads only when the rider has diagnostic
     // logging on AND the build carries Telegram credentials. sentLogBytes is a BYTE offset into the
     // current log file: each send seeks there and reads only the not-yet-sent tail (not the whole file),
@@ -277,7 +280,36 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
         // ride (the extension process may be killed at ride end).
         engine.realPowerProvider = {
             val dn = savedMetersSnapshot.firstOrNull { it.enabled }?.deviceNumber
-            if (dn != null) antManager.powerFlow(dn).value else Double.NaN
+            val own = if (dn != null) antManager.powerFlow(dn).value else Double.NaN
+            // Fall back to the Karoo's own POWER stream. KPower usually has NO channel of its own:
+            // the rider's meter is paired NATIVE on the Karoo and two masters can't read one ANT
+            // meter at once, so `own` stays NaN and `calibrationRegressors` drops every sample
+            // before it reaches the accumulator. The 2026-09-12 ride is the proof — 2 h 40
+            // recording with the Rally, 2.500 usable samples in the FIT, and not one CALIB line.
+            if (own.isFinite()) own else karooRealPowerW
+        }
+        // The Karoo's POWER stream, ONLY while it is a REAL meter's power and only while it can be
+        // used: recording, comparison mode on, estimate not primary. If the estimate is the bound
+        // power source, POWER carries OUR OWN output and the least squares would fit the model to
+        // itself. Gating the SUBSCRIPTION (not the samples) keeps it free when off, and it still
+        // hot-toggles. Non-Streaming maps to NaN instead of the stream's last known value, which
+        // would otherwise feed the fit a frozen sample through a dropout.
+        serviceScope.launch {
+            combine(
+                karooSystem.consumerFlow<RideState>().map { it is RideState.Recording },
+                applicationContext.comparisonModeFlow(),
+                engine.estimateIsPrimary,
+            ) { recording, comparison, estPrimary -> recording && comparison && !estPrimary }
+                .distinctUntilChanged()
+                .flatMapLatest { usable ->
+                    if (usable) karooSystem.streamDataFlow(DataType.Type.POWER)
+                    else flowOf(null)
+                }
+                .collect { state ->
+                    karooRealPowerW = if (state is StreamState.Streaming) {
+                        state.getValueOrDefault()
+                    } else Double.NaN
+                }
         }
         // Field calibration is a DEV tuning aid: the fitted CdA + per-surface Crr (with ± std error) are
         // written to the DIAGNOSTIC LOG so they can be analysed offline to refine the model coefficients.
@@ -517,7 +549,7 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                     // already the self-expiring signal from meterScreenActiveFlow(): no age math here.
                     val shouldConnect = enabledDns.isNotEmpty() && !meterScreenActive
                     if (shouldRunComparison && !acquiredForComparison) {
-                        engine.acquire(comparisonToken); acquiredForComparison = true
+                        engine.acquire(comparisonToken, "comparison"); acquiredForComparison = true
                     } else if (!shouldRunComparison && acquiredForComparison) {
                         engine.release(comparisonToken); acquiredForComparison = false
                     }

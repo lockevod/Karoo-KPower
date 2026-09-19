@@ -221,17 +221,35 @@ class PowerEstimationEngine(
     // como token y el modo comparación un token fijo. Un Set hace acquire/release
     // idempotentes — un doble release (p.ej. el host cancela un emitter dos veces) no
     // puede desbalancear el contador y parar el motor mientras otro consumidor lo usa.
-    private val consumers = HashSet<Any>()
+    // Map, no Set, solo para poder ETIQUETAR al titular: el 2026-09-12 el motor siguio calculando
+    // pendiente cada 3 s durante 19 min 43 s DESPUES del stopFit, hasta que el SO mato el proceso,
+    // y `PowerEstimationEngine: stop` no aparece en todo el log. El token de comparacion SI se
+    // suelta al pasar a Idle, asi que quedaba otro titular vivo — y sin etiqueta no habia forma de
+    // saber cual. Las etiquetas no cambian la semantica: sigue siendo idempotente por token.
+    private val consumers = HashMap<Any, String>()
     private var engineJob: Job? = null
     private var pipelineJob: Job? = null
     private var metricJob: Job? = null
 
-    @Synchronized fun acquire(token: Any) {
-        if (consumers.add(token) && consumers.size == 1) startPipeline()
+    @Synchronized fun acquire(token: Any, label: String = "?") {
+        if (consumers.put(token, label) != null) return
+        logConsumers("acquire", label)
+        if (consumers.size == 1) startPipeline()
     }
 
     @Synchronized fun release(token: Any) {
-        if (consumers.remove(token) && consumers.isEmpty()) stopPipeline()
+        val label = consumers.remove(token) ?: return
+        logConsumers("release", label)
+        if (consumers.isEmpty()) stopPipeline()
+    }
+
+    /** Quien mantiene vivo el motor. Solo con el log de diagnostico activado. */
+    private fun logConsumers(what: String, label: String) {
+        if (!FileLogTree.enabled) return
+        Timber.d(
+            "PowerEstimationEngine: %s %s -> %d holder(s) %s",
+            what, label, consumers.size, consumers.values.sorted(),
+        )
     }
 
     /**
@@ -522,7 +540,11 @@ class PowerEstimationEngine(
                                 "%.1f".format(bundle.values.headwind.getValueOrDefault()) else "—",
                             tempC?.let { "%.1f".format(it) } ?: "—",
                             pressurePa?.let { "%.0f".format(it / 100.0) } ?: "—",
-                            if (cadenceLive) "live" else "absent",
+                            // El VALOR, no solo "live": el 2026-09-12 hubo muestras con ped=0
+                            // mientras el Karoo grababa 68 rpm, y con "live" no se puede saber si
+                            // falla el gate o si el stream traia una cadencia baja de verdad.
+                            if (cadenceLive) "%.0f".format(bundle.values.cadence.getValueOrDefault())
+                            else "absent",
                             if (isPedaling) 1 else 0,
                         )
                     }
@@ -600,8 +622,15 @@ class PowerEstimationEngine(
                 // unlike NP/avg below).
                 _power3sW.value = ma3s.add(w)
                 if (recording) {
+                    // NP incluye los ceros: es la definicion de Coggan (la ventana de 30 s ya
+                    // absorbe el freewheel) y es lo que hace el Karoo — su normalized_power y
+                    // nuestro est_np coincidieron en 160 vs 158 W el 2026-09-12.
                     npCalc.add(w)
-                    runningAvg.add(w)
+                    // La MEDIA los excluye, porque el Karoo excluye los ceros en avg_power. Sin
+                    // esto las dos cifras del resumen no son comparables: esa misma marcha dio
+                    // avg_power=143 W (Karoo, sin ceros) frente a est_avg=110 W (nuestro, con
+                    // ceros), y el estimador parecia un 23 % bajo cuando iba un 5 % bajo.
+                    if (w > 0.0) runningAvg.add(w)
                     _npW.value = npCalc.value
                     _avgW.value = runningAvg.value
                 }

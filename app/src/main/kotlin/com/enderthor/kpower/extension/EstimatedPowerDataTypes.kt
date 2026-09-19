@@ -47,7 +47,7 @@ class EstimatedPowerDataType(
         // Token NUEVO por suscripción (no `this`): así dos páginas con el mismo campo se
         // ref-cuentan por separado y soltar una no para el engine si otra lo sigue usando.
         val token = Any()
-        engine.acquire(token)
+        engine.acquire(token, "field:$typeId")
         scope.launch {
             combine(
                 engine.hasSample,

@@ -28,7 +28,7 @@ class EstimatedPowerSource(
         // so the old cancellable releases only ITS token and can't stop the engine / mark the device
         // disconnected while the new connection is still live.
         val token = Any()
-        engine.acquire(token)
+        engine.acquire(token, "virtual-device")
         engine.setVirtualDeviceConnected(token, true)
 
         scope.launch {
