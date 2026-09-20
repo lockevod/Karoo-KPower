@@ -26,6 +26,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emptyFlow
@@ -749,14 +750,32 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
     }
 
     /** Write the field-calibration fit to the diagnostic log (dev tuning aid). Includes the active bike id
-     *  for context. Caller already gated on FileLogTree.enabled. */
+     *  for context. Caller already gated on FileLogTree.enabled.
+     *
+     *  La MASA DECLARADA va en la linea a proposito, y no es decorativa: el ajuste la toma como dato
+     *  fijo, asi que un error de masa no se ve como error de masa, se reparte entre CdA y Crr. Medido
+     *  con el replay sobre dos salidas reales (RideReplayTest): subir la masa declarada 5 kg mueve el
+     *  Crr ajustado un 30-40 % y el CdA un 25 %. Peor aun, `fiable`/`ok` solo mira el error estandar
+     *  del propio parametro, que sigue siendo estrecho mientras el ajuste esta sesgado: en las dos
+     *  salidas daba fiable=true con la masa equivocada. Sin la masa al lado, estos numeros no se
+     *  pueden interpretar, y se han interpretado mal.
+     *  Regla practica: si CdA y Crr se desvian del configurado en SENTIDOS OPUESTOS, sospecha de la
+     *  masa antes que de los coeficientes; cuando la masa acierta, los dos se acercan a la vez. */
     private suspend fun logCalibration(fit: com.enderthor.kpower.vdevice.FieldCalibrator.Fit) {
-        val bikeId = com.enderthor.kpower.data.resolveActiveConfig(
+        val cfg = com.enderthor.kpower.data.resolveActiveConfig(
             applicationContext.loadPreferencesFlow().first(), activeProfileIdFlow.value
-        )?.id
+        )
+        val bikeId = cfg?.id
+        val bikeKg = cfg?.bikeMass?.toDoubleOrNull()
+        val riderKg = withTimeoutOrNull(5_000) {
+            karooSystem.consumerFlow<UserProfile>().first()
+        }?.weight?.toDouble()
         Timber.tag("CALIB").d(
-            "bike=%s cda=%.3f±%.3f (%s) n=%d | %s",
-            bikeId?.toString() ?: "?", fit.cda, fit.cdaSe, if (fit.cdaReliable) "ok" else "uncertain", fit.samples,
+            "bike=%s mass=%s (bici %s + perfil %s) cda=%.3f±%.3f (%s) n=%d | %s",
+            bikeId?.toString() ?: "?",
+            if (bikeKg != null && riderKg != null) "%.1f".format(bikeKg + riderKg) else "?",
+            bikeKg?.let { "%.1f".format(it) } ?: "?", riderKg?.let { "%.1f".format(it) } ?: "?",
+            fit.cda, fit.cdaSe, if (fit.cdaReliable) "ok" else "uncertain", fit.samples,
             fit.perSurface.joinToString(" ") { s ->
                 "${s.surface}:${s.crrEff?.let { "%.4f".format(it) } ?: "—"}±${s.crrSe?.let { "%.4f".format(it) } ?: "—"}(${s.samples}${if (s.reliable) "" else "?"})"
             },

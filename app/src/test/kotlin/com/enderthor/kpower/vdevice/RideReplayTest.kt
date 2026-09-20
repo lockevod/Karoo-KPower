@@ -59,8 +59,8 @@ class RideReplayTest {
         val headwind: Double?, val wxTempC: Double?, val wxPressureHpa: Double?,
     )
 
-    private fun load(): List<Tick> {
-        val txt = javaClass.classLoader!!.getResourceAsStream("ride-2026-09-06-mtb.csv")!!
+    private fun load(fixture: String = "ride-2026-09-06-mtb.csv"): List<Tick> {
+        val txt = javaClass.classLoader!!.getResourceAsStream(fixture)!!
             .bufferedReader().readLines()
         return txt.drop(1).filter { it.isNotBlank() }.map { line ->
             val c = line.split(",")
@@ -452,6 +452,40 @@ class RideReplayTest {
             println("  rider %5.1f kg -> sesgo=%+6.1f W  RMSE=%5.1f W  trabajo=%+5.1f %%".format(
                 m, err.average(), sqrt(err.sumOf { it * it } / err.size),
                 100.0 * model.sum() / real.sum() - 100.0))
+        }
+    }
+
+    /**
+     * Segunda marcha, independiente: 2026-09-20, 24,5 km / 861 m, mismo MTB y mismo medidor.
+     * Existe porque el 06-sep por si solo no distingue "falta masa" de "falta Crr", y una segunda
+     * salida con otro perfil de terreno si acota.
+     *
+     * Lo que este test responde: la marcha grabada da -4,9 % de trabajo frente al medidor, con la
+     * config REAL del dispositivo (kpower_bikes.json: bikeMass 13). El fixture del 06-sep usa 14,4,
+     * que es la cota que el propio rider calculo. Si el barrido cierra el hueco subiendo masa y el
+     * Crr ajustado vuelve al configurado, el problema es la masa declarada, no el coeficiente.
+     */
+    @Test
+    fun `la salida del 20-sep acota masa frente a coeficiente`() {
+        val ticks = load("ride-2026-09-20-mtb.csv")
+        val idx = ticks.indices.filter { ticks[it].realW != null }
+        val real = idx.map { ticks[it].realW!! }
+        println("=== 20-sep: sensibilidad al peso (bici $BIKE_MASS kg) ===")
+        for (m in listOf(69.0, 70.0, 72.0, 75.0, 78.0)) {
+            val e = replay(ticks, m)
+            val model = idx.map { e[it] }
+            val err = real.indices.map { model[it] - real[it] }
+            println("  rider %5.1f kg (total %5.1f) -> sesgo=%+6.1f W  RMSE=%5.1f W  trabajo=%+5.1f %%".format(
+                m, m + BIKE_MASS, err.average(), sqrt(err.sumOf { it * it } / err.size),
+                100.0 * model.sum() / real.sum() - 100.0))
+        }
+        // El ajuste no separa masa de Crr por si solo, pero el termino aero NO depende de la masa:
+        // si al subir la masa el Crr ajustado vuelve al configurado, era la masa.
+        for (rm in listOf(RIDER_MASS, RIDER_MASS + 5.0, RIDER_MASS + 8.0)) {
+            val cal = FieldCalibrator()
+            replay(ticks, rm, calibrator = cal)
+            println("=== 20-sep: calibracion (masa declarada ${(rm + BIKE_MASS).toInt()} kg) ===")
+            cal.result()?.let { printFit(it) } ?: println("  sin ajuste (muestras: ${cal.sampleCount()})")
         }
     }
 }
