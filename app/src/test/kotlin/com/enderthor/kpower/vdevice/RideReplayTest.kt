@@ -679,6 +679,28 @@ class RideReplayTest {
             }
         }
 
+        // Y la pregunta que importa: el candidato, ¿arregla llano y bajada o solo el instante?
+        println("=== 20-sep: terreno, produccion vs candidato (85 kg) ===")
+        for ((lbl, lead, tau) in listOf(
+            Triple("produccion L2 t1000", 2.0, 1_000.0),
+            Triple("candidato  L4 t500", 4.0, 500.0),
+        )) {
+            val slopes = DoubleArray(ticks.size)
+            val e = replay(ticks, 85.0 - BIKE_MASS, leadSeconds = lead, tauMs = tau, slopesOut = slopes)
+            val model = idx.map { e[it] }
+            print("  %-22s total %+5.1f %% |".format(lbl, 100.0 * model.sum() / real.sum() - 100.0))
+            for ((lo, hi, t) in listOf(
+                Triple(-99.0, -2.0, "bajada"), Triple(-2.0, 2.0, "llano"),
+                Triple(2.0, 6.0, "sub2-6"), Triple(6.0, 99.0, "sub>6"),
+            )) {
+                val sel = idx.indices.filter { slopes[idx[it]] >= lo && slopes[idx[it]] < hi }
+                if (sel.size < 30) continue
+                val rk = sel.sumOf { real[it] }; val mk = sel.sumOf { model[it] }
+                print("  %s %+.1f %%".format(t, 100.0 * mk / rk - 100.0))
+            }
+            println()
+        }
+
         data class Arm(val lbl: String, val src: GradeSrc, val lead: Double?, val tau: Double?)
         for (a in listOf(
             Arm("altitud prod (L2 t1000)", GradeSrc.ALTITUDE, null, null),
