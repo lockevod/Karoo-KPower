@@ -541,4 +541,100 @@ class RideReplayTest {
             cal.result()?.let { printFit(it) } ?: println("  sin ajuste (muestras: ${cal.sampleCount()})")
         }
     }
+
+    /**
+     * Caracterizacion del cubo de LLANO y BAJADA, que es donde vive el residuo real (-22 % en las
+     * dos marchas) una vez corregido el agrupamiento. Antes de proponer una causa hay que saber
+     * COMO son esas muestras: si el deficit esta en velocidad alta (aero/viento), en aceleracion
+     * (termino de inercia amortiguado) o en muestras pedaleando vs rodando.
+     */
+    @Test
+    fun `20-sep anatomia del llano y la bajada`() {
+        val ticks = load("ride-2026-09-20-mtb.csv")
+        val idx = ticks.indices.filter { ticks[it].realW != null }
+        val real = idx.map { ticks[it].realW!! }
+        val slopes = DoubleArray(ticks.size)
+        val e = replay(ticks, 85.0 - BIKE_MASS, slopesOut = slopes)
+        val model = idx.map { e[it] }
+
+        for ((lo, hi, lbl) in listOf(
+            Triple(-99.0, -2.0, "bajada"), Triple(-2.0, 2.0, "llano"),
+            Triple(2.0, 6.0, "sub2-6"), Triple(6.0, 99.0, "sub>6"),
+        )) {
+            val sel = idx.indices.filter { slopes[idx[it]] >= lo && slopes[idx[it]] < hi }
+            if (sel.size < 30) continue
+            val ped = sel.filter { (ticks[idx[it]].cadence ?: 0.0) > 0 }
+            val coast = sel.filter { (ticks[idx[it]].cadence ?: 0.0) <= 0 }
+            fun kj(l: List<Int>, f: (Int) -> Double) = l.sumOf { f(it) } / 1000.0
+            println("=== %s  n=%d ===".format(lbl, sel.size))
+            println("  v media=%.1f km/h  deficit total=%+.1f kJ".format(
+                sel.map { (ticks[idx[it]].speed ?: 0.0) }.average() * 3.6,
+                kj(sel) { model[it] } - kj(sel) { real[it] }))
+            println("  PEDALEANDO n=%5d  real=%6.1f kJ  est=%6.1f kJ  -> %+6.1f %%  (%+.1f kJ)".format(
+                ped.size, kj(ped) { real[it] }, kj(ped) { model[it] },
+                100.0 * kj(ped) { model[it] } / kj(ped) { real[it] } - 100.0,
+                kj(ped) { model[it] } - kj(ped) { real[it] }))
+            if (coast.isNotEmpty() && kj(coast) { real[it] } > 0.05)
+                println("  RODANDO   n=%5d  real=%6.1f kJ  est=%6.1f kJ  -> %+6.1f %%  (%+.1f kJ)".format(
+                    coast.size, kj(coast) { real[it] }, kj(coast) { model[it] },
+                    100.0 * kj(coast) { model[it] } / kj(coast) { real[it] } - 100.0,
+                    kj(coast) { model[it] } - kj(coast) { real[it] }))
+            // reparto del deficit PEDALEANDO por banda de velocidad: aero crece con v^3
+            for ((vlo, vhi) in listOf(0.0 to 3.0, 3.0 to 5.0, 5.0 to 7.0, 7.0 to 99.0)) {
+                val b = ped.filter { (ticks[idx[it]].speed ?: 0.0).let { v -> v >= vlo && v < vhi } }
+                if (b.size < 20) continue
+                println("      %4.1f-%4.1f km/h n=%5d real=%6.1f est=%6.1f -> %+6.1f %% (%+.1f kJ)".format(
+                    vlo * 3.6, vhi * 3.6, b.size, kj(b) { real[it] }, kj(b) { model[it] },
+                    100.0 * kj(b) { model[it] } / kj(b) { real[it] } - 100.0,
+                    kj(b) { model[it] } - kj(b) { real[it] }))
+            }
+        }
+
+        // DISCRIMINANTE. El deficit decrece con la velocidad, asi que NO es aero/viento/CdA (esos
+        // crecen con v^3). La hipotesis alternativa es el termino de INERCIA: el modelo de Martin
+        // es estacionario y su aceleracion pasa por un EMA(0,3) con clamp a +-2 m/s2, asi que las
+        // arrancadas repetidas de terreno roto se suavizan. Si el deficit vive en las muestras que
+        // ACELERAN, es eso (y no hay coeficiente que lo arregle).
+        // Volcado para cruzar la pendiente USADA con la superficie OSM real de cada punto. La
+        // marcha se rodo con la superficie viva MUERTA (preset GRAVEL en todo), asi que si los
+        // tramos llanos son de otra clase que las subidas, ese es el mecanismo que produce esta
+        // firma — y es justo lo que el fix de la superficie acaba de habilitar.
+        java.io.File("build/slopes-20sep.csv").also { f ->
+            f.parentFile.mkdirs()
+            f.bufferedWriter().use { w ->
+                w.write("i,slope,real,est,speed,cadence\n")
+                idx.indices.forEach { k ->
+                    val t = ticks[idx[k]]
+                    // Locale.ROOT OBLIGATORIO: `"%.1f".format(x)` usa el locale por defecto y en
+                    // es-ES escribe COMA decimal, que parte las columnas del CSV en silencio.
+                    w.write("${idx[k]},${"%.3f".format(java.util.Locale.ROOT, slopes[idx[k]])}," +
+                        "${real[k]},${"%.1f".format(java.util.Locale.ROOT, model[k])}," +
+                        "${t.speed ?: 0.0},${t.cadence ?: 0.0}\n")
+                }
+            }
+            println("volcado -> ${f.absolutePath} (${idx.size} filas)")
+        }
+
+        println("=== deficit por aceleracion instantanea (llano + bajada, pedaleando) ===")
+        val flatIdx = idx.indices.filter { slopes[idx[it]] < 2.0 && (ticks[idx[it]].cadence ?: 0.0) > 0 }
+        fun accelAt(k: Int): Double {
+            val i0 = idx[k]
+            if (i0 == 0) return 0.0
+            val v1 = ticks[i0].speed ?: return 0.0
+            val v0 = ticks[i0 - 1].speed ?: return 0.0
+            val dt = (ticks[i0].tMs - ticks[i0 - 1].tMs) / 1000.0
+            return if (dt <= 0.0) 0.0 else (v1 - v0) / dt
+        }
+        for ((alo, ahi, lbl) in listOf(
+            Triple(-9.0, -0.3, "frenando  a < -0,3"), Triple(-0.3, 0.3, "estable   |a| < 0,3"),
+            Triple(0.3, 0.8, "acelera   0,3-0,8"), Triple(0.8, 9.0, "acelera   a > 0,8"),
+        )) {
+            val b = flatIdx.filter { accelAt(it).let { a -> a >= alo && a < ahi } }
+            if (b.size < 20) continue
+            val rk = b.sumOf { real[it] } / 1000.0
+            val mk = b.sumOf { model[it] } / 1000.0
+            println("  %-20s n=%5d  real=%6.1f kJ  est=%6.1f kJ  -> %+6.1f %%  (%+.1f kJ)".format(
+                lbl, b.size, rk, mk, 100.0 * mk / rk - 100.0, mk - rk))
+        }
+    }
 }
