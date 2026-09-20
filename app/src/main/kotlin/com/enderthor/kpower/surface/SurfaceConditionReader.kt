@@ -33,6 +33,9 @@ class SurfaceConditionReader(private val context: Context) {
 
     private var knownMapfiles: List<MapFileInfo>? = null
     private var lastScanMs = 0L
+    // Cuantos .map habia en el directorio en el ultimo escaneo. Distingue un exito COMPLETO
+    // (abrieron todos) de uno PARCIAL, que si hay que reintentar.
+    private var lastCandidateCount = 0
     // access-order LRU (true) so trimming evicts the LEAST-RECENTLY-USED reader, not the oldest-inserted —
     // otherwise a point covered by overlapping mapfiles could evict the hot one and reopen it (header
     // parse = real I/O) every tile.
@@ -71,11 +74,19 @@ class SurfaceConditionReader(private val context: Context) {
     }
 
     private fun ensureMapfiles() {
-        // Una vez encontrados, no reescanear durante la ruta (los .map no aparecen a mitad);
+        // Una vez encontrados TODOS, no reescanear durante la ruta (los .map no aparecen a mitad);
         // close() resetea knownMapfiles=null, así que una reconexión sí reescanea.
-        if (knownMapfiles?.isNotEmpty() == true) return
+        //
+        // "TODOS" es la palabra que importa. Antes bastaba con que la lista no estuviese vacia, asi
+        // que con dos mapas y uno fallando justo en el escaneo (lo estan reemplazando, se esta
+        // descargando), el que fallo se caia de la lista y NO se reintentaba en toda la sesion: las
+        // zonas cubiertas solo por el quedaban en Unknown para siempre. El reintento de 5 min no lo
+        // salvaba porque solo corria con la lista vacia del todo. Un fallo transitorio se volvia
+        // permanente.
+        val known = knownMapfiles
+        if (known != null && known.isNotEmpty() && known.size == lastCandidateCount) return
         val now = System.currentTimeMillis()
-        if (knownMapfiles != null && now - lastScanMs < SCAN_INTERVAL_MS) return
+        if (known != null && now - lastScanMs < SCAN_INTERVAL_MS) return
         lastScanMs = now
 
         // Registrar el MOTIVO de una lista vacia. Sin esto los cuatro caminos que devuelven null
@@ -108,6 +119,7 @@ class SurfaceConditionReader(private val context: Context) {
         val raw = dir.listFiles()
         val files = raw.orEmpty().filter { it.isFile && it.extension.equals("map", true) }
             .toTypedArray()
+        lastCandidateCount = files.size
         when {
             raw == null -> Timber.w(
                 "Surface: permission granted but listFiles() failed -> check that the process " +
@@ -133,7 +145,14 @@ class SurfaceConditionReader(private val context: Context) {
         if (knownMapfiles.isNullOrEmpty()) {
             Timber.w("Surface: no readable mapfiles (%d candidates) -> preset in use", files.size)
         } else {
-            Timber.i("Surface: %d mapfile(s) readable -> live surface ON", knownMapfiles?.size ?: 0)
+            val readable = knownMapfiles?.size ?: 0
+            Timber.i("Surface: %d mapfile(s) readable -> live surface ON", readable)
+            if (readable < files.size) {
+                Timber.w(
+                    "Surface: only %d of %d mapfiles opened -> retrying the rest every %d min",
+                    readable, files.size, SCAN_INTERVAL_MS / 60_000L
+                )
+            }
         }
     }
 
@@ -205,6 +224,7 @@ class SurfaceConditionReader(private val context: Context) {
         openReaders.clear()
         knownMapfiles = null
         lastScanMs = 0L
+        lastCandidateCount = 0
         cachedTileKey = Long.MIN_VALUE
         cachedWays = emptyList()
     }
