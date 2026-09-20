@@ -494,6 +494,29 @@ class RideReplayTest {
                 100.0 * model.sum() / real.sum() - 100.0, corr(real, model)))
         }
 
+        // DESGLOSE POR TERRENO a las dos masas. Obligatorio antes de recomendar nada: el agregado
+        // es una media ponderada dominada por la subida, y una sesion anterior ya se equivoco
+        // citandolo solo. Si al corregir la masa las subidas se pasan mientras bajada y llano
+        // siguen negativos, "poner 16 kg" seria el mismo error con otro numero.
+        for (total in listOf(82.0, 85.0)) {
+            val slopes = DoubleArray(ticks.size)
+            val e = replay(ticks, total - BIKE_MASS, slopesOut = slopes)
+            val model = idx.map { e[it] }
+            println("=== 20-sep: terreno a %.0f kg (total %+.1f %%) ===".format(
+                total, 100.0 * model.sum() / real.sum() - 100.0))
+            for ((lo, hi, lbl) in listOf(
+                Triple(-99.0, -2.0, "bajada < -2 %"), Triple(-2.0, 2.0, "llano -2..2 %"),
+                Triple(2.0, 6.0, "subida 2-6 %"), Triple(6.0, 99.0, "subida > 6 %"),
+            )) {
+                val sel = idx.indices.filter { slopes[idx[it]] >= lo && slopes[idx[it]] < hi }
+                if (sel.size < 30) continue
+                val rk = sel.sumOf { real[it] } / 1000.0
+                val mk = sel.sumOf { model[it] } / 1000.0
+                println("    %-16s n=%5d  real=%6.1f kJ  est=%6.1f kJ  -> %+6.1f %%".format(
+                    lbl, sel.size, rk, mk, 100.0 * mk / rk - 100.0))
+            }
+        }
+
         // Ni la masa ni la pendiente lo cierran del todo. La tercera palanca es powerLoss: 2,5 %
         // es un valor de CARRETERA, y en MTB hay perdida que el modelo de Martin no tiene
         // (transmision bajo carga, y sobre todo lo que se traga la suspension y el terreno roto).
