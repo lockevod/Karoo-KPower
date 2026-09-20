@@ -268,10 +268,10 @@ class MainActivity : ComponentActivity() {
         // The settings edited on these screens are mirrored from here too — the extension service
         // (the other mirror site) may not be running while the rider is in the app.
         mirrorSettingsToBackup()
-        if (checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) !=
+        if (checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) !=
             android.content.pm.PackageManager.PERMISSION_GRANTED
         ) {
-            requestStorage.launch(android.Manifest.permission.READ_EXTERNAL_STORAGE)
+            requestStorage.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
         }
         setContent { Main() }
     }

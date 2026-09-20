@@ -9,15 +9,27 @@ import com.enderthor.kpower.data.KarooSurface
  * (con `highway`); las áreas/ríos/vías no-highway se filtran antes.
  */
 object SurfaceTagClassifier {
+    // OpenAndroMaps NO usa el vocabulario OSM crudo: su tag-transform lo reduce a un juego propio
+    // en el que aparecen `raw`, `smooth_paved` y `rough_paved`. Sin ellos, el mapa OAM -que es el
+    // que el ciclista mantiene actualizado- pierde su etiqueta mas frecuente y cae al fallback por
+    // tipo de via. Medido sobre la salida del 2026-09-20 (640 puntos, ambos mapas): 32 puntos se
+    // quedaban en Unknown -> preset justo donde spain.map decia GRAVEL.
+    // El destino de `raw` no es una suposicion: cruzando las MISMAS vias contra spain.map, 66 de 72
+    // correspondencias son `ground` y 6 son `dirt`, y los dos ya estaban en gravelSurfaces.
+    // `smooth_paved` y `rough_paved` son los dos el cubo de asphalt/concrete: pese al nombre,
+    // las 7 vias que llevan `rough_paved` en la zona son todas `living_street`, calle pavimentada.
+    // No se tratan como cobblestone/sett aunque el nombre lo sugiera.
     private val pavedSurfaces = setOf(
         "asphalt", "concrete", "concrete:plates", "concrete:lanes",
-        "paving_stones", "paved", "chipseal", "metal"
+        "paving_stones", "paved", "chipseal", "metal",
+        "smooth_paved", "rough_paved"                    // OAM
     )
     private val compactedSurfaces = setOf("compacted", "fine_gravel")
     private val gravelSurfaces = setOf(
         "unpaved", "dirt", "ground", "earth", "gravel", "pebblestone", "cobblestone",
         "sett", "unhewn_cobblestone", "rock", "rocks", "stone", "grass_paver",
-        "clay", "woodchips", "salt", "wood"
+        "clay", "woodchips", "salt", "wood",
+        "raw"                                            // OAM
     )
     private val looseSurfaces = setOf("grass", "sand", "mud", "snow", "ice")
 

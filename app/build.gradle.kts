@@ -24,12 +24,18 @@ android {
         minSdk = 26   // Karoo 2 = Android 8 (API 26); lets FileLogTree's java.time work without desugaring
         // DELIBERADO, NO SUBIR sin sustituir antes la lectura de mapfiles. La superficie viva lee
         // /offline/maps/*.map por RUTA con mapsforge, y un .map no es un fichero de medios: desde
-        // targetSdk 29 el almacenamiento con ambito es obligatorio y no se puede desactivar, asi
+        // targetSdk 30 el almacenamiento con ambito es obligatorio y no se puede desactivar (en 29
+        // todavia vale requestLegacyExternalStorage, que este manifiesto NO declara porque con 28
+        // se da por hecho; si algun dia se sube a 29 hay que ponerlo a mano), asi
         // que READ_EXTERNAL_STORAGE, incluso CONCEDIDO, no abre esa ruta — solo el directorio
         // propio de la app y los medios que ella creo. Con 28 se aplica el almacenamiento heredado
         // y el permiso normal vale. Es lo que hace routegraph (tambien 28) con el mismo mapsforge,
         // la misma ruta y el mismo permiso; con 34 la feature estuvo MUERTA en silencio (la salida
         // del 2026-09-12: 1.138 de 1.138 clasificaciones a Unknown con spain.map presente).
+        // Ojo: bajar el target es NECESARIO pero NO SUFICIENTE. El permiso clasico tiene que ser
+        // WRITE_EXTERNAL_STORAGE, no READ, porque /offline se monta con gid=sdcard_rw y solo WRITE
+        // concede ese gid; con targetSdk 28 y solo READ la feature tambien estuvo muerta (salida
+        // del 2026-09-20). Ver el comentario de AndroidManifest.xml.
         // Alternativa si algun dia hay que subir: SAF, el ciclista elige la carpeta una vez y
         // MapFile se abre desde el FileChannel del descriptor, sin permiso ninguno.
         // KPower no usa notificaciones, PendingIntent, AlarmManager ni servicio en primer plano,

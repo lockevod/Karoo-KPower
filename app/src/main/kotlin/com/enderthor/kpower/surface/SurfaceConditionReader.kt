@@ -85,7 +85,7 @@ class SurfaceConditionReader(private val context: Context) {
         // 1.138 muestras sin permiso y el log no lo dijo en ninguna linea. Corre una vez por
         // escaneo, no por muestra. Nunca el NOMBRE ni la RUTA: el mapfile se llama como la region
         // del ciclista y este log se sube.
-        if (!hasReadPermission()) {
+        if (!hasStoragePermission()) {
             Timber.w("Surface: no storage permission -> live surface OFF, preset in use")
             knownMapfiles = emptyList(); return
         }
@@ -96,7 +96,26 @@ class SurfaceConditionReader(private val context: Context) {
             knownMapfiles = emptyList(); return
         }
 
-        val files = dir.listFiles { f -> f.isFile && f.extension.equals("map", true) } ?: emptyArray()
+        // Tres causas distintas producian el MISMO `0 candidates`, y por eso la feature ha muerto
+        // varias veces sin que el log lo dijera. Se listan sin filtro y se separan:
+        //   raw == null      -> opendir fallo. La causa tipica es DAC: falta el gid sdcard_rw que
+        //                       /offline exige. Pero listFiles() TIRA el errno, asi que tambien
+        //                       cabe EMFILE, ENOMEM o EIO. No se prescribe una cura: se dice lo
+        //                       que se ha visto y el comprobante que lo distingue.
+        //   raw vacio        -> el directorio se lee y esta vacio de verdad.
+        //   raw sin .map     -> hay ficheros pero ninguno casa (.map.gz, mapas un nivel mas
+        //                       abajo). Hay que mover los mapas, no tocar permisos.
+        val raw = dir.listFiles()
+        val files = raw.orEmpty().filter { it.isFile && it.extension.equals("map", true) }
+            .toTypedArray()
+        when {
+            raw == null -> Timber.w(
+                "Surface: permission granted but listFiles() failed -> check that the process " +
+                    "has gid 1015 (sdcard_rw): grep ^Groups /proc/<pid>/status"
+            )
+            raw.isEmpty() -> Timber.w("Surface: map dir is readable but empty")
+            files.isEmpty() -> Timber.w("Surface: %d entries in map dir, none .map", raw.size)
+        }
         // Never log the NAME: mapfiles are named after their region ("catalunya.map") and this log is
         // uploaded, so a filename is a coarse home location. Size identifies which file (stably, unlike
         // a list index) without naming it. The THROWABLE is dropped for the same reason — mapsforge's
@@ -124,7 +143,20 @@ class SurfaceConditionReader(private val context: Context) {
         for (file in files) {
             try {
                 val reader = openReaders.getOrPut(file) { MapFile(file) }
-                val result = reader.readMapData(tile) ?: continue
+                // null aqui NO es "no hay vias": mapsforge aborta la consulta entera y devuelve null
+                // si un bloque supera Parameters.MAXIMUM_BUFFER_SIZE (10 MB), y solo lo cuenta por
+                // java.util.logging, que no pasa por Timber ni acaba en el log que sube el ciclista.
+                // Medido el 2026-09-20 sobre spain.map y el OAM de 2,2 GB en la ruta entera: 0 nulls
+                // y 0 avisos, asi que NO se toca el limite. Pero si un mapa nuevo lo provoca, el
+                // sintoma seria otra vez Unknown durante toda la marcha sin una sola linea. Una linea.
+                val result = reader.readMapData(tile)
+                if (result == null) {
+                    Timber.w(
+                        "Surface: readMapData returned null for mapfile (%d MB) at tile %d/%d",
+                        file.length() shr 20, tx, ty
+                    )
+                    continue
+                }
                 for (way in result.ways) {
                     val tags = way.tags
                     val highway = tags.find { it.key.equals("highway", true) }?.value?.lowercase()
@@ -155,8 +187,17 @@ class SurfaceConditionReader(private val context: Context) {
         }
     }
 
-    private fun hasReadPermission(): Boolean =
-        context.checkCallingOrSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) ==
+    // WRITE, no READ, y NO escribimos nada: es el unico permiso que concede el gid sdcard_rw
+    // que /offline exige. Ver AndroidManifest.xml antes de "simplificarlo" a READ.
+    // Conceder NO exige reiniciar a mano: al cambiar los gids el sistema mata el uid
+    // (killUid GIDS_CHANGED) y el proceso re-forkea ya con 1015. Comprobado en el Karoo el
+    // 2026-09-20: el pid murio a los 2 s del grant y volvio con el gid puesto.
+    // ponytail: valido mientras el target siga en 28 y el Karoo en API 32. En API 33+
+    // WRITE_EXTERNAL_STORAGE ya no se concede y esto seria siempre false, con un log enganyoso
+    // ("no storage permission"); para entonces hara falta SAF, que es la salida anotada en
+    // app/build.gradle.kts. No se construye hoy para un dispositivo que no existe.
+    private fun hasStoragePermission(): Boolean =
+        context.checkCallingOrSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
             PackageManager.PERMISSION_GRANTED
 
     @Synchronized fun close() {

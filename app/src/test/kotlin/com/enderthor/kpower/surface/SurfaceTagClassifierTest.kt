@@ -65,4 +65,21 @@ class SurfaceTagClassifierTest {
         assertNull(SurfaceTagClassifier.classifyWay(null, null, "footway"))
         assertNull(SurfaceTagClassifier.classifyWay(null, null, null))
     }
+
+    // Vocabulario propio de OpenAndroMaps. El caso que importaba: `raw` sobre un `path` sin
+    // tracktype caia en Unknown -> preset, y es la etiqueta mas frecuente del OAM (32 puntos de
+    // la salida del 2026-09-20). El cruce contra spain.map da `ground`/`dirt` para esas vias.
+    @Test fun `OAM raw maps to gravel like the ground and dirt it stands for`() =
+        assertEquals(KarooSurface.GRAVEL, SurfaceTagClassifier.classify("raw", null))
+
+    @Test fun `OAM smooth_paved maps to asphalt`() =
+        assertEquals(KarooSurface.ASPHALT, SurfaceTagClassifier.classify("smooth_paved", null))
+
+    // rough_paved es calle pavimentada pese al nombre: las que lo llevan son living_street.
+    @Test fun `OAM rough_paved maps to asphalt`() =
+        assertEquals(KarooSurface.ASPHALT, SurfaceTagClassifier.classify("rough_paved", null))
+
+    // La regresion concreta: sin `raw` esto devolvia null y se usaba el preset.
+    @Test fun `OAM raw on a tagless path is no longer unknown`() =
+        assertEquals(KarooSurface.GRAVEL, SurfaceTagClassifier.classifyWay("raw", null, "path"))
 }

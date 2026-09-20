@@ -79,13 +79,15 @@ fun DetailScreen(configdata: ConfigData, onUpdate: (ConfigData) -> Unit, onDelet
     var preferHeadwind by remember(configdata.id) { mutableStateOf(configdata.preferHeadwind) }
     var headwindWindUnit by remember(configdata.id) { mutableStateOf(configdata.headwindWindUnit) }
     var useRouteSurface by remember(configdata.id) { mutableStateOf(configdata.useRouteSurface) }
-    // Permiso de lectura para /offline/maps. Se siembra al entrar en la pantalla y lo actualiza el
-    // callback del lanzador; si el ciclista lo concede desde los ajustes de Android, se relee al
-    // volver a entrar. Vale el permiso CLASICO porque la app compila con targetSdk 28 a proposito
-    // (almacenamiento heredado); ver el comentario en app/build.gradle.kts.
+    // Permiso de almacenamiento para /offline/maps. Se siembra al entrar en la pantalla y lo
+    // actualiza el callback del lanzador; si el ciclista lo concede desde los ajustes de Android,
+    // se relee al volver a entrar. Vale el permiso CLASICO porque la app compila con targetSdk 28
+    // a proposito (almacenamiento heredado); ver el comentario en app/build.gradle.kts.
+    // Se pide WRITE y NO escribimos nada: es el unico permiso que concede el gid sdcard_rw que
+    // /offline exige. Ver AndroidManifest.xml antes de "simplificarlo" a READ.
     var hasStoragePermission by remember {
         mutableStateOf(
-            ctx.checkCallingOrSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) ==
+            ctx.checkCallingOrSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
                 android.content.pm.PackageManager.PERMISSION_GRANTED
         )
     }
@@ -102,7 +104,7 @@ fun DetailScreen(configdata: ConfigData, onUpdate: (ConfigData) -> Unit, onDelet
             // toque, en vez de pedirle al ciclista que navegue los ajustes del Karoo a mano.
             val act = ctx as? android.app.Activity
             if (act != null && !act.shouldShowRequestPermissionRationale(
-                    android.Manifest.permission.READ_EXTERNAL_STORAGE
+                    android.Manifest.permission.WRITE_EXTERNAL_STORAGE
                 )
             ) {
                 runCatching {
@@ -404,7 +406,7 @@ fun DetailScreen(configdata: ConfigData, onUpdate: (ConfigData) -> Unit, onDelet
                         useRouteSurface = on
                         if (on && !hasStoragePermission) {
                             storagePermissionLauncher.launch(
-                                android.Manifest.permission.READ_EXTERNAL_STORAGE
+                                android.Manifest.permission.WRITE_EXTERNAL_STORAGE
                             )
                         }
                     }
@@ -430,7 +432,7 @@ fun DetailScreen(configdata: ConfigData, onUpdate: (ConfigData) -> Unit, onDelet
                     // ninguna forma de volver a pedir el permiso desde la app.
                     Button(onClick = {
                         storagePermissionLauncher.launch(
-                            android.Manifest.permission.READ_EXTERNAL_STORAGE
+                            android.Manifest.permission.WRITE_EXTERNAL_STORAGE
                         )
                     }) { Text(stringResource(R.string.auto_surface_grant)) }
                 }
