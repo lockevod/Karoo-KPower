@@ -723,4 +723,48 @@ class RideReplayTest {
                 a.lbl, sel.size, rk, mk, 100.0 * mk / rk - 100.0, tot))
         }
     }
+
+    /**
+     * TERCER fixture, y el que faltaba: 2026-08-19, 80,7 km con solo 715 m (0,9 % medio) y
+     * **62,7 % de las muestras en llano**, frente al 8 % de las dos marchas de MTB. Aqui el cubo
+     * que concentra el residuo deja de ser marginal y pasa a ser la señal principal, que es la
+     * condicion que `mem:bias-lives-in-flat-and-descent` ponia para poder atacarlo.
+     *
+     * RESULTADO: el deficit de llano NO se reproduce. A 82 kg el llano da **+4,0 %** (10.465
+     * muestras, 1.262 kJ — el cubo dominante), no el -21 % del 20-sep. Total +0,9 %, RMSE 46,5 W,
+     * el mejor de los tres fixtures. Conclusion: el -21 % del 20-sep es del TERRENO MTB, no de la
+     * pendiente llana, y la explicacion "estructural, el modelo no puede ver la potencia en llano"
+     * queda RETIRADA.
+     *
+     * Sobre la bici: se replica con los coeficientes de "Spark" (la unica configurada). Que salga
+     * +0,9 % es a la vez el resultado y la verificacion — con una bici de carretera real, unos
+     * coeficientes de MTB knobby a 1,4 bar habrian sobrestimado muchisimo, no quedado en +1 %.
+     */
+    @Test
+    fun `19-ago la marcha llana pone a prueba el residuo`() {
+        val ticks = load("ride-2026-08-19-road.csv")
+        val idx = ticks.indices.filter { ticks[it].realW != null }
+        val real = idx.map { ticks[it].realW!! }
+        println("=== 19-ago: 80,7 km / 715 m, 62,7 %% llano ===")
+        for (total in listOf(82.0, 85.0)) {
+            val slopes = DoubleArray(ticks.size)
+            val e = replay(ticks, total - BIKE_MASS, slopesOut = slopes)
+            val model = idx.map { e[it] }
+            val err = real.indices.map { model[it] - real[it] }
+            println("  --- masa %.0f kg: trabajo %+.1f %%  sesgo %+.1f W  RMSE %.1f W  r(1s)=%.3f".format(
+                total, 100.0 * model.sum() / real.sum() - 100.0, err.average(),
+                sqrt(err.sumOf { it * it } / err.size), corr(real, model)))
+            for ((lo, hi, lbl) in listOf(
+                Triple(-99.0, -2.0, "bajada"), Triple(-2.0, 2.0, "llano"),
+                Triple(2.0, 6.0, "sub2-6"), Triple(6.0, 99.0, "sub>6"),
+            )) {
+                val sel = idx.indices.filter { slopes[idx[it]] >= lo && slopes[idx[it]] < hi }
+                if (sel.size < 30) continue
+                val rk = sel.sumOf { real[it] } / 1000.0
+                val mk = sel.sumOf { model[it] } / 1000.0
+                println("      %-8s n=%5d  real=%6.1f kJ  est=%6.1f kJ  -> %+6.1f %%".format(
+                    lbl, sel.size, rk, mk, 100.0 * mk / rk - 100.0))
+            }
+        }
+    }
 }
