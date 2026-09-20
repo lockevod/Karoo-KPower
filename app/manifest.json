@@ -3,10 +3,10 @@
   "packageName": "com.enderthor.kpower",
   "latestApkUrl": "https://github.com/lockevod/Karoo-KPower/releases/latest/download/kpower.apk",
   "iconUrl": "https://github.com/lockevod/Karoo-KPower/releases/latest/download/karoo-power_hr.png",
-  "latestVersion": "1.9.5",
-  "latestVersionCode": 202603261,
+  "latestVersion": "3.0.0",
+  "latestVersionCode": 202609071,
   "developer": "Enderthor",
-  "description": "This extension for Karoo devices adds a device simulates a virtual power meter.",
-  "releaseNotes": "Break change: You need to uninstall current version (if it's < 1.9.5) and install the new one. Bump extensions to 1.1.9.Minor improvements.",
-  "tags": "Performance,Health"
+  "description": "Adds a virtual power meter to your Karoo, estimating power from a physics model when you don't have a real power meter. With a real ANT+ meter, it records the Cycling Dynamics the Karoo can't.",
+  "releaseNotes": "More accurate power: fresher grade + auto surface from offline maps. New: multi-bike per ride profile, real ANT+ meter with Cycling Dynamics, power offset. Less battery use. The weight field now means bike + gear — re-check yours. Coming from <1.9.5? Uninstall first.",
+  "tags": ["entertainment","health","performance"]
 }

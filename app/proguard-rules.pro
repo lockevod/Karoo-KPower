@@ -102,3 +102,15 @@
 -keepclassmembers class * {
     @androidx.compose.** *;
 }
+
+# mapsforge (offline map reading for live surface detection). Keep the reader API we
+# call and silence transitive desktop/XmlPull references R8 can't resolve on Android.
+-keep class org.mapsforge.** { *; }
+-dontwarn org.mapsforge.**
+-dontwarn java.awt.**
+-dontwarn javax.xml.stream.**
+-dontwarn org.kxml2.**
+
+# ANT+ plugin libraries
+-keep class com.dsi.ant.** { *; }
+-dontwarn com.dsi.ant.**

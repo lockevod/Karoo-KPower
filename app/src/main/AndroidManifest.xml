@@ -1,6 +1,54 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
+    <!-- Lectura de los mapfiles offline del Karoo (/offline/maps/*.map) para detectar
+         la superficie OSM bajo el ciclista. Sin permiso o sin mapfiles, la feature
+         degrada a "Unknown" y se usa el preset.
+
+         Hace falta WRITE, no basta READ, y NO es por escribir nada. El Karoo bind-montea
+         /storage/emulated/0/offline aparte del resto de /sdcard, con gid=1015 (sdcard_rw) y
+         mask=6, dentro del espacio de nombres de cada app (/storage/emulated/0/offline y sus
+         gemelos bajo /mnt/user, /mnt/androidwritable y /mnt/installer). El volumen entero, en
+         cambio, se monta con gid=9997 (everybody). Asi que ese subarbol y solo ese queda en modo
+         0771 root:sdcard_rw, con cada .map en 0660 root:sdcard_rw. El platform.xml del dispositivo mapea READ_EXTERNAL_STORAGE
+         a gid sdcard_r (1028) y WRITE_EXTERNAL_STORAGE a sdcard_r mas sdcard_rw. Con solo READ la
+         app cae en "other", que tiene permiso de atravesar pero NO de listar el directorio, y
+         ninguno sobre los ficheros. Por eso SurfaceConditionReader veia dir.exists() a true y
+         listFiles() a null, y registraba "no readable mapfiles (0 candidates)" con spain.map
+         delante (salida del 2026-09-20, ruta entera en Unknown). Funciona porque targetSdk es 28
+         (almacenamiento heredado).
+
+         Comprobado en el dispositivo el 2026-09-20, por si alguien duda: de los 15 paquetes con
+         WRITE concedido, los 15 llevan el gid 1015 en su proceso vivo, y ninguno de los que solo
+         tienen READ lo lleva. Concediendo WRITE temporalmente a routegraph (que los declara pero
+         los tenia denegados) su proceso paso a Groups: 1015 1028 3003 9997, en el mismo dominio
+         SELinux untrusted_app_27 que KPower; se revoco despues, asi que esa linea ya no es
+         reproducible: la que si lo es son los 15 paquetes.
+
+         Y no es SELinux, aunque "no hay denials avc" NO lo demuestre: el DAC se evalua ANTES del
+         hook del LSM, asi que la app nunca llego a intentar el read y no podia haber denial. La
+         prueba buena es que KPower YA hace I/O de directorio sobre sdcardfs hoy, en
+         /storage/emulated/0/Android/data/com.enderthor.kpower, misma etiqueta u:object_r:sdcardfs:s0
+         y mismo dominio untrusted_app_27. La regla ya esta ejercitada. Y ese subarbol es sdcardfs
+         de verdad, no FUSE: /storage/emulated/0 es u:object_r:fuse:s0 con gid 9997 y
+         /storage/emulated/0/offline es u:object_r:sdcardfs:s0 con gid 1015, que es exactamente la
+         frontera de montaje. Lo sirve el kernel con las credenciales del llamante, sin pasar por
+         MediaProvider, y por eso el gid decide.
+
+         Los gids suplementarios los fija Zygote al hacer fork, pero NO hay que reiniciar a mano:
+         al cambiar los gids el sistema mata el uid (killUid GIDS_CHANGED) y el proceso re-forkea
+         ya con 1015. Medido en el Karoo el 2026-09-20: concedido el permiso, el pid murio en
+         menos de 2 s y volvio con Groups: 1015 1028 3003 9997. -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <!-- Para detectar si Headwind está instalado (Android 11+ oculta el resto de paquetes). -->
+    <queries>
+        <package android:name="de.timklge.karooheadwind" />
+        <!-- Android 11+ package visibility. The raw-ANT channel binds the ANT Radio Service. (The ANT+
+             Plugins Service / antpluginlib PCC is no longer used — discovery, identify and calibration
+             are all done on raw channels now, so com.dsi.ant.plugins.antplus is not queried.) -->
+        <package android:name="com.dsi.ant.service" />
+    </queries>
     <application
         android:name=".KpowerApplication"
         android:allowBackup="true"

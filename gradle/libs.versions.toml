@@ -1,5 +1,6 @@
 [versions]
 agp = "8.5.0"
+junit = "4.13.2"
 color = "1.3.0"
 datastorePreferences = "1.1.1"
 kotlin = "2.0.0"
@@ -7,16 +8,15 @@ kotlin = "2.0.0"
 androidxCore = "1.13.1"
 androidxLifecycle = "2.8.6"
 androidxActivity = "1.9.3"
-androidxComposeUi = "1.7.4"
+androidxComposeUi = "1.7.6"
 androidxComposeMaterial = "1.3.0"
-glance = "1.1.1"
 kotlinxSerializationJson = "1.7.3"
 lifecycleRuntimeKtx = "2.8.7"
 navigationRuntimeKtx = "2.8.4"
 navigationCompose = "2.8.4"
-cardview = "1.0.0"
-foundationAndroid = "1.7.2"
-foundationLayoutAndroid = "1.7.2"
+glance = "1.1.1"
+foundationAndroid = "1.7.6"
+foundationLayoutAndroid = "1.7.6"
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
@@ -24,6 +24,7 @@ jetbrains-kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = 
 compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 
 [libraries]
+junit = { module = "junit:junit", version.ref = "junit" }
 androidx-datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastorePreferences" }
 androidx-lifecycle-runtime-ktx = { module = "androidx.lifecycle:lifecycle-runtime-ktx", version.ref = "lifecycleRuntimeKtx" }
 color = { module = "com.maxkeppeler.sheets-compose-dialogs:color", version.ref = "color" }
@@ -41,17 +42,14 @@ androidx-compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling
 androidx-compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling", version.ref = "androidxComposeUi" }
 androidx-compose-material = { module = "androidx.compose.material3:material3", version.ref = "androidxComposeMaterial" }
 
-# Glance
 androidx-navigation-runtime-ktx = { group = "androidx.navigation", name = "navigation-runtime-ktx", version.ref = "navigationRuntimeKtx" }
 androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerializationJson" }
-androidx-cardview = { group = "androidx.cardview", name = "cardview", version.ref = "cardview" }
-androidx-glance-appwidget = { group = "androidx.glance", name = "glance-appwidget", version.ref = "glance" }
-androidx-glance-appwidget-preview = { module = "androidx.glance:glance-appwidget-preview", version.ref = "glance" }
-androidx-glance-preview = { group = "androidx.glance", name = "glance-preview", version.ref = "glance" }
 timber = { module = "com.jakewharton.timber:timber", version = "5.0.1" }
+mapsforge-map-reader = { module = "org.mapsforge:mapsforge-map-reader", version = "0.25.0" }
 androidx-foundation-android = { group = "androidx.compose.foundation", name = "foundation-android", version.ref = "foundationAndroid" }
 androidx-foundation-layout-android = { group = "androidx.compose.foundation", name = "foundation-layout-android", version.ref = "foundationLayoutAndroid" }
+androidx-glance-appwidget = { module = "androidx.glance:glance-appwidget", version.ref = "glance" }
 
 [bundles]
 androidx-lifeycle = ["androidx-lifecycle-runtime-compose", "androidx-lifecycle-viewmodel-compose"]
