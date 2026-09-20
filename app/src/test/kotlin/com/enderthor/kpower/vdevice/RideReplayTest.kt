@@ -479,6 +479,36 @@ class RideReplayTest {
                 m, m + BIKE_MASS, err.average(), sqrt(err.sumOf { it * it } / err.size),
                 100.0 * model.sum() / real.sum() - 100.0))
         }
+        // La masa NO lo explica todo. El dispositivo rodo con bikeMass 13 + perfil 69 = 82 kg y
+        // dio -4,9 % medido; el replay a 83,4 kg da -1,7 %, y la sensibilidad es ~1 %/kg, asi que
+        // 1,4 kg no pueden valer 3 puntos. La otra diferencia entre replay y dispositivo es la
+        // FUENTE DE PENDIENTE: aqui altitud, alli ruta (96 % de las muestras, src=route). A/B para
+        // separar las dos causas, a la masa REAL del dispositivo (67,6 + 14,4 = 82).
+        println("=== 20-sep: fuente de pendiente a la masa real del dispositivo (82 kg) ===")
+        for (src in listOf(GradeSrc.ALTITUDE, GradeSrc.KAROO_LEAD, GradeSrc.LEGACY)) {
+            val e = replay(ticks, 82.0 - BIKE_MASS, src)
+            val model = idx.map { e[it] }
+            val err = real.indices.map { model[it] - real[it] }
+            println("  %-19s sesgo=%+6.1f W  RMSE=%5.1f W  trabajo=%+5.1f %%  r(1s)=%.3f".format(
+                src.name, err.average(), sqrt(err.sumOf { it * it } / err.size),
+                100.0 * model.sum() / real.sum() - 100.0, corr(real, model)))
+        }
+
+        // Ni la masa ni la pendiente lo cierran del todo. La tercera palanca es powerLoss: 2,5 %
+        // es un valor de CARRETERA, y en MTB hay perdida que el modelo de Martin no tiene
+        // (transmision bajo carga, y sobre todo lo que se traga la suspension y el terreno roto).
+        // Inventario real del rider: bici 11 + pedales 0,4 + liquido 0,2 + bidones 1,45 +
+        // herramientas 0,5 + ropa 1,7 + casco 0,35 + movil 0,2 + Karoo 0,16 = 16,0 -> total 85 kg.
+        println("=== 20-sep: powerLoss a la masa real inventariada (85 kg) ===")
+        for (pl in listOf(0.025, 0.035, 0.045, 0.055)) {
+            val e = replay(ticks, 85.0 - BIKE_MASS, powerLoss = pl)
+            val model = idx.map { e[it] }
+            val err = real.indices.map { model[it] - real[it] }
+            println("  powerLoss %.1f %% -> sesgo=%+6.1f W  RMSE=%5.1f W  trabajo=%+5.1f %%".format(
+                pl * 100, err.average(), sqrt(err.sumOf { it * it } / err.size),
+                100.0 * model.sum() / real.sum() - 100.0))
+        }
+
         // El ajuste no separa masa de Crr por si solo, pero el termino aero NO depende de la masa:
         // si al subir la masa el Crr ajustado vuelve al configurado, era la masa.
         for (rm in listOf(RIDER_MASS, RIDER_MASS + 5.0, RIDER_MASS + 8.0)) {
