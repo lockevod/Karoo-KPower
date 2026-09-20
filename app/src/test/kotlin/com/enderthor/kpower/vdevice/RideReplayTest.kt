@@ -637,4 +637,68 @@ class RideReplayTest {
                 lbl, b.size, rk, mk, 100.0 * mk / rk - 100.0, mk - rk))
         }
     }
+
+    /**
+     * Tercera hipotesis para el residuo de llano, tras caer cadencia (r=+0,002) y rugosidad
+     * (r=-0,188, signo invertido): ATENUACION DE PENDIENTE en terreno ondulado. El cubo
+     * -2..+2 % es donde viven los toboganes. La cadena de pendiente suaviza, y como la velocidad
+     * CORRELACIONA con la pendiente (mas lento arriba, mas rapido abajo), atenuar theta mientras v
+     * varia no se cancela: m*g*v*sin(theta) pierde energia de forma asimetrica. En una subida
+     * sostenida el suavizado sigue bien la pendiente, por eso alli no falla.
+     *
+     * Si la hipotesis vale, el deficit del cubo llano debe MOVERSE al cambiar la cadena de
+     * pendiente. Si es insensible, queda descartada igual que las otras dos.
+     */
+    @Test
+    fun `20-sep el cubo llano frente a la cadena de pendiente`() {
+        val ticks = load("ride-2026-09-20-mtb.csv")
+        val idx = ticks.indices.filter { ticks[it].realW != null }
+        val real = idx.map { ticks[it].realW!! }
+        println("=== llano (-2..2 %) por cadena de pendiente, 85 kg, solo pedaleando ===")
+        // SEGUNDO FIXTURE para la decision pendiente de `mem:estimator-error-is-grade-lag`: sobre
+        // el 06-sep, L=4/tau=500 puntuaba mejor que el L=2/tau=1000 de produccion (RMSE 52,3 vs
+        // 58,8) y quedo anotado como "confirmar con un segundo fixture antes de tocar". Esta es la
+        // confirmacion y sale A FAVOR: 51,6 vs 57,0 W (-9,5 %), r(1s) 0,886 vs 0,853, r(30s) 0,987
+        // vs 0,978. Las dos marchas, con perfiles de terreno distintos, eligen el mismo ajuste.
+        // MATIZ: en ENERGIA del cubo llano el candidato es algo PEOR (-28,0 % vs -22,5 %), asi que
+        // mejora el instante y empeora un poco el agregado de ese cubo. Siguen siendo el mismo
+        // ciclista, la misma bici y la misma zona: no son marchas independientes.
+        run {
+            val r30 = { v: List<Double> -> (29 until v.size).map { i -> v.subList(i - 29, i + 1).average() } }
+            println("=== 20-sep: sintonia del lead (la decision pendiente) ===")
+            for ((lbl, lead, tau) in listOf(
+                Triple("produccion L2 t1000", 2.0, 1_000.0),
+                Triple("candidato  L4 t500", 4.0, 500.0),
+            )) {
+                val e = replay(ticks, 85.0 - BIKE_MASS, leadSeconds = lead, tauMs = tau)
+                val model = idx.map { e[it] }
+                val err = real.indices.map { model[it] - real[it] }
+                println("  %-22s RMSE=%5.1f W  r(1s)=%.3f  r(30s)=%.3f".format(
+                    lbl, sqrt(err.sumOf { it * it } / err.size),
+                    corr(real, model), corr(r30(real), r30(model))))
+            }
+        }
+
+        data class Arm(val lbl: String, val src: GradeSrc, val lead: Double?, val tau: Double?)
+        for (a in listOf(
+            Arm("altitud prod (L2 t1000)", GradeSrc.ALTITUDE, null, null),
+            Arm("altitud L4 t500", GradeSrc.ALTITUDE, 4.0, 500.0),
+            Arm("altitud SIN lead t1", GradeSrc.ALTITUDE, 0.0, 1.0),
+            Arm("karoo + lead", GradeSrc.KAROO_LEAD, null, null),
+            Arm("legacy", GradeSrc.LEGACY, null, null),
+        )) {
+            val slopes = DoubleArray(ticks.size)
+            val e = replay(ticks, 85.0 - BIKE_MASS, a.src, leadSeconds = a.lead, tauMs = a.tau,
+                slopesOut = slopes)
+            val model = idx.map { e[it] }
+            val sel = idx.indices.filter {
+                slopes[idx[it]] < 2.0 && (ticks[idx[it]].cadence ?: 0.0) > 0
+            }
+            val rk = sel.sumOf { real[it] } / 1000.0
+            val mk = sel.sumOf { model[it] } / 1000.0
+            val tot = 100.0 * model.sum() / real.sum() - 100.0
+            println("  %-26s n=%4d  real=%5.1f kJ  est=%5.1f kJ  -> %+6.1f %%   (marcha entera %+5.1f %%)".format(
+                a.lbl, sel.size, rk, mk, 100.0 * mk / rk - 100.0, tot))
+        }
+    }
 }
