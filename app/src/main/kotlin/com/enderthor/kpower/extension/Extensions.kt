@@ -72,6 +72,7 @@ import kotlinx.coroutines.flow.flow
 
 
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.retryWhen
 
@@ -112,17 +113,24 @@ val jsonWithUnknownKeys = Json {
 /** Every reader goes through these: a storage IOException (busy eMMC, a file the corruption handler is
  *  replacing) retries instead of terminating the flow — and, in a collector without its own catch,
  *  killing the process.
- *  [emptyWhileFailing]: emit empty Preferences once on the first failure, then keep retrying. Right for
- *  the runtime caches (empty = "no cache", and the ride-gate combine must not wait on a cache), wrong
- *  for settings: empty there would hand the auto-saving bike editor default bikes to save. */
-internal fun DataStore<Preferences>.safeData(emptyWhileFailing: Boolean): Flow<Preferences> =
-    data.retryWhen { cause, attempt ->
-        if (cause !is java.io.IOException) return@retryWhen false
-        Timber.w(cause, "DataStore read failed; retrying")
-        if (emptyWhileFailing && attempt == 0L) emit(emptyPreferences())
-        delay(1_000)
-        true
-    }
+ *  [emptyWhileFailing]: if the store fails before this collector has seen ANY snapshot, emit empty
+ *  Preferences once so it isn't left waiting, then keep retrying. Right for the runtime caches (empty =
+ *  "no cache", and the ride-gate combine must not wait on a cache). Never after real data: a failure
+ *  mid-stream keeps the last value downstream — flipping an active scan stamp to "inactive" and back
+ *  would reconnect and drop the ANT meter mid-scan. Wrong for settings at any point: empty there would
+ *  hand the auto-saving bike editor default bikes to save. */
+internal fun DataStore<Preferences>.safeData(emptyWhileFailing: Boolean): Flow<Preferences> = flow {
+    var emitted = false
+    data.onEach { emitted = true }
+        .retryWhen { cause, _ ->
+            if (cause !is java.io.IOException) return@retryWhen false
+            Timber.w(cause, "DataStore read failed; retrying")
+            if (emptyWhileFailing && !emitted) { emitted = true; emit(emptyPreferences()) }
+            delay(1_000)
+            true
+        }
+        .collect { emit(it) }
+}
 val Context.settingsData: Flow<Preferences> get() = dataStore.safeData(emptyWhileFailing = false)
 private val Context.runtimeData: Flow<Preferences> get() = runtimeStore.safeData(emptyWhileFailing = true)
 

@@ -340,4 +340,16 @@ class SettingsBackupTest {
         reads = 0
         assertEquals(real, flaky.safeData(emptyWhileFailing = false).first())
     }
+
+    @Test
+    fun `a runtime failure after real data keeps the last value, no empty flip`() = runBlocking {
+        var reads = 0
+        val stamp = mutablePreferencesOf(meterScreen to 42L)
+        val flaky = object : DataStore<Preferences> {
+            override val data = flow<Preferences> { emit(stamp); if (++reads == 1) throw IOException("busy") }
+            override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences) = error("unused")
+        }
+        // Real stamp, failure, recovery re-reads the same stamp: never an empty snapshot in between.
+        assertEquals(listOf<Preferences>(stamp, stamp), flaky.safeData(emptyWhileFailing = true).take(2).toList())
+    }
 }
