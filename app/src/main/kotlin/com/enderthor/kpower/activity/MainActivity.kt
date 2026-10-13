@@ -87,8 +87,12 @@ private val Context.settingsBackup: DataStore<Preferences> by preferencesDataSto
 val Context.dataStore: DataStore<Preferences> by preferencesDataStore(
     name = "settings",
     corruptionHandler = ReplaceFileCorruptionHandler { mutablePreferencesOf(SETTINGS_RESET_AT to System.currentTimeMillis()) },
-    produceMigrations = { ctx -> listOf(RestoreSettingsBackup(ctx.settingsBackup), DropChurnKeys) }
+    produceMigrations = { ctx -> settingsMigrations(ctx.settingsBackup) }
 )
+
+/** The settings store's migrations, in order. A function so the test runs exactly this list. */
+internal fun settingsMigrations(backup: DataStore<Preferences>): List<DataMigration<Preferences>> =
+    listOf(RestoreSettingsBackup(backup), DropChurnKeys)
 
 /** Ride-time caches (weather, stats, last GPS fix, meter-screen stamp) live HERE, not in settings, so
  *  the rider's setup is only rewritten when they change it — every in-ride write to settings was one
@@ -195,14 +199,18 @@ internal suspend fun mirrorSettings(source: DataStore<Preferences>, backup: Data
                     // Expires, so an unreadable backup cannot freeze the mirror indefinitely — after a
                     // day the rider's current settings are the truth and deserve backing up.
                     if (durable.resetPending()) return@collect
+                    // A failed write must retry on its own: settings may not emit again for the rest of
+                    // the ride (the ride-time churn that used to re-trigger this lives in runtimeStore
+                    // now). Throwing re-enters the loop below, which re-collects the LATEST snapshot.
                     if (mirrorSnapshot(backup, durable)) lastMirrored = durable
+                    else throw java.io.IOException("Settings backup write failed; retrying")
                 }
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
             // Throwable: mirrorStarted is never reset, so if this coroutine dies the process has no
             // backup for the rest of its life — and silently. The loop below retries instead.
-            Timber.w(t, "Primary settings read failed; preserving backup and retrying")
+            Timber.w(t, "Settings mirror failed (read or backup write); preserving backup and retrying")
         }
         delay(1_000)
     }

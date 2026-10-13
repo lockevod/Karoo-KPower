@@ -8,6 +8,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 
@@ -110,12 +111,20 @@ val jsonWithUnknownKeys = Json {
 
 /** Every reader goes through these: a storage IOException (busy eMMC, a file the corruption handler is
  *  replacing) retries instead of terminating the flow — and, in a collector without its own catch,
- *  killing the process. Not an empty fallback: that would hand the editor default bikes to auto-save. */
-private fun DataStore<Preferences>.safeData(): Flow<Preferences> = data.retryWhen { cause, _ ->
-    (cause is java.io.IOException).also { if (it) { Timber.w(cause, "DataStore read failed; retrying"); delay(1_000) } }
-}
-val Context.settingsData: Flow<Preferences> get() = dataStore.safeData()
-private val Context.runtimeData: Flow<Preferences> get() = runtimeStore.safeData()
+ *  killing the process.
+ *  [emptyWhileFailing]: emit empty Preferences once on the first failure, then keep retrying. Right for
+ *  the runtime caches (empty = "no cache", and the ride-gate combine must not wait on a cache), wrong
+ *  for settings: empty there would hand the auto-saving bike editor default bikes to save. */
+internal fun DataStore<Preferences>.safeData(emptyWhileFailing: Boolean): Flow<Preferences> =
+    data.retryWhen { cause, attempt ->
+        if (cause !is java.io.IOException) return@retryWhen false
+        Timber.w(cause, "DataStore read failed; retrying")
+        if (emptyWhileFailing && attempt == 0L) emit(emptyPreferences())
+        delay(1_000)
+        true
+    }
+val Context.settingsData: Flow<Preferences> get() = dataStore.safeData(emptyWhileFailing = false)
+private val Context.runtimeData: Flow<Preferences> get() = runtimeStore.safeData(emptyWhileFailing = true)
 
 // Ride-time caches → runtimeStore (see there). The rest of the keys are settings → dataStore.
 val currentDataKey = stringPreferencesKey("current")
@@ -493,7 +502,7 @@ suspend fun KarooSystemService.httpRequest(
  *  personal data. Created once and persisted. */
 val installIdKey = stringPreferencesKey("installId")
 suspend fun Context.getOrCreateInstallId(): String {
-    try { dataStore.data.first()[installIdKey] } catch (_: java.io.IOException) { null }?.let { return it }
+    dataStore.data.first()[installIdKey]?.let { return it }
     val id = java.util.UUID.randomUUID().toString().replace("-", "").take(8)
     runCatching { dataStore.edit { it[installIdKey] = id } }
     return id

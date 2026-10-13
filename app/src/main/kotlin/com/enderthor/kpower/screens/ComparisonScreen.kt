@@ -121,8 +121,8 @@ fun ComparisonScreen() {
 
     // Heartbeat ONLY while actively scanning: refreshes the "radio active" stamp every ~45 s so a scan that
     // runs longer than the backstop can't expire the window mid-scan (which would let the service re-grab
-    // the radio). Gated on `scanning` so merely browsing the saved list writes NOTHING — a write re-emits
-    // the whole DataStore (incl. a meters JSON decode in the extension) for nothing. When scanning stops the
+    // the radio). Gated on `scanning` so merely browsing the saved list writes NOTHING — each write is an
+    // fsync'd file rewrite (runtimeStore) and re-arms the service's ride gate. When scanning stops the
     // loop ends → the stamp goes stale within the backstop and the meter reconnects. Interval ≤ backstop/2
     // so one missed beat can't expire the window. (The Karoo's own sensorservice doesn't release channels to
     // scan at all — it relies on search-priority preemption + retry; this is our belt-and-suspenders.)
@@ -206,8 +206,8 @@ fun ComparisonScreen() {
                             uploadPairingLog(ctx, karooSystem, diagnosticLog, "scan", scanLogOffset)
                         } else {
                             // The radio-active stamp is written by LaunchedEffect(scanning)'s first pass (it
-                            // fires the moment scanning flips true), so don't ALSO write it here — that was two
-                            // full DataStore writes (+ two meters-JSON decodes in the service) per scan tap.
+                            // fires the moment scanning flips true), so don't ALSO write it here — that would be
+                            // two store writes per scan tap.
                             scanLogOffset = pairingLogOffset()   // upload only what this scan session adds
                             Timber.i("===== ANT SCAN START =====")
                             antManager.startScan()
