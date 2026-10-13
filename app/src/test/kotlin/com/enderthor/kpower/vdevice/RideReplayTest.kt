@@ -778,11 +778,12 @@ class RideReplayTest {
      * CUARTO fixture, el primero con la superficie VIVA funcionando (2026-09-24, MTB 17,4 km /
      * 570 m): la columna `surface` es la superficie efectiva que usó el motor, sacada del log.
      *
-     * Barrido del NIVEL de rodadura. Los factores de producción mantienen las proporciones de la
-     * literatura (estándar 1,24x y grava 1,40x el asfalto; Meyer et al. 2016 da 1,20x y 1,50x),
-     * pero el asfalto queda en 0,75x el Crr base. Aquí se sube ligeramente y se mira terreno a
-     * terreno. Los otros tres fixtures se ruedan con el preset GRAVEL (sin superficie viva), así
-     * que solo les afectan los brazos que tocan GRAVEL.
+     * Barrido del NIVEL de rodadura. Se hizo con el asfalto en 0,75x el Crr base (estándar 1,24x y
+     * grava 1,40x el asfalto, proporciones de la literatura; Meyer et al. 2016 da 1,20x y 1,50x).
+     * De aquí salió el asfalto 0,95 que producción tiene EN PRUEBA (ver KarooSurface), así que
+     * ahora "produccion" ya es 0,95 y el brazo "asfalto 0,75" conserva la referencia anterior. Los
+     * otros tres fixtures se ruedan con el preset GRAVEL (sin superficie viva), así que solo les
+     * afectan los brazos que tocan GRAVEL.
      */
     @Test
     fun `barrido del nivel de rodadura por superficie`() {
@@ -792,8 +793,8 @@ class RideReplayTest {
         fun scaled(k: Double) = prod.mapValues { it.value * k }
         val arms = listOf(
             Arm("produccion", prod),
+            Arm("asfalto 0,75", asph(0.75)),   // valor anterior a la prueba de campo
             Arm("asfalto 0,85", asph(0.85)),
-            Arm("asfalto 0,95", asph(0.95)),
             Arm("asfalto 1,05", asph(1.05)),
             Arm("todo x1,10", scaled(1.10)),
             Arm("todo x1,20", scaled(1.20)),

@@ -253,7 +253,7 @@ suspend fun updateAntMeters(
  * Decodifica un documento de DataStore deduplicando por la CADENA CRUDA, no por el objeto decodificado.
  *
  * `dataStore.data` reemite el snapshot COMPLETO de Preferences en cada escritura de CUALQUIER clave
- * (un toggle, un medidor, el sello de la pantalla de medidores...). Con el decode aguas arriba
+ * (un toggle, un medidor, una bici guardada...). Con el decode aguas arriba
  * del dedup, cada una de esas escrituras reparseaba este documento para cada colector vivo; leyendo
  * primero la cadena, una escritura ajena cuesta una búsqueda en un mapa y un `String.equals` (que
  * además acierta por identidad, porque DataStore devuelve la misma instancia).
