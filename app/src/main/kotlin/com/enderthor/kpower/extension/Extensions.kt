@@ -4,6 +4,8 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
 
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
@@ -12,6 +14,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 
 import com.enderthor.kpower.BuildConfig
 import com.enderthor.kpower.activity.dataStore
+import com.enderthor.kpower.activity.runtimeStore
 import com.enderthor.kpower.data.GpsCoordinates
 import com.enderthor.kpower.data.KnownProfile
 import com.enderthor.kpower.data.OpenMeteoCurrentWeatherResponse
@@ -69,6 +72,7 @@ import kotlinx.coroutines.flow.flow
 
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.retryWhen
 
 import kotlinx.coroutines.flow.single
 import kotlinx.coroutines.flow.timeout
@@ -104,6 +108,16 @@ val jsonWithUnknownKeys = Json {
     isLenient = true
 }
 
+/** Every reader goes through these: a storage IOException (busy eMMC, a file the corruption handler is
+ *  replacing) retries instead of terminating the flow — and, in a collector without its own catch,
+ *  killing the process. Not an empty fallback: that would hand the editor default bikes to auto-save. */
+private fun DataStore<Preferences>.safeData(): Flow<Preferences> = data.retryWhen { cause, _ ->
+    (cause is java.io.IOException).also { if (it) { Timber.w(cause, "DataStore read failed; retrying"); delay(1_000) } }
+}
+val Context.settingsData: Flow<Preferences> get() = dataStore.safeData()
+private val Context.runtimeData: Flow<Preferences> get() = runtimeStore.safeData()
+
+// Ride-time caches → runtimeStore (see there). The rest of the keys are settings → dataStore.
 val currentDataKey = stringPreferencesKey("current")
 val statsKey = stringPreferencesKey("stats")
 val lastKnownPositionKey = stringPreferencesKey("lastKnownPosition")
@@ -118,7 +132,7 @@ suspend fun saveComparisonMode(context: Context, enabled: Boolean) {
 
 /** Toggle global (off por defecto): expone campos custom + escribe FIT de comparación. */
 fun Context.comparisonModeFlow(): Flow<Boolean> =
-    dataStore.data.map { it[comparisonModeKey] ?: false }.distinctUntilChanged()
+    settingsData.map { it[comparisonModeKey] ?: false }.distinctUntilChanged()
 
 val diagnosticLogKey = booleanPreferencesKey("diagnosticLog")
 
@@ -128,7 +142,7 @@ suspend fun saveDiagnosticLog(context: Context, enabled: Boolean) {
 
 /** Toggle global (off por defecto): escribe logs de diagnóstico a fichero (FileLogTree). */
 fun Context.diagnosticLogFlow(): Flow<Boolean> =
-    dataStore.data.map { it[diagnosticLogKey] ?: false }.distinctUntilChanged()
+    settingsData.map { it[diagnosticLogKey] ?: false }.distinctUntilChanged()
 
 val batteryAlertKey = booleanPreferencesKey("batteryAlert")
 
@@ -139,7 +153,7 @@ suspend fun saveBatteryAlert(context: Context, enabled: Boolean) {
 /** Toggle global (off por defecto): dispara un InRideAlert cuando la batería del meter grabado baja
  *  (LOW) y otro si pasa a crítica (CRITICAL), como mucho uno por nivel y ride. */
 fun Context.batteryAlertFlow(): Flow<Boolean> =
-    dataStore.data.map { it[batteryAlertKey] ?: false }.distinctUntilChanged()
+    settingsData.map { it[batteryAlertKey] ?: false }.distinctUntilChanged()
 
 // ── Meter-management screen activity signal (cross-component, via DataStore) ──────────────────────
 // ComparisonScreen and the extension service hold SEPARATE AntPowerManager instances but share the one
@@ -162,13 +176,13 @@ val meterScreenActiveKey = longPreferencesKey("meterScreenActiveAt")
 /** Mark KPower's meter-management screen active (using the ANT radio) or not. `active=true` stamps now;
  *  `false` clears. Call true on screen enter AND on each scan start (refreshes the backstop window). */
 suspend fun saveMeterScreenActive(context: Context, active: Boolean) {
-    context.dataStore.edit { it[meterScreenActiveKey] = if (active) System.currentTimeMillis() else 0L }
+    context.runtimeStore.edit { it[meterScreenActiveKey] = if (active) System.currentTimeMillis() else 0L }
 }
 
 /** Raw "last marked active" stamp (0 = inactive), with no freshness/expiry logic of its own — building
  *  block for [meterScreenActiveFlow], which is what callers should collect. */
 fun Context.meterScreenActiveAtFlow(): Flow<Long> =
-    dataStore.data.map { it[meterScreenActiveKey] ?: 0L }.distinctUntilChanged()
+    runtimeData.map { it[meterScreenActiveKey] ?: 0L }.distinctUntilChanged()
 
 /** Self-expiring "is the meter-management screen active" signal. `flatMapLatest` re-arms on every new
  *  stamp (including a heartbeat re-stamp): a cleared (0L) or stale/future stamp emits `false`
@@ -222,7 +236,7 @@ suspend fun updateAntMeters(
  * Decodifica un documento de DataStore deduplicando por la CADENA CRUDA, no por el objeto decodificado.
  *
  * `dataStore.data` reemite el snapshot COMPLETO de Preferences en cada escritura de CUALQUIER clave
- * (la posición GPS una vez por minuto, un update de stats, un toggle...). Con el decode aguas arriba
+ * (un toggle, un medidor, el sello de la pantalla de medidores...). Con el decode aguas arriba
  * del dedup, cada una de esas escrituras reparseaba este documento para cada colector vivo; leyendo
  * primero la cadena, una escritura ajena cuesta una búsqueda en un mapa y un `String.equals` (que
  * además acierta por identidad, porque DataStore devuelve la misma instancia).
@@ -256,7 +270,7 @@ internal fun <R, T> Flow<R>.decodeDeduped(
 
 /** Ver [decodeDeduped]: dedup por la cadena cruda, decode sólo cuando esta clave cambia de verdad. */
 fun Context.antMetersFlow(): Flow<List<com.enderthor.kpower.ant.SavedMeter>> =
-    dataStore.data.map { it[antMetersKey] ?: "[]" }
+    settingsData.map { it[antMetersKey] ?: "[]" }
         .decodeDeduped(
             decode = { jsonWithUnknownKeys.decodeFromString<List<com.enderthor.kpower.ant.SavedMeter>>(it) },
             onError = { Timber.e(it, "Failed to read antMeters"); emptyList() },
@@ -270,7 +284,7 @@ suspend fun saveKnownProfiles(context: Context, profiles: List<KnownProfile>) {
 
 /** Ver [decodeDeduped]. */
 fun Context.knownProfilesFlow(): Flow<List<KnownProfile>> =
-    dataStore.data.map { it[knownProfilesKey] ?: "[]" }
+    settingsData.map { it[knownProfilesKey] ?: "[]" }
         .decodeDeduped(
             decode = { jsonWithUnknownKeys.decodeFromString<List<KnownProfile>>(it) },
             onError = { Timber.e(it, "Failed to read knownProfiles"); emptyList() },
@@ -308,14 +322,14 @@ fun queueSavePreferences(context: Context, configDatas: List<ConfigData>) {
 }
 
 suspend fun saveStats(context: Context, stats: HeadwindStats) {
-    context.dataStore.edit { t ->
+    context.runtimeStore.edit { t ->
         t[statsKey] = Json.encodeToString(stats)
     }
 }
 
 
 suspend fun saveCurrentData(context: Context, forecast: OpenMeteoCurrentWeatherResponse) {
-    context.dataStore.edit { t ->
+    context.runtimeStore.edit { t ->
         t[currentDataKey] = Json.encodeToString(forecast)
     }
 }
@@ -342,7 +356,7 @@ fun KarooSystemService.streamDataFlow(dataTypeId: String): Flow<StreamState> {
 /** Ver [decodeDeduped]. Este era el peor fan-out: la respuesta meteorológica se deserializaba una
  *  vez por colector vivo en cada escritura de preferencias no relacionada. */
 fun Context.streamCurrentWeatherData(): Flow<OpenMeteoCurrentWeatherResponse> {
-    return dataStore.data.map { it[currentDataKey] }
+    return runtimeData.map { it[currentDataKey] }
         .decodeDeduped(
             decode = { data -> data?.let { jsonWithUnknownKeys.decodeFromString<OpenMeteoCurrentWeatherResponse>(it) } },
             onError = { Timber.e("Failed to stream current weather data $it"); null },
@@ -361,7 +375,7 @@ fun Context.streamCurrentWeatherData(): Flow<OpenMeteoCurrentWeatherResponse> {
 
 /** Ver [decodeDeduped]. */
 fun Context.streamStats(): Flow<HeadwindStats> {
-    return dataStore.data.map { it[statsKey] ?: HeadwindStats.defaultStats }
+    return runtimeData.map { it[statsKey] ?: HeadwindStats.defaultStats }
         .decodeDeduped(
             decode = { jsonWithUnknownKeys.decodeFromString<HeadwindStats>(it) },
             onError = {
@@ -374,7 +388,7 @@ fun Context.streamStats(): Flow<HeadwindStats> {
 /** Ver [decodeDeduped]. La lista de bicis es el documento más grande del store y el estimador
  *  mantiene un colector sobre ella durante toda la marcha. */
 fun Context.loadPreferencesFlow(): Flow<List<ConfigData>> {
-    return dataStore.data.map { it[preferencesKey] ?: defaultConfigData }
+    return settingsData.map { it[preferencesKey] ?: defaultConfigData }
         .decodeDeduped(
             decode = { jsonWithUnknownKeys.decodeFromString<List<ConfigData>>(it) },
             onError = {
@@ -479,7 +493,7 @@ suspend fun KarooSystemService.httpRequest(
  *  personal data. Created once and persisted. */
 val installIdKey = stringPreferencesKey("installId")
 suspend fun Context.getOrCreateInstallId(): String {
-    dataStore.data.first()[installIdKey]?.let { return it }
+    try { dataStore.data.first()[installIdKey] } catch (_: java.io.IOException) { null }?.let { return it }
     val id = java.util.UUID.randomUUID().toString().replace("-", "").take(8)
     runCatching { dataStore.edit { it[installIdKey] = id } }
     return id
@@ -649,10 +663,8 @@ suspend fun KarooSystemService.updateLastKnownGps(
 }
 
 suspend fun Context.getLastKnownPosition(): GpsCoordinates? {
-    val settingsJson = dataStore.data.first()
-
     try {
-        val lastKnownPositionString = settingsJson[lastKnownPositionKey] ?: return null
+        val lastKnownPositionString = runtimeStore.data.first()[lastKnownPositionKey] ?: return null
         val lastKnownPosition = jsonWithUnknownKeys.decodeFromString<GpsCoordinates>(
             lastKnownPositionString
         )
@@ -692,7 +704,7 @@ suspend fun saveLastKnownPosition(context: Context, gpsCoordinates: GpsCoordinat
     Timber.i("Saving last known position: $gpsCoordinates")
 
     try {
-        context.dataStore.edit { t ->
+        context.runtimeStore.edit { t ->
             t[lastKnownPositionKey] = Json.encodeToString(gpsCoordinates)
         }
     } catch(e: Throwable){

@@ -287,4 +287,18 @@ class SettingsBackupTest {
         assertNull("marker cleared once we know what the backup held", migrated[resetAt])
         scope.cancel()
     }
+
+    @Test
+    fun `old churn keys are dropped from settings, settings kept`() = runBlocking {
+        val scope = CoroutineScope(Job())
+        val old = store("old", scope)
+        old.edit { it[profiles] = "[bike]"; it[position] = "{gps}"; it[meterScreen] = 42L }
+        scope.cancel()
+        val scope2 = CoroutineScope(Job())
+        val reopened = store("old", scope2, listOf(DropChurnKeys)).data.first()
+        assertEquals("[bike]", reopened[profiles])
+        assertNull(reopened[position])
+        assertNull(reopened[meterScreen])
+        scope2.cancel()
+    }
 }
