@@ -14,6 +14,10 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.flow.toList
+import com.enderthor.kpower.extension.safeData
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
@@ -286,5 +290,66 @@ class SettingsBackupTest {
         assertEquals("[6593]", migrated[meters])
         assertNull("marker cleared once we know what the backup held", migrated[resetAt])
         scope.cancel()
+    }
+
+    @Test
+    fun `production migrations drop old churn keys and keep settings`() = runBlocking {
+        val scope = CoroutineScope(Job())
+        val old = store("old", scope)
+        old.edit { it[profiles] = "[bike]"; it[position] = "{gps}"; it[meterScreen] = 42L }
+        val backup = store("old_backup", scope)
+        backup.edit { it[profiles] = "[stale-bike]" }
+        scope.coroutineContext[Job]!!.cancelAndJoin()   // release the files before reopening them
+        val scope2 = CoroutineScope(Job())
+        val reopened = store("old", scope2, settingsMigrations(store("old_backup", scope2))).data.first()
+        assertEquals("present settings are not replaced by the backup", "[bike]", reopened[profiles])
+        assertNull(reopened[position])
+        assertNull(reopened[meterScreen])
+        scope2.cancel()
+    }
+
+    @Test
+    fun `a failed backup write retries without another settings change`() = runBlocking {
+        val scope = CoroutineScope(Job())
+        val source = store("src", scope)
+        source.edit { it[profiles] = "[bike]" }
+        var writes = 0
+        var stored: Preferences = emptyPreferences()
+        val flakyBackup = object : DataStore<Preferences> {
+            override val data = flow { emit(stored) }
+            override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences {
+                if (++writes <= 3) throw IOException("busy")   // exhausts one mirrorSnapshot
+                return transform(stored).also { stored = it }
+            }
+        }
+        val mirror = scope.launch { mirrorSettings(source, flakyBackup) }
+        withTimeout(10_000) { while (stored[profiles] != "[bike]") kotlinx.coroutines.delay(50) }
+        mirror.cancel()
+        scope.cancel()
+    }
+
+    @Test
+    fun `runtime reads emit empty while failing, settings reads wait`() = runBlocking {
+        var reads = 0
+        val real = mutablePreferencesOf(profiles to "[bike]")
+        val flaky = object : DataStore<Preferences> {
+            override val data = flow<Preferences> { if (++reads == 1) throw IOException("busy"); emit(real) }
+            override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences) = error("unused")
+        }
+        assertEquals(listOf(emptyPreferences(), real), flaky.safeData(emptyWhileFailing = true).take(2).toList())
+        reads = 0
+        assertEquals(real, flaky.safeData(emptyWhileFailing = false).first())
+    }
+
+    @Test
+    fun `a runtime failure after real data keeps the last value, no empty flip`() = runBlocking {
+        var reads = 0
+        val stamp = mutablePreferencesOf(meterScreen to 42L)
+        val flaky = object : DataStore<Preferences> {
+            override val data = flow<Preferences> { emit(stamp); if (++reads == 1) throw IOException("busy") }
+            override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences) = error("unused")
+        }
+        // Real stamp, failure, recovery re-reads the same stamp: never an empty snapshot in between.
+        assertEquals(listOf<Preferences>(stamp, stamp), flaky.safeData(emptyWhileFailing = true).take(2).toList())
     }
 }
