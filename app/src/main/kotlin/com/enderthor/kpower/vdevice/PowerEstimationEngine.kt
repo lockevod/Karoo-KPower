@@ -183,6 +183,7 @@ class PowerEstimationEngine(
         val cadenceGate = CadenceGate()
         var movingTicks = 0
         var lastGoodElevation = 0.0
+        val gpsMotion = GpsMotion()
     }
     // ponytail: 0.0 here is a MEASUREMENT masquerading as "unknown" — with no elevation stream AND no
     // weather pressure, airDensity falls back to sea-level ISA and over-estimates aero ~25 % at 2000 m.
@@ -406,8 +407,18 @@ class PowerEstimationEngine(
                 }
             }
 
+            // Posición GPS avanzando = se mueve (ver GpsMotion). Solo con fix real (orientation != null):
+            // la posición cacheada pre-fix no cuenta. NO usar la cadencia aquí: con el GPS perdido
+            // (túnel, rodillo en casa) mantendría viva la última velocidad GPS → potencia fantasma.
+            launch {
+                location.filter { it.orientation != null }
+                    .collect { st.gpsMotion.update(it.lat, it.lng, System.currentTimeMillis()) }
+            }
+
             combine(
-                karooSystem.speedStreamWithStaleness(),
+                karooSystem.speedStreamWithStaleness(
+                    isMoving = { st.gpsMotion.isMoving(System.currentTimeMillis()) },
+                ),
                 karooSystem.streamDataMonitorFlow(DataType.Type.ELEVATION_GRADE),
                 karooSystem.streamDataMonitorFlow(DataType.Type.PRESSURE_ELEVATION_CORRECTION),
                 // noCheck skips the emit(initialState) path, so without a synthetic first emission this

@@ -882,22 +882,37 @@ internal fun monitorStreamData(
  *
  * NOTA: no aplicar distinctUntilChanged aguas arriba (rompería la detección,
  * por eso `streamDataMonitorFlow` se llama con applyDistinct=false para SPEED).
+ *
+ * [isMoving] = evidencia de movimiento que NO sale de la velocidad ni sigue viva con el GPS
+ * perdido (la posición GPS avanzando): un proxy basado en velocidad se alimentaría del propio 0
+ * forzado, y uno basado en cadencia mantendría la última velocidad GPS en un túnel o en rodillo.
  */
 fun KarooSystemService.speedStreamWithStaleness(
-    staleThresholdMs: Long = 5_000L
+    staleThresholdMs: Long = 5_000L,
+    isMoving: () -> Boolean = { false },
+): Flow<StreamState> =
+    streamDataMonitorFlow(DataType.Type.SPEED, applyDistinct = false)
+        .withSpeedStaleness(staleThresholdMs, isMoving)
+
+internal fun Flow<StreamState>.withSpeedStaleness(
+    staleThresholdMs: Long,
+    isMoving: () -> Boolean,
+    nowMs: () -> Long = System::currentTimeMillis,
 ): Flow<StreamState> = flow {
     var lastValue = Double.NaN
     var lastChangeMs = 0L
 
-    streamDataMonitorFlow(DataType.Type.SPEED, applyDistinct = false).collect { state ->
+    collect { state ->
         if (state is StreamState.Streaming) {
             val v = state.dataPoint.singleValue ?: 0.0
-            val now = System.currentTimeMillis()
+            val now = nowMs()
             if (v != lastValue || lastChangeMs == 0L) {
                 lastChangeMs = now
                 lastValue = v
             }
-            val stale = (now - lastChangeMs) > staleThresholdMs && v > 0.0
+            // Si consta que se mueve, un valor repetido es velocidad constante real (sensor de rueda
+            // cuantizado, salida 2026-10-25), no un GPS congelado: no se anula.
+            val stale = (now - lastChangeMs) > staleThresholdMs && v > 0.0 && !isMoving()
             if (stale) {
                 emit(
                     StreamState.Streaming(
