@@ -40,6 +40,13 @@ class LogReporterTest {
     }
 
     @Test
+    fun `map tile coordinates are redacted`() {
+        val r = LogReporter.redactForUpload("Surface: readMapData returned null for mapfile (12 MB) at tile 32412/24518")
+        assertFalse(r.contains("32412")); assertFalse(r.contains("24518"))
+        assertTrue(r.contains("tile •"))
+    }
+
+    @Test
     fun deviceAliasesStayDistinctPerMeterAndStableWithinTheFile() {
         val redacted = LogReporter.redactForUpload(
             """

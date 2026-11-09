@@ -35,6 +35,8 @@ object LogReporter {
     // `latitude=`, `longitude=`) → `=•`. Then sensor serials and the Karoo saved-device names.
     private val COORD = Regex("(lat|lng|lon|latitude|longitude)=-?\\d+(\\.\\d+)?")
     private val CLASSIFY_COORDS = Regex("classifyAt\\([^\\r\\n)]*\\)")
+    // Map tile x/y (z16 ≈ 0,5 km) is a location too: SurfaceConditionReader logs it on a mapfile miss.
+    private val TILE = Regex("\\btile \\d+/\\d+(/\\d+)?")
     private val CALIBRATION_START = Regex("(CALIBRATION START #\\d+) \\([^\\r\\n)]*\\)")
     private val IDENTITY_PAYLOAD = Regex("(PAGE 0x5[01] payload=)[0-9A-Fa-f ]+")
     private val ANT_DEVICE = Regex("\\bdev=(\\d+)")
@@ -102,6 +104,7 @@ object LogReporter {
     fun redactForUpload(content: String): String = aliasDeviceNumbers(
         content
             .replace(CLASSIFY_COORDS, "classifyAt(•,•)")
+            .replace(TILE, "tile •")
             .replace(CALIBRATION_START, "$1 (•)")
             .replace(IDENTITY_PAYLOAD, "$1•")
             .replace(COORD, "$1=•")
