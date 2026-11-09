@@ -5,6 +5,12 @@ watts from a physics model (slope + rolling resistance + real-air-density aero +
 drivetrain losses). And if you **do** own a real meter, KPower can read it to enrich the recorded FIT —
 with one important **pairing catch** (below).
 
+> **New in 3.0 (a big step up from 1.9.x):** a rebuilt estimator (low-lag grade from altitude and the
+> loaded route, acceleration term, real air density, tyre + live map surface rolling resistance, Simple
+> mode, one bike per Karoo profile, power offset) and **advanced cycling dynamics** with a real ANT+ meter
+> (torque, power phase, PCO, barycenter… written to the FIT). Dynamics are new — if something looks off,
+> **[send me the log](#found-a-problem)**. Full list: **[README](../README.md#whats-new-in-30--a-big-step-up-from-19x)**.
+
 > **The ANT+ rule:** a meter **can't** be read over ANT+ by the Karoo and KPower at the same time (they
 > share the one ANT+ radio; whichever locks it first keeps it, the other goes dark). To have KPower read it
 > **alongside** the Karoo, pair the meter to the Karoo over **BLE** (leaving ANT+ free for KPower). If your
@@ -70,6 +76,14 @@ With a real meter, KPower's value is in the **FIT**: torque, power phase, PCO, b
 Connect** shows native TE/PS/balance (if you paired the meter natively), but KPower's own fields (torque,
 power phase, PCO, barycenter) come through as separate "developer" charts, not inside its "Cycling
 Dynamics" section — no power-phase arc (SDK limitation, not a bug). **Strava** ignores developer fields.
+
+## Found a problem?
+
+*Real meter* tab → turn on **Diagnostic logging**, reproduce the problem, then tap **Send last ride
+log** (if the Karoo wasn't connected to the Companion app during the ride). Then open a
+[GitHub issue](https://github.com/lockevod/Karoo-KPower/issues) with what you saw, the ride date/time
+and your meter model. GPS and sensor identifiers are stripped before sending. Details:
+**[real-meter-and-fit.md](real-meter-and-fit.md#reporting-a-problem-dynamics-pairing-estimate)**.
 
 ## Install (sideload)
 

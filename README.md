@@ -9,29 +9,50 @@ written straight into your ride FIT.
 
 🇪🇸 **Guía rápida en español:** [docs/guia-rapida.md](docs/guia-rapida.md) · Karoo OS ≥ 1.524.2003 (tested on Karoo 3).
 
-## Two tools in one
+## What's new in 3.0 — a big step up from 1.9.x
 
-**1 · Estimated power — no sensor needed**
-- Pair **“KPW Estimated”** and the Karoo records power, NP, TSS and zones **natively**, just like a real meter.
-- Physics model with **real temperature/pressure/wind** (Open-Meteo, or [Headwind](https://github.com/timklge/karoo-headwind) if installed), tyre/surface rolling resistance, height-based aero and an acceleration term.
-- **Multiple bikes**, auto-selected per Karoo ride profile.
-- On-screen fields: **Est. Power / 3s / NP**.
+3.0 is not an incremental update. The estimator has been rebuilt, and real-meter support with
+**advanced cycling dynamics** is completely new.
 
-**2 · Advanced cycling dynamics — with a real ANT+ meter**
-KPower reads your meter's raw ANT+ broadcast and records the dynamics the Karoo can't, into the ride FIT (view them in [intervals.icu](https://intervals.icu)):
-- **Torque** (overall + per leg)
+### 1 · A much better estimator — no sensor needed
+
+Pair **“KPW Estimated”** and the Karoo records power, NP, TSS and zones **natively**, just like a real
+meter. Compared with 1.9.x, the model behind it has been rebuilt:
+
+| | 1.9.x | 3.0 |
+|---|---|---|
+| **Grade** | the Karoo's grade stream, which arrives several seconds late | derived from altitude with lag compensation, and taken **from the route profile** when a route is loaded — power follows the climb instead of trailing it |
+| **Acceleration** | ignored | **inertia term**: speeding up costs watts, slowing down gives them back |
+| **Air density** | estimated from altitude only | **real temperature and pressure** (Open-Meteo, or [Headwind](https://github.com/timklge/karoo-headwind) if installed — no API key) |
+| **Rolling resistance** | a Crr typed by hand × a fixed surface you picked | derived from your **tyre** (width, pressure, tread, tubeless — Berto tables) and the **surface under you**, read live from your offline maps |
+| **Frontal area / aero** | typed by hand | from your **height + weight** (Bassett) and riding position |
+| **Setup** | raw physics numbers | **Simple mode** (preset, height, tyre, weight) — or Advanced for full control |
+| **Bikes** | several, switched by hand | **auto-selected per Karoo ride profile**, with export/import |
+| **Calibration** | — | **power offset** (factor % / W) to match a real meter you trust |
+
+Plus on-screen fields **Est. Power / 3s / NP**, and an optional *estimate vs real* log in the FIT to
+check it against a meter. It is still an **estimate**, not a measurement — wind is the biggest unknown.
+
+### 2 · Advanced cycling dynamics — new, with a real ANT+ meter
+
+KPower reads your meter's **raw ANT+ broadcast** and writes into the ride FIT the dynamics the
+Karoo **can't record on its own**:
+
+- **Torque** (overall + per leg) — the Karoo shows it live but never writes it to the FIT
 - **Power phase** & **peak power phase** (left/right)
 - **Platform centre offset (PCO)** + rider position + **torque barycenter**
-- **L/R balance**, **torque effectiveness**, **pedal smoothness**
+- **L/R balance**, **torque effectiveness**, **pedal smoothness** (also when the Karoo can't, e.g. with an offset applied)
 
-> **Where to look:** intervals.icu shows every field automatically. Garmin Connect shows native TE/PS/
-> balance, but keeps KPower's own fields (torque, power phase, PCO, barycenter) as separate
-> developer-data charts, not inside its "Cycling Dynamics" section — no arc graphic there (SDK
-> limitation, not a bug). Strava ignores developer fields. Details: **[docs/real-meter-and-fit.md](docs/real-meter-and-fit.md#where-to-see-it-after-the-ride)**.
+Also: **auto-naming** (brand + model), **battery level & low-battery alert**, **zero-offset
+calibration** from the Karoo, and a **power offset** applied to the recorded power.
 
-Plus **auto-naming** (brand + model), **battery level & low-battery alert**, and optional **estimate-vs-real logging** to compare both in the FIT. Details: **[docs/real-meter-and-fit.md](docs/real-meter-and-fit.md)**.
+> **Where to look:** [intervals.icu](https://intervals.icu) shows every field automatically. Garmin
+> Connect shows native TE/PS/balance, but keeps KPower's own fields (torque, power phase, PCO,
+> barycenter) as separate developer-data charts — no arc graphic (SDK limitation, not a bug). Strava
+> ignores developer fields. Details: **[docs/real-meter-and-fit.md](docs/real-meter-and-fit.md#where-to-see-it-after-the-ride)**.
 
-> Power is an **estimation**, not a measurement — the parameters matter. Setup: **[docs/configuration.md](docs/configuration.md)**.
+> Dynamics support is new and meters differ a lot in what they send. If something looks wrong, please
+> **[send me the log](#found-a-problem-send-the-log)** — that's how it gets fixed.
 
 ## Quick start
 
@@ -66,11 +87,25 @@ real meter & FIT: **[docs/real-meter-and-fit.md](docs/real-meter-and-fit.md)**.
 - It's an estimate: the biggest unknown is **wind**. KPower pulls wind/temperature/pressure from
   Open-Meteo automatically (or from the [Headwind](https://github.com/timklge/karoo-headwind) extension
   if installed) — nothing to configure. Dial in Crr/CdA from references (Advanced mode).
-- Grade lag is much smaller than it used to be: on a loaded route KPower reads the grade from the route
-  profile, otherwise from the fresh altitude stream. A few seconds can still slip through on sharp
+- Grade lag is much smaller than in 1.9.x: on a loaded route KPower reads the grade from the route
+  profile, otherwise from the altitude stream. A few seconds can still slip through on sharp
   transitions; it self-corrects.
 - Use the **Power 3s** field for a steadier reading.
 - Tested on Karoo 3 / metric. After updating, you may need to re-pair the virtual sensor.
+
+## Found a problem? Send the log
+
+1. *Real meter* tab → turn on **Diagnostic logging** (at the bottom). It's off by default.
+2. Ride (or pair / calibrate) as usual and reproduce the problem.
+3. If your Karoo was connected to the Companion app during the ride, the log is already on its way —
+   it's sent automatically during and after the ride.
+4. Otherwise, back home: *Real meter* tab → **Send last ride log**. Wait until it says **Log sent ✓**.
+5. Open a [GitHub issue](https://github.com/lockevod/Karoo-KPower/issues) describing what you saw, the
+   date/time of the ride and your meter model. Attaching the FIT helps a lot.
+
+**Privacy:** the copy that is sent has GPS coordinates, sensor names, serial numbers / device IDs and
+file paths removed. It goes only to the developer. Turn diagnostic logging off again when you're done —
+it uses some extra battery and storage.
 
 ## Credits
 
@@ -78,8 +113,8 @@ real meter & FIT: **[docs/real-meter-and-fit.md](docs/real-meter-and-fit.md)**.
   code make this extension possible.
 - Power model: <https://www.gribble.org/cycling/power_v_speed.html>
 - KPower has no account or backend. Weather lookup sends the current position to Open-Meteo; when the
-  off-by-default diagnostic log is enabled in a developer-configured build, anonymized GPS-stripped
-  logs are sent automatically to the developer through Telegram.
+  off-by-default diagnostic log is enabled, anonymized GPS-stripped logs are sent to the developer
+  through Telegram (see [Found a problem?](#found-a-problem-send-the-log)).
 
 ## Links
 

@@ -127,10 +127,20 @@ object LogReporter {
         }
         val redacted = redactForUpload(content)
         if (redacted.isBlank()) return SendResult.Failure("Nothing to send (log is empty).")
+        return sendDocument(redacted.toByteArray(Charsets.UTF_8), "text/plain; charset=UTF-8", fileName, caption, karooSystem)
+    }
 
+    /** POSTs [content] as a Telegram document. Callers MUST pass already-redacted content. */
+    private suspend fun sendDocument(
+        content: ByteArray,
+        contentType: String,
+        fileName: String,
+        caption: String,
+        karooSystem: KarooSystemService,
+    ): SendResult {
         return try {
             val boundary = "KPowerBoundary_${System.currentTimeMillis()}"
-            val body = buildMultipart(boundary, fileName, redacted, caption)
+            val body = buildMultipart(boundary, fileName, content, contentType, caption)
             val kb = body.size / 1024
             Timber.d("LogReporter: sending %d KB to Telegram…", kb)
 
@@ -207,10 +217,47 @@ object LogReporter {
         return SendResult.Success("Sent ✓ ($seq part(s))")
     }
 
+    /**
+     * Redact [text], gzip it (logs compress ~10x, so a long ride is tens of POSTs instead of hundreds)
+     * and send it as `<prefix>.log.gz.partNN` slices under [MAX_DOC_BYTES]. Rebuild on the dev side
+     * with `cat <prefix>.log.gz.part* | gunzip`. Each slice is retried once (Bluetooth hiccup / 429)
+     * before giving up. [onPart] reports (sent, total) for a progress line.
+     */
+    suspend fun sendGzipChunked(
+        text: String,
+        fileNamePrefix: String,
+        captionPrefix: String,
+        karooSystem: KarooSystemService,
+        onPart: (Int, Int) -> Unit = { _, _ -> },
+    ): SendResult {
+        if (!configured) return SendResult.Failure("Logging credentials not configured in this build.")
+        val redacted = redactForUpload(text)
+        if (redacted.isBlank()) return SendResult.Failure("Nothing to send (log is empty).")
+        val gz = java.io.ByteArrayOutputStream().also { bos ->
+            java.util.zip.GZIPOutputStream(bos).use { it.write(redacted.toByteArray(Charsets.UTF_8)) }
+        }.toByteArray()
+        val total = (gz.size + MAX_DOC_BYTES - 1) / MAX_DOC_BYTES
+        for (i in 0 until total) {
+            val slice = gz.copyOfRange(i * MAX_DOC_BYTES, minOf((i + 1) * MAX_DOC_BYTES, gz.size))
+            val name = "$fileNamePrefix.log.gz.part${"%02d".format(i)}"
+            val caption = "$captionPrefix (part ${i + 1}/$total)"
+            var res = sendDocument(slice, "application/octet-stream", name, caption, karooSystem)
+            if (!res.ok) {
+                kotlinx.coroutines.delay(5_000)
+                res = sendDocument(slice, "application/octet-stream", name, caption, karooSystem)
+            }
+            if (!res.ok) return res
+            onPart(i + 1, total)
+        }
+        return SendResult.Success("Sent ✓ ($total part(s))")
+    }
+
     /** Builds a `multipart/form-data` body for the Telegram Bot API `sendDocument` endpoint. */
-    private fun buildMultipart(boundary: String, fileName: String, fileContent: String, caption: String): ByteArray {
+    private fun buildMultipart(
+        boundary: String, fileName: String, fileContent: ByteArray, contentType: String, caption: String,
+    ): ByteArray {
         val crlf = "\r\n"
-        return buildString {
+        val head = buildString {
             append("--$boundary$crlf")
             append("Content-Disposition: form-data; name=\"chat_id\"$crlf$crlf")
             append(CHAT_ID); append(crlf)
@@ -221,9 +268,8 @@ object LogReporter {
             }
             append("--$boundary$crlf")
             append("Content-Disposition: form-data; name=\"document\"; filename=\"$fileName\"$crlf")
-            append("Content-Type: text/plain; charset=UTF-8$crlf$crlf")
-            append(fileContent); append(crlf)
-            append("--$boundary--$crlf")
+            append("Content-Type: $contentType$crlf$crlf")
         }.toByteArray(Charsets.UTF_8)
+        return head + fileContent + "$crlf--$boundary--$crlf".toByteArray(Charsets.UTF_8)
     }
 }

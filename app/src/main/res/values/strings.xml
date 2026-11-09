@@ -42,6 +42,12 @@
     <string name="comparison_mode_desc">Writes KPower\'s estimated power to the FIT as extra fields (est_power, est_np…) to compare against a real meter, AND field-calibrates your bike\'s Crr/CdA from the real meter (suggestion shown in the bike editor afterwards). Needs a real meter recording. Off by default.</string>
     <string name="dynamics_auto_info">Cycling dynamics from an enabled meter are written to the FIT automatically (the Karoo can\'t record them itself).</string>
     <string name="diagnostic_log_path_prefix">Log: </string>
+    <string name="send_log_button">Send last ride log</string>
+    <string name="send_log_sending">Sending…</string>
+    <string name="send_log_done">Log sent ✓ Thanks!</string>
+    <string name="send_log_none">No ride log found. Ride with diagnostic logging on first.</string>
+    <string name="send_log_progress">Sending… file %1$d/%2$d · part %3$d/%4$d</string>
+    <string name="send_log_failed">Not sent: %1$s. Check the Companion connection and try again.</string>
 
     <!-- ANT+ scan -->
     <string name="ant_meters_title">ANT+ power meters</string>
