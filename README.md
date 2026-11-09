@@ -134,7 +134,7 @@ it uses some extra battery and storage.
 - Built on the work of **timklge** ([repos](https://github.com/timklge?tab=repositories)) — parts of his
   code make this extension possible.
 - Power model: <https://www.gribble.org/cycling/power_v_speed.html>
-- KPower has no account or backend. Weather lookup sends the current position to Open-Meteo; when the
+- KPower has no user account. Weather lookup sends the current position to Open-Meteo; when the
   off-by-default diagnostic log is enabled, anonymized GPS-stripped logs are sent to the developer
   through a write-only Cloudflare relay to a private Telegram chat (see [Found a problem?](#found-a-problem-send-the-log)).
 
