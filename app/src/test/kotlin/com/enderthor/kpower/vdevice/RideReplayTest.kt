@@ -57,6 +57,9 @@ class RideReplayTest {
         // Es una banda de sensibilidad razonable, NO una ejecución de producción: escalar el
         // viento x0..x2 mueve el trabajo entre -5 % y +1 %. Ver tools/fit_to_replay_fixture.py.
         val headwind: Double?, val wxTempC: Double?, val wxPressureHpa: Double?,
+        // Superficie EFECTIVA que usó el motor (SURFACE effective= del log). Solo la tienen los
+        // fixtures grabados con la superficie viva funcionando; los demás caen al preset.
+        val surface: KarooSurface? = null,
     )
 
     private fun load(fixture: String = "ride-2026-09-06-mtb.csv"): List<Tick> {
@@ -65,7 +68,8 @@ class RideReplayTest {
         return txt.drop(1).filter { it.isNotBlank() }.map { line ->
             val c = line.split(",")
             fun d(i: Int) = c.getOrNull(i)?.takeIf { it.isNotEmpty() }?.toDouble()
-            Tick(c[0].toLong(), d(1), d(2), d(3), d(4), d(5), d(6), d(7), d(8), d(9))
+            Tick(c[0].toLong(), d(1), d(2), d(3), d(4), d(5), d(6), d(7), d(8), d(9),
+                c.getOrNull(10)?.takeIf { it.isNotEmpty() }?.let { KarooSurface.valueOf(it) })
         }
     }
 
@@ -88,6 +92,8 @@ class RideReplayTest {
         // calculó con el de altitud asigna muestras al cubo equivocado, y como la potencia
         // correlaciona con la pendiente, eso infla el error aparente de bajada y llano.
         slopesOut: DoubleArray? = null,
+        // Factor de rodadura por superficie; por defecto el de producción (KarooSurface.factor).
+        surfaceFactor: (KarooSurface) -> Double = { it.factor },
     ): DoubleArray {
         val accelerationTracker = AccelerationTracker()
         val gradeHold = GradeHold()
@@ -151,7 +157,7 @@ class RideReplayTest {
                 elevation = heldElevation,
                 ftp = FTP,
                 isPedaling = isPedaling,
-                surface = SURFACE.factor,
+                surface = surfaceFactor(t.surface ?: SURFACE),
                 isforcepower = false,
                 // Temperatura y presión de Open-Meteo, como production (`bundle.weatherTempC` /
                 // `weatherPressureHpa` son la PRIMERA opción, independientes de useKarooTemp).
@@ -170,7 +176,7 @@ class RideReplayTest {
             val gradeFresh = altGrade != null || t.grade != null
             if (calibrator != null && t.realW != null && gradeFresh) {
                 est.calibrationRegressors(t.realW)?.let { (y, x1, x2) ->
-                    calibrator.add(y, x1, x2, SURFACE)
+                    calibrator.add(y, x1, x2, t.surface ?: SURFACE)
                 }
             }
         }
@@ -764,6 +770,62 @@ class RideReplayTest {
                 val mk = sel.sumOf { model[it] } / 1000.0
                 println("      %-8s n=%5d  real=%6.1f kJ  est=%6.1f kJ  -> %+6.1f %%".format(
                     lbl, sel.size, rk, mk, 100.0 * mk / rk - 100.0))
+            }
+        }
+    }
+
+    /**
+     * CUARTO fixture, el primero con la superficie VIVA funcionando (2026-09-24, MTB 17,4 km /
+     * 570 m): la columna `surface` es la superficie efectiva que usó el motor, sacada del log.
+     *
+     * Barrido del NIVEL de rodadura. Se hizo con el asfalto en 0,75x el Crr base (estándar 1,24x y
+     * grava 1,40x el asfalto, proporciones de la literatura; Meyer et al. 2016 da 1,20x y 1,50x).
+     * De aquí salió el asfalto 0,95 que producción tiene EN PRUEBA (ver KarooSurface), así que
+     * ahora "produccion" ya es 0,95 y el brazo "asfalto 0,75" conserva la referencia anterior. Los
+     * otros tres fixtures se ruedan con el preset GRAVEL (sin superficie viva), así que solo les
+     * afectan los brazos que tocan GRAVEL.
+     */
+    @Test
+    fun `barrido del nivel de rodadura por superficie`() {
+        data class Arm(val lbl: String, val f: Map<KarooSurface, Double>)
+        val prod = KarooSurface.entries.associateWith { it.factor }
+        fun asph(v: Double) = prod + (KarooSurface.ASPHALT to v)
+        fun scaled(k: Double) = prod.mapValues { it.value * k }
+        val arms = listOf(
+            Arm("produccion", prod),
+            Arm("asfalto 0,75", asph(0.75)),   // valor anterior a la prueba de campo
+            Arm("asfalto 0,85", asph(0.85)),
+            Arm("asfalto 1,05", asph(1.05)),
+            Arm("todo x1,10", scaled(1.10)),
+            Arm("todo x1,20", scaled(1.20)),
+        )
+        for (fx in listOf(
+            "ride-2026-09-24-mtb.csv", "ride-2026-09-20-mtb.csv",
+            "ride-2026-09-06-mtb.csv", "ride-2026-08-19-road.csv", "19-ago como ASFALTO",
+        )) {
+            // SUPUESTO: la marcha de carretera del 19-ago, con la superficie viva, habria salido
+            // casi entera ASPHALT. Sin log de superficie de ese dia, se fuerza en todos los ticks.
+            val ticks = if (fx.startsWith("19-ago")) load("ride-2026-08-19-road.csv")
+                .map { it.copy(surface = KarooSurface.ASPHALT) } else load(fx)
+            val idx = ticks.indices.filter { ticks[it].realW != null }
+            val real = idx.map { ticks[it].realW!! }
+            println("=== $fx (85 kg) ===")
+            for (a in arms) {
+                val slopes = DoubleArray(ticks.size)
+                val e = replay(ticks, 85.0 - BIKE_MASS, slopesOut = slopes, surfaceFactor = { a.f.getValue(it) })
+                val model = idx.map { e[it] }
+                val err = real.indices.map { model[it] - real[it] }
+                print("  %-14s total %+5.1f %%  RMSE %5.1f |".format(
+                    a.lbl, 100.0 * model.sum() / real.sum() - 100.0, sqrt(err.sumOf { it * it } / err.size)))
+                for ((lo, hi, t) in listOf(
+                    Triple(-99.0, -2.0, "bajada"), Triple(-2.0, 2.0, "llano"),
+                    Triple(2.0, 6.0, "sub2-6"), Triple(6.0, 99.0, "sub>6"),
+                )) {
+                    val sel = idx.indices.filter { slopes[idx[it]] >= lo && slopes[idx[it]] < hi }
+                    if (sel.size < 30) continue
+                    print("  %s %+6.1f %%".format(t, 100.0 * sel.sumOf { model[it] } / sel.sumOf { real[it] } - 100.0))
+                }
+                println()
             }
         }
     }

@@ -56,14 +56,18 @@ data class RealKarooValues(
 // CAMPO por el usuario; se descartó empíricamente la familia de literatura 1.0/1.5/2.5/5.0 (con el
 // baseCrr del neumático inflaba la potencia en gravel/arena). Recalibrar solo con datos reales del
 // modo Comparación. Ver memoria [[power-model-literature]].
+// EN PRUEBA (2026-09-24): ASPHALT 0.75 -> 0.95 por el barrido de RideReplayTest (única palanca que
+// mejora las marchas con asfalto sin pasar las subidas de MTB). SAND 2.20 -> 3.50: el Crr efectivo
+// de un taco tubeless pasa de ~0,021 a ~0,034, cerca de los 0,030 medidos por Steyn & Warnich 2014
+// en arena con MTB (y 3,3x la grava, ellos dan >=4,5x). Pendiente de validar en campo.
 enum class KarooSurface(
     val surface: String,
     val factor: Double,
 ) {
-    ASPHALT("Asphalt / concrete", 0.75),
+    ASPHALT("Asphalt / concrete", 0.95),
     STANDARD("Smooth gravel / hardpack", 0.93),
     GRAVEL("Gravel / dirt", 1.05),
-    SAND("Sand / mud / soft", 2.20),
+    SAND("Sand / mud / soft", 3.50),
 }
 
 // tubelessFactor: reducción de Crr al montar tubeless vs cámara, según datos de

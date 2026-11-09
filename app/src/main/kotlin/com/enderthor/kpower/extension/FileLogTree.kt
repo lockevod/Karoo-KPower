@@ -299,4 +299,16 @@ object FileLogTree : Timber.Tree() {
 
     /** Absolute path of the current log file, for the settings hint. */
     fun pathHint(): String = logFile?.absolutePath ?: "(not started yet)"
+
+    /** Files of the most recent ride (`kpower-<stamp>.log` + its `-pN` rotations), in write order. "Most
+     *  recent" = last WRITTEN (lastModified), not the stamp: the stamp is local wall-clock time and is
+     *  wrong before a GPS/network clock sync or across a timezone change. Empty if none. */
+    fun lastRideLogFiles(): List<File> {
+        val files = logDir?.listFiles { f -> f.name.startsWith("kpower-") && f.name.endsWith(".log") }
+            ?: return emptyList()
+        fun base(f: File) = f.name.removeSuffix(".log").replace(Regex("-p\\d+$"), "")
+        fun part(f: File) = Regex("-p(\\d+)\\.log$").find(f.name)?.groupValues?.get(1)?.toInt() ?: 0
+        val last = files.maxByOrNull { it.lastModified() }?.let { base(it) } ?: return emptyList()
+        return files.filter { base(it) == last }.sortedBy { part(it) }
+    }
 }

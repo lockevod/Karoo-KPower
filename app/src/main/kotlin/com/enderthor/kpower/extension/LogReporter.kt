@@ -7,13 +7,14 @@ import kotlinx.coroutines.withTimeoutOrNull
 import timber.log.Timber
 
 /**
- * Sends the KPower diagnostic log to the developer via a Telegram bot — only when the rider has the
+ * Sends the KPower diagnostic log to the developer's Telegram — only when the rider has the
  * (off-by-default) diagnostic log enabled. Ported from KGhost's LogReporter.
  *
  * Privacy:
- *  - **Credentials never in source / never in any settings screen**: BOT_TOKEN and CHAT_ID come from
- *    [BuildConfig], injected from `local.properties` (gitignored) at compile time. The log can only ever
- *    go to the developer's own chat; absent keys make this a no-op.
+ *  - **No bot credentials in the APK**: uploads go to a write-only relay (tools/log-relay, a Cloudflare
+ *    Worker) that holds the bot token and the chat id. Only the relay URL is compiled in
+ *    ([BuildConfig.LOG_RELAY_URL], from `local.properties`); it can't read, forward or delete anything.
+ *    Absent URL makes this a no-op.
  *  - **No GPS coordinates or sensor identifiers leave the device**: [redactForUpload] strips every
  *    coordinate token (lat/lng/lon/latitude/longitude — incl. inside `GpsCoordinates(...)`) AND sensor
  *    serial numbers + the Karoo's saved-device names from the uploaded copy. The on-device file keeps
@@ -24,17 +25,17 @@ import timber.log.Timber
  */
 object LogReporter {
 
-    // From local.properties at compile time: calib.bot_token=<@BotFather token>, calib.chat_id=<dev chat>.
-    private val BOT_TOKEN: String get() = BuildConfig.CALIB_BOT_TOKEN
-    private val CHAT_ID: String get() = BuildConfig.CALIB_CHAT_ID
-
-    private const val API_BASE = "https://api.telegram.org/bot"
+    // From local.properties at compile time: calib.relay_url=https://<worker>.workers.dev
+    private val RELAY_URL: String get() = BuildConfig.LOG_RELAY_URL
+    private const val APP_TAG = "kpower"   // must be in the Worker's ALLOWED_APPS
     private const val TIMEOUT_MS = 60_000L
 
     // Any coordinate token (`lat=`, `lng=`, `lon=` — note GpsCoordinates.toString() uses `lon=` —,
     // `latitude=`, `longitude=`) → `=•`. Then sensor serials and the Karoo saved-device names.
     private val COORD = Regex("(lat|lng|lon|latitude|longitude)=-?\\d+(\\.\\d+)?")
     private val CLASSIFY_COORDS = Regex("classifyAt\\([^\\r\\n)]*\\)")
+    // Map tile x/y (z16 ≈ 0,5 km) is a location too: SurfaceConditionReader logs it on a mapfile miss.
+    private val TILE = Regex("\\btile \\d+/\\d+(/\\d+)?")
     private val CALIBRATION_START = Regex("(CALIBRATION START #\\d+) \\([^\\r\\n)]*\\)")
     private val IDENTITY_PAYLOAD = Regex("(PAGE 0x5[01] payload=)[0-9A-Fa-f ]+")
     private val ANT_DEVICE = Regex("\\bdev=(\\d+)")
@@ -62,8 +63,7 @@ object LogReporter {
 
     /** True only when a real bot token + chat id were compiled in (so callers can skip work entirely). */
     val configured: Boolean
-        get() = BOT_TOKEN.isNotBlank() && !BOT_TOKEN.startsWith("REPLACE") &&
-            CHAT_ID.isNotBlank() && !CHAT_ID.startsWith("REPLACE")
+        get() = RELAY_URL.startsWith("https://")
 
     sealed class SendResult(val message: String) {
         class Success(message: String) : SendResult(message)
@@ -102,6 +102,7 @@ object LogReporter {
     fun redactForUpload(content: String): String = aliasDeviceNumbers(
         content
             .replace(CLASSIFY_COORDS, "classifyAt(•,•)")
+            .replace(TILE, "tile •")
             .replace(CALIBRATION_START, "$1 (•)")
             .replace(IDENTITY_PAYLOAD, "$1•")
             .replace(COORD, "$1=•")
@@ -122,22 +123,32 @@ object LogReporter {
         karooSystem: KarooSystemService,
     ): SendResult {
         if (!configured) {
-            Timber.w("LogReporter: credentials not set in local.properties — skipping log send")
+            Timber.w("LogReporter: relay URL not set in local.properties — skipping log send")
             return SendResult.Failure("Logging credentials not configured in this build.")
         }
         val redacted = redactForUpload(content)
         if (redacted.isBlank()) return SendResult.Failure("Nothing to send (log is empty).")
+        return sendDocument(redacted.toByteArray(Charsets.UTF_8), "text/plain; charset=UTF-8", fileName, caption, karooSystem)
+    }
 
+    /** POSTs [content] as a Telegram document. Callers MUST pass already-redacted content. */
+    private suspend fun sendDocument(
+        content: ByteArray,
+        contentType: String,
+        fileName: String,
+        caption: String,
+        karooSystem: KarooSystemService,
+    ): SendResult {
         return try {
             val boundary = "KPowerBoundary_${System.currentTimeMillis()}"
-            val body = buildMultipart(boundary, fileName, redacted, caption)
+            val body = buildMultipart(boundary, fileName, content, contentType, caption)
             val kb = body.size / 1024
             Timber.d("LogReporter: sending %d KB to Telegram…", kb)
 
             val response: HttpResponseState.Complete? = withTimeoutOrNull(TIMEOUT_MS) {
                 karooSystem.httpRequest(
                     "POST",
-                    "$API_BASE$BOT_TOKEN/sendDocument",
+                    RELAY_URL,
                     mapOf("Content-Type" to "multipart/form-data; boundary=$boundary"),
                     body,
                 )
@@ -154,9 +165,10 @@ object LogReporter {
             } else {
                 val tgDesc = Regex("\"description\"\\s*:\\s*\"([^\"]+)\"").find(respBody)?.groupValues?.getOrNull(1)
                 val hint = when (response.statusCode) {
-                    401 -> "Bot token rejected (check CALIB_BOT_TOKEN)."
-                    400 -> tgDesc ?: "Bad request (check chat id)."
-                    413 -> "File too big (Telegram limit is 50 MB)."
+                    401, 404 -> "Relay rejected the bot token or chat id (check the Worker secrets)."
+                    403 -> "Relay doesn't accept this app (check ALLOWED_APPS)."
+                    400 -> tgDesc ?: "Bad request."
+                    413 -> "Chunk too big for the relay."
                     429 -> "Rate-limited by Telegram. Wait a minute."
                     in 500..599 -> "Telegram server error (try again)."
                     else -> tgDesc ?: "HTTP ${response.statusCode}"
@@ -207,13 +219,50 @@ object LogReporter {
         return SendResult.Success("Sent ✓ ($seq part(s))")
     }
 
+    /**
+     * Redact [text], gzip it (logs compress ~10x, so a long ride is tens of POSTs instead of hundreds)
+     * and send it as `<prefix>.log.gz.partNN` slices under [MAX_DOC_BYTES]. Rebuild on the dev side
+     * with `cat <prefix>.log.gz.part* | gunzip`. Each slice is retried once (Bluetooth hiccup / 429)
+     * before giving up. [onPart] reports (sent, total) for a progress line.
+     */
+    suspend fun sendGzipChunked(
+        text: String,
+        fileNamePrefix: String,
+        captionPrefix: String,
+        karooSystem: KarooSystemService,
+        onPart: (Int, Int) -> Unit = { _, _ -> },
+    ): SendResult {
+        if (!configured) return SendResult.Failure("Logging credentials not configured in this build.")
+        val redacted = redactForUpload(text)
+        if (redacted.isBlank()) return SendResult.Failure("Nothing to send (log is empty).")
+        val gz = java.io.ByteArrayOutputStream().also { bos ->
+            java.util.zip.GZIPOutputStream(bos).use { it.write(redacted.toByteArray(Charsets.UTF_8)) }
+        }.toByteArray()
+        val total = (gz.size + MAX_DOC_BYTES - 1) / MAX_DOC_BYTES
+        for (i in 0 until total) {
+            val slice = gz.copyOfRange(i * MAX_DOC_BYTES, minOf((i + 1) * MAX_DOC_BYTES, gz.size))
+            val name = "$fileNamePrefix.log.gz.part${"%02d".format(i)}"
+            val caption = "$captionPrefix (part ${i + 1}/$total)"
+            var res = sendDocument(slice, "application/octet-stream", name, caption, karooSystem)
+            if (!res.ok) {
+                kotlinx.coroutines.delay(5_000)
+                res = sendDocument(slice, "application/octet-stream", name, caption, karooSystem)
+            }
+            if (!res.ok) return res
+            onPart(i + 1, total)
+        }
+        return SendResult.Success("Sent ✓ ($total part(s))")
+    }
+
     /** Builds a `multipart/form-data` body for the Telegram Bot API `sendDocument` endpoint. */
-    private fun buildMultipart(boundary: String, fileName: String, fileContent: String, caption: String): ByteArray {
+    private fun buildMultipart(
+        boundary: String, fileName: String, fileContent: ByteArray, contentType: String, caption: String,
+    ): ByteArray {
         val crlf = "\r\n"
-        return buildString {
+        val head = buildString {
             append("--$boundary$crlf")
-            append("Content-Disposition: form-data; name=\"chat_id\"$crlf$crlf")
-            append(CHAT_ID); append(crlf)
+            append("Content-Disposition: form-data; name=\"app\"$crlf$crlf")
+            append(APP_TAG); append(crlf)
             if (caption.isNotBlank()) {
                 append("--$boundary$crlf")
                 append("Content-Disposition: form-data; name=\"caption\"$crlf$crlf")
@@ -221,9 +270,8 @@ object LogReporter {
             }
             append("--$boundary$crlf")
             append("Content-Disposition: form-data; name=\"document\"; filename=\"$fileName\"$crlf")
-            append("Content-Type: text/plain; charset=UTF-8$crlf$crlf")
-            append(fileContent); append(crlf)
-            append("--$boundary--$crlf")
+            append("Content-Type: $contentType$crlf$crlf")
         }.toByteArray(Charsets.UTF_8)
+        return head + fileContent + "$crlf--$boundary--$crlf".toByteArray(Charsets.UTF_8)
     }
 }

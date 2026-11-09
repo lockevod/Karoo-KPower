@@ -93,10 +93,11 @@ fields).
 | **PCO** left/right | `left/right_pco` (standard) | **yes** (Karoo doesn't record PCO) |
 | Pedal centre offset rider position, **torque barycenter** | `dyn_rider_pos`, `dyn_baryc` (dev) | **yes** |
 
-> `dyn_baryc` stays empty with **Garmin Rally** pedals — they never send the ANT+ page that carries it.
-> That's the pedals, not a KPower bug; every other column above is filled normally.
 | Balance, TE, PS | `dyn_balance_l/r`, `dyn_te_l/r`, `dyn_ps_l/r` (dev) | redundant when native; the only copy when KPW-virtual |
 | Estimate (when “Log estimated power” on) | `est_power`, `est_power_3s` (record); `est_np`, `est_avg` (session) | yes |
+
+> `dyn_baryc` stays empty with **Garmin Rally** pedals — they never send the ANT+ page that carries it.
+> That's the pedals, not a KPower bug; every other column above is filled normally.
 
 Why developer fields for balance/TE/PS: the Karoo writes the **standard** `left_right_balance` /
 torque-effectiveness / pedal-smoothness for a natively-paired meter. If KPower also wrote those standard
@@ -171,11 +172,24 @@ enabled, **“Log estimated power (FIT)”** on, and **diagnostic logging** on, 
 a ± std error) go to the diagnostic log (`CALIB …`) for offline analysis. A small ± means the ride
 pinned the value down; a large ± means it didn't.
 
-When **diagnostic logging** is enabled in a build configured for developer delivery, KPower
-automatically sends log chunks to the developer through Telegram during and after rides, and after
-pairing or calibration. The uploaded copy removes GPS coordinates, saved sensor names, serial/device
-identifiers and raw ANT identity pages; the full-detail file remains local. Diagnostics are off by
-default and use additional battery, storage and network data.
+## Reporting a problem (dynamics, pairing, estimate)
+
+Dynamics support is new and every meter brand sends a slightly different set of ANT+ pages, so a
+diagnostic log is the fastest way to get a problem fixed:
+
+1. *Real meter* tab → **Diagnostic logging** ON (bottom of the screen; off by default).
+2. Ride, pair or calibrate as usual and reproduce the problem.
+3. With the Karoo connected to the Companion app, KPower sends the log by itself during and after
+   the ride, and after pairing or calibration.
+4. Rode without a connection, or not sure it went through? Back home: *Real meter* → **Send last ride
+   log**, and wait for **Log sent ✓**. It sends the whole log of your most recent ride.
+5. Open a [GitHub issue](https://github.com/lockevod/Karoo-KPower/issues): what you saw, ride date/time,
+   meter model, and the FIT if you can.
+
+The uploaded copy removes GPS coordinates, saved sensor names, serial/device identifiers, raw ANT
+identity pages and file paths, and goes only to the developer through Telegram. The full-detail file
+stays on the Karoo (the most recent logs are kept). Turn diagnostics off afterwards — they use extra
+battery, storage and network data.
 
 ## FAQ
 

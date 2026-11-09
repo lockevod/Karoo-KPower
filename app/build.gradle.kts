@@ -44,10 +44,11 @@ android {
         versionCode = 202609071
         versionName = "3.0.0"
 
-        // Telegram bot for diagnostic-log delivery (only used when the rider enables diagnostic logging).
-        // From local.properties: calib.bot_token / calib.chat_id. Absent → "" → LogReporter is a no-op.
-        buildConfigField("String", "CALIB_BOT_TOKEN", "\"${localProps.getProperty("calib.bot_token", "")}\"")
-        buildConfigField("String", "CALIB_CHAT_ID", "\"${localProps.getProperty("calib.chat_id", "")}\"")
+        // Diagnostic-log delivery goes through a write-only relay (tools/log-relay, a Cloudflare Worker that
+        // holds the Telegram token). Only the relay URL ships in the APK — never the bot token: R8 leaves
+        // string constants readable, so anything compiled in is public. From local.properties:
+        // calib.relay_url=https://... Absent → "" → LogReporter is a no-op.
+        buildConfigField("String", "LOG_RELAY_URL", "\"${localProps.getProperty("calib.relay_url", "")}\"")
     }
 
     buildTypes {

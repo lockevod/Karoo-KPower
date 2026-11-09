@@ -45,6 +45,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.MutableStateFlow
 
 import com.enderthor.kpower.R
 import com.enderthor.kpower.ant.AntPowerManager
@@ -121,8 +124,8 @@ fun ComparisonScreen() {
 
     // Heartbeat ONLY while actively scanning: refreshes the "radio active" stamp every ~45 s so a scan that
     // runs longer than the backstop can't expire the window mid-scan (which would let the service re-grab
-    // the radio). Gated on `scanning` so merely browsing the saved list writes NOTHING — a write re-emits
-    // the whole DataStore (incl. a meters JSON decode in the extension) for nothing. When scanning stops the
+    // the radio). Gated on `scanning` so merely browsing the saved list writes NOTHING — each write is an
+    // fsync'd file rewrite (runtimeStore) and re-arms the service's ride gate. When scanning stops the
     // loop ends → the stamp goes stale within the backstop and the meter reconnects. Interval ≤ backstop/2
     // so one missed beat can't expire the window. (The Karoo's own sensorservice doesn't release channels to
     // scan at all — it relies on search-priority preemption + retry; this is our belt-and-suspenders.)
@@ -144,6 +147,9 @@ fun ComparisonScreen() {
     // can be diagnosed). The extension service drives the same flag; this is an idempotent safety net for
     // when the user is in settings. Never turns it OFF here (the service owns flush-and-close on turn-off).
     LaunchedEffect(diagnosticLog) { if (diagnosticLog) FileLogTree.enabled = true }
+
+    val sendingLog by ManualLogSend.sending.collectAsState()
+    val logSendStatus by ManualLogSend.status.collectAsState()
 
     // Meter currently being renamed (null = no dialog).
     var renaming by remember { mutableStateOf<SavedMeter?>(null) }
@@ -206,8 +212,8 @@ fun ComparisonScreen() {
                             uploadPairingLog(ctx, karooSystem, diagnosticLog, "scan", scanLogOffset)
                         } else {
                             // The radio-active stamp is written by LaunchedEffect(scanning)'s first pass (it
-                            // fires the moment scanning flips true), so don't ALSO write it here — that was two
-                            // full DataStore writes (+ two meters-JSON decodes in the service) per scan tap.
+                            // fires the moment scanning flips true), so don't ALSO write it here — that would be
+                            // two store writes per scan tap.
                             scanLogOffset = pairingLogOffset()   // upload only what this scan session adds
                             Timber.i("===== ANT SCAN START =====")
                             antManager.startScan()
@@ -405,6 +411,20 @@ fun ComparisonScreen() {
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            // Manual resend for rides done offline (the in-ride uploader needs the
+                            // Companion link, and the ride-end send can die with the process).
+                            // Shown even with logging OFF: the files of the last ride are still on disk.
+                            if (LogReporter.configured) {
+                                TextButton(
+                                    enabled = !sendingLog,
+                                    onClick = { ManualLogSend.start(ctx.applicationContext) },
+                                ) {
+                                    Text(stringResource(if (sendingLog) R.string.send_log_sending else R.string.send_log_button))
+                                }
+                                logSendStatus?.let {
+                                    Text(it, style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
                         }
                     }
                 }
@@ -542,5 +562,62 @@ private fun uploadPairingLog(
             karooSystem = karooSystem,
         )
         Timber.i("pairing log upload (%s): %s", prefix, res.message)
+    }
+}
+
+/**
+ * Manual "send last ride log". Runs on its own process-level scope with its own [KarooSystemService],
+ * so leaving the screen (which disconnects the screen's service) doesn't kill a long upload. State is
+ * process-level so the screen shows progress again when reopened.
+ * ponytail: resends parts the in-ride uploader may already have delivered (gzip keeps that cheap).
+ * Track per-file sent offsets on disk if duplicates become a problem.
+ */
+private object ManualLogSend {
+    val sending = MutableStateFlow(false)
+    val status = MutableStateFlow<String?>(null)
+
+    fun start(app: Context) {
+        if (!sending.compareAndSet(false, true)) return
+        status.value = null
+        CoroutineScope(Dispatchers.IO).launch {
+            val ks = KarooSystemService(app)
+            try {
+                val connected = CompletableDeferred<Unit>()
+                ks.connect { if (it) connected.complete(Unit) }
+                status.value = if (withTimeoutOrNull(10_000) { connected.await() } == null)
+                    app.getString(R.string.send_log_failed, "Karoo service not connected")
+                else send(app, ks)
+            } catch (e: Exception) {
+                status.value = app.getString(R.string.send_log_failed, e.javaClass.simpleName)
+            } finally {
+                runCatching { ks.disconnect() }
+                sending.value = false
+            }
+        }
+    }
+
+    private suspend fun send(app: Context, ks: KarooSystemService): String {
+        FileLogTree.flushNow()
+        val files = FileLogTree.lastRideLogFiles()
+        if (files.isEmpty()) return app.getString(R.string.send_log_none)
+        val id = runCatching { app.getOrCreateInstallId() }.getOrNull() ?: "anon"
+        val ver = BuildConfig.VERSION_NAME
+        var sent = 0
+        for ((i, f) in files.withIndex()) {
+            val text = runCatching { f.readText(Charsets.UTF_8) }.getOrNull()
+            if (text.isNullOrBlank()) continue
+            val res = LogReporter.sendGzipChunked(
+                text = text,
+                fileNamePrefix = "kpower_manual_v${ver}_${id}_f${i + 1}",
+                captionPrefix = "KPower manual log (file ${i + 1}/${files.size})\nAnon tag: $id | v$ver",
+                karooSystem = ks,
+            ) { part, total ->
+                status.value = app.getString(R.string.send_log_progress, i + 1, files.size, part, total)
+            }
+            Timber.i("manual log upload %s: %s", f.name, res.message)
+            if (!res.ok) return app.getString(R.string.send_log_failed, res.message)
+            sent++
+        }
+        return app.getString(if (sent == 0) R.string.send_log_none else R.string.send_log_done)
     }
 }

@@ -7,6 +7,16 @@ potencia con un modelo físico (pendiente + resistencia a la rodadura + aerodin�
 del aire + aceleración, menos pérdidas de transmisión). Y si **tienes** un potenciómetro real, KPower
 puede leerlo para enriquecer el FIT grabado — con un **matiz de emparejamiento** importante (ver abajo).
 
+> **Novedades en 3.0 (gran salto respecto a 1.9.x):**
+> - **Estimador rehecho:** pendiente casi sin retraso (de la altitud y del perfil de la ruta cargada), término
+>   de aceleración, densidad del aire con temperatura/presión reales, rodadura según tu neumático y la
+>   **superficie real** leída de los mapas offline, área frontal según altura y peso, modo simple, una
+>   bici por perfil del Karoo y ajuste de potencia (offset).
+> - **Dinámicas de ciclismo avanzadas (nuevo):** con un medidor ANT+ real, KPower graba en el FIT lo que el
+>   Karoo no puede: **par** (total y por pierna), **power phase** y pico, **PCO**, posición y baricentro,
+>   además de balance, eficacia del par y suavidad.
+> - Las dinámicas son nuevas: si algo no cuadra, **[envíame el registro](#algo-falla)**.
+
 > **Regla ANT+:** un medidor **no** puede leerse por ANT+ desde el Karoo y desde KPower a la vez (comparten
 > la radio ANT+; el primero que lo engancha se lo queda, el otro se queda sin señal). Para que KPower lo lea
 > **junto** al Karoo, empareja el medidor al Karoo por **BLE** (deja el ANT+ libre para KPower). Si tu medidor
@@ -72,6 +82,15 @@ Connect** verás la eficacia de par / fluidez de pedaleo / balance nativos (si e
 nativo), pero lo propio de KPower (par, fase de potencia, desplazamiento del centro de la plataforma,
 barycenter) sale como gráficos "developer" aparte, no dentro de su sección "Cycling Dynamics" — sin el
 arco de fase de potencia (limitación del SDK, no un bug). **Strava** ignora los developer fields.
+
+## ¿Algo falla?
+
+Pestaña *Medidor real* → activa **Registro de diagnóstico**, reproduce el problema y pulsa **Enviar
+registro de la última salida** (si el Karoo no estuvo conectado a la app Companion durante la salida).
+Después abre un [issue en GitHub](https://github.com/lockevod/Karoo-KPower/issues) con lo que viste, la
+fecha/hora de la salida y tu modelo de medidor. Antes de enviarlo se quitan el GPS y los identificadores
+de sensores. Detalles (en inglés):
+**[real-meter-and-fit.md](real-meter-and-fit.md#reporting-a-problem-dynamics-pairing-estimate)**.
 
 ## Instalación
 

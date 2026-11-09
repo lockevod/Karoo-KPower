@@ -42,6 +42,12 @@
     <string name="comparison_mode_desc">Graba la potencia estimada de KPower en el FIT como campos extra (est_power, est_np…) para compararla con un medidor real, Y calibra en campo el Crr/CdA de tu bici a partir del medidor real (la sugerencia aparece luego en el editor de bici). Requiere un medidor grabando. Off por defecto.</string>
     <string name="dynamics_auto_info">Las dinámicas de pedaleo de un medidor activado se graban en el FIT automáticamente (el Karoo no puede grabarlas).</string>
     <string name="diagnostic_log_path_prefix">Registro: </string>
+    <string name="send_log_button">Enviar registro de la última salida</string>
+    <string name="send_log_sending">Enviando…</string>
+    <string name="send_log_done">Registro enviado ✓ ¡Gracias!</string>
+    <string name="send_log_none">No hay registro de salida. Sal con el registro de diagnóstico activado.</string>
+    <string name="send_log_progress">Enviando… fichero %1$d/%2$d · parte %3$d/%4$d</string>
+    <string name="send_log_failed">No enviado: %1$s. Revisa la conexión con Companion y reinténtalo.</string>
 
     <!-- ANT+ scan -->
     <string name="ant_meters_title">Potenciómetros ANT+</string>

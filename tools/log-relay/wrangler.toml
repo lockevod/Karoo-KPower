@@ -1,0 +1,8 @@
+name = "log-relay"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+
+[vars]
+ALLOWED_APPS = "kpower,kghost,ksafe"
+
+# Secrets (NOT here): wrangler secret put BOT_TOKEN / wrangler secret put CHAT_ID
