@@ -85,11 +85,14 @@ log** (if the Karoo wasn't connected to the Companion app during the ride). Then
 and your meter model. GPS and sensor identifiers are stripped before sending. Details:
 **[real-meter-and-fit.md](real-meter-and-fit.md#reporting-a-problem-dynamics-pairing-estimate)**.
 
-## Install (sideload)
+## Install
 
-**Karoo 3 (v ≥ 1.527):** open the [latest APK](https://github.com/lockevod/Karoo-KPower/releases/latest/download/kpower.apk)
-on your phone → share to the **Hammerhead Companion** app → install.
+**Karoo Extensions store (recommended):** on the Karoo, open the **Extensions store** → **KPower** →
+**Install**. Updates arrive on their own.
 
-**Karoo 2:** enable sideloading, then `adb install app-release.apk`.
+**Sideload (pre-release builds):** Karoo 3 (v ≥ 1.527): open the [latest APK](https://github.com/lockevod/Karoo-KPower/releases/latest/download/kpower.apk)
+on your phone → share to the **Hammerhead Companion** app → install. Karoo 2: enable sideloading,
+then `adb install app-release.apk`.
 
-> Upgrading from **< 1.9.5**? Uninstall the old version first (incompatible data format).
+> **Upgrading from 1.9.5 / 1.9.6?** Just update (store or sideload, no uninstall): your bikes are kept and
+> open in Advanced mode with the same values. From **< 1.9.5**: uninstall first (incompatible data format).

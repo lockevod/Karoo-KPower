@@ -65,7 +65,19 @@ New here? Pick your setup in the quick guide:
 > including how to get your **offset** into the recording — are in the quick guide and
 > **[docs/real-meter-and-fit.md](docs/real-meter-and-fit.md#how-to-pair-the-power-source--and-the-ant-rule)**.
 
-## Install (sideload)
+## Install
+
+### Karoo Extensions store *(recommended)*
+
+KPower is distributed by Hammerhead in the Karoo's built-in **Extensions store** — no APK, no
+sideloading, no ADB, and updates arrive on their own.
+
+1. On the Karoo, open the **Extensions store** from the main menu.
+2. Find **KPower** and tap **Install**.
+3. Open KPower to set up your bike (or your meter), then pair the source you want — see
+   [Quick start](docs/quick-start.md).
+
+### Sideloading *(advanced / pre-release builds)*
 
 **Karoo 3 (v ≥ 1.527):** open the [latest APK](https://github.com/lockevod/Karoo-KPower/releases/latest/download/kpower.apk)
 link on your phone → share to the **Hammerhead Companion** app → install.
@@ -73,7 +85,15 @@ link on your phone → share to the **Hammerhead Companion** app → install.
 **Karoo 2:** enable sideloading ([DC Rainmaker guide](https://www.dcrainmaker.com/2021/02/how-to-sideload-android-apps-on-your-hammerhead-karoo-1-karoo-2.html)),
 then `adb install app-release.apk`.
 
-> Upgrading from **< 1.9.5**? Uninstall the old version first (incompatible data format).
+### Upgrading from 1.9.x
+
+- **From 1.9.5 / 1.9.6:** just update — from the store or by sideloading, no need to uninstall. Your
+  bikes are kept and open in **Advanced** mode with exactly the values you had (weight, Crr, Cd, area,
+  power loss, FTP, surface). The OpenWeather key is no longer used — weather now comes from Open-Meteo
+  or Headwind automatically. Try **Simple** mode afterwards if you'd rather set the bike from tyre,
+  height and position.
+- **From < 1.9.5:** uninstall the old version first (incompatible data format).
+- After updating, re-pair the **KPW** sensor in your ride profile if the Karoo doesn't pick it up.
 
 ## Settings
 

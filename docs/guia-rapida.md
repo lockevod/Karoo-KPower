@@ -94,9 +94,13 @@ de sensores. Detalles (en inglés):
 
 ## Instalación
 
-**Karoo 3 (v ≥ 1.527):** abre en el móvil el [APK más reciente](https://github.com/lockevod/Karoo-KPower/releases/latest/download/kpower.apk)
-→ compartir a la app **Hammerhead Companion** → instalar.
+**Tienda de extensiones del Karoo (recomendado):** en el Karoo abre la **tienda de extensiones**
+(Extensions store) → **KPower** → **Instalar**. Las actualizaciones llegan solas.
 
-**Karoo 2:** activa el sideload y `adb install app-release.apk`.
+**Sideload (versiones previas):** Karoo 3 (v ≥ 1.527): abre en el móvil el [APK más reciente](https://github.com/lockevod/Karoo-KPower/releases/latest/download/kpower.apk)
+→ compartir a la app **Hammerhead Companion** → instalar. Karoo 2: activa el sideload y
+`adb install app-release.apk`.
 
-> ¿Vienes de una versión **< 1.9.5**? Desinstala la antigua primero (formato de datos incompatible).
+> **¿Vienes de la 1.9.5 / 1.9.6?** Actualiza sin más (tienda o sideload, sin desinstalar): tus bicis se
+> conservan y se abren en modo Avanzado con los mismos valores. Desde **< 1.9.5**: desinstala primero
+> (formato de datos incompatible).
