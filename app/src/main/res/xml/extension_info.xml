@@ -1,7 +1,45 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cross-extension consumption: every DataType below is addressable by any other Karoo extension via
+  KarooSystemService.streamDataFlow(DataType.dataTypeId("kpower", "<typeId>")), which resolves to the
+  id "TYPE_EXT::kpower::<typeId>" (e.g. TYPE_EXT::kpower::real-power-0, TYPE_EXT::kpower::dyn-te-0).
+  The estimated fields run the estimator on demand; the real-meter / dynamics fields only stream while
+  a meter is enabled AND the ride is recording (battery gate). Real power+cadence are ALSO exposed as a
+  standard pairable POWER/CADENCE sensor ("KPOWER …"), which is the most interoperable path for power.
+-->
 <ExtensionInfo
     displayName="@string/extension_name"
     icon="@drawable/ic_power_hr"
     id="kpower"
+    fitFile="true"
     scansDevices="true">
+    <DataType
+        typeId="estimated-power-instant"
+        displayName="@string/est_instant_name"
+        description="@string/est_instant_desc"
+        graphical="false"
+        icon="@drawable/ic_power_hr" />
+    <DataType
+        typeId="estimated-power-3s"
+        displayName="@string/est_3s_name"
+        description="@string/est_3s_desc"
+        graphical="false"
+        icon="@drawable/ic_power_hr" />
+    <DataType
+        typeId="estimated-power-np"
+        displayName="@string/est_np_name"
+        description="@string/est_np_desc"
+        graphical="false"
+        icon="@drawable/ic_power_hr" />
+    <DataType typeId="real-power-0" displayName="@string/real1_name" description="@string/real1_desc" graphical="false" icon="@drawable/ic_power_hr" />
+    <DataType typeId="real-3s-0" displayName="@string/real1_3s_name" description="@string/real1_3s_desc" graphical="false" icon="@drawable/ic_power_hr" />
+    <DataType typeId="real-np-0" displayName="@string/real1_np_name" description="@string/real1_np_desc" graphical="false" icon="@drawable/ic_power_hr" />
+    <!-- Dual L/R balance (graphical). Live value only matters for a KPW-virtual (offset) source, where the
+         Karoo shows no native dynamics; harmless/redundant with a native meter. -->
+    <DataType typeId="real-balance-0" displayName="@string/real1_balance_name" description="@string/real1_balance_desc" graphical="true" icon="@drawable/ic_power_hr" />
+    <DataType typeId="real-balance-avg-0" displayName="@string/real1_balance_avg_name" description="@string/real1_balance_avg_desc" graphical="true" icon="@drawable/ic_power_hr" />
+    <!-- Other on-screen dynamics + torque fields removed: the Karoo shows TE / pedal smoothness /
+         torque / avg-torque / max-torque natively for a natively-paired meter. Everything still goes to the
+         FIT (torque is UNIQUE there — no standard torque record field; balance/TE/PS as dev fields; power
+         phase / PCO / barycenter as dev fields). -->
 </ExtensionInfo>
