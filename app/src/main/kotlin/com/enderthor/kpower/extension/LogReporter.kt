@@ -7,13 +7,14 @@ import kotlinx.coroutines.withTimeoutOrNull
 import timber.log.Timber
 
 /**
- * Sends the KPower diagnostic log to the developer via a Telegram bot — only when the rider has the
+ * Sends the KPower diagnostic log to the developer's Telegram — only when the rider has the
  * (off-by-default) diagnostic log enabled. Ported from KGhost's LogReporter.
  *
  * Privacy:
- *  - **Credentials never in source / never in any settings screen**: BOT_TOKEN and CHAT_ID come from
- *    [BuildConfig], injected from `local.properties` (gitignored) at compile time. The log can only ever
- *    go to the developer's own chat; absent keys make this a no-op.
+ *  - **No bot credentials in the APK**: uploads go to a write-only relay (tools/log-relay, a Cloudflare
+ *    Worker) that holds the bot token and the chat id. Only the relay URL is compiled in
+ *    ([BuildConfig.LOG_RELAY_URL], from `local.properties`); it can't read, forward or delete anything.
+ *    Absent URL makes this a no-op.
  *  - **No GPS coordinates or sensor identifiers leave the device**: [redactForUpload] strips every
  *    coordinate token (lat/lng/lon/latitude/longitude — incl. inside `GpsCoordinates(...)`) AND sensor
  *    serial numbers + the Karoo's saved-device names from the uploaded copy. The on-device file keeps
@@ -24,11 +25,9 @@ import timber.log.Timber
  */
 object LogReporter {
 
-    // From local.properties at compile time: calib.bot_token=<@BotFather token>, calib.chat_id=<dev chat>.
-    private val BOT_TOKEN: String get() = BuildConfig.CALIB_BOT_TOKEN
-    private val CHAT_ID: String get() = BuildConfig.CALIB_CHAT_ID
-
-    private const val API_BASE = "https://api.telegram.org/bot"
+    // From local.properties at compile time: calib.relay_url=https://<worker>.workers.dev
+    private val RELAY_URL: String get() = BuildConfig.LOG_RELAY_URL
+    private const val APP_TAG = "kpower"   // must be in the Worker's ALLOWED_APPS
     private const val TIMEOUT_MS = 60_000L
 
     // Any coordinate token (`lat=`, `lng=`, `lon=` — note GpsCoordinates.toString() uses `lon=` —,
@@ -64,8 +63,7 @@ object LogReporter {
 
     /** True only when a real bot token + chat id were compiled in (so callers can skip work entirely). */
     val configured: Boolean
-        get() = BOT_TOKEN.isNotBlank() && !BOT_TOKEN.startsWith("REPLACE") &&
-            CHAT_ID.isNotBlank() && !CHAT_ID.startsWith("REPLACE")
+        get() = RELAY_URL.startsWith("https://")
 
     sealed class SendResult(val message: String) {
         class Success(message: String) : SendResult(message)
@@ -125,7 +123,7 @@ object LogReporter {
         karooSystem: KarooSystemService,
     ): SendResult {
         if (!configured) {
-            Timber.w("LogReporter: credentials not set in local.properties — skipping log send")
+            Timber.w("LogReporter: relay URL not set in local.properties — skipping log send")
             return SendResult.Failure("Logging credentials not configured in this build.")
         }
         val redacted = redactForUpload(content)
@@ -150,7 +148,7 @@ object LogReporter {
             val response: HttpResponseState.Complete? = withTimeoutOrNull(TIMEOUT_MS) {
                 karooSystem.httpRequest(
                     "POST",
-                    "$API_BASE$BOT_TOKEN/sendDocument",
+                    RELAY_URL,
                     mapOf("Content-Type" to "multipart/form-data; boundary=$boundary"),
                     body,
                 )
@@ -167,9 +165,10 @@ object LogReporter {
             } else {
                 val tgDesc = Regex("\"description\"\\s*:\\s*\"([^\"]+)\"").find(respBody)?.groupValues?.getOrNull(1)
                 val hint = when (response.statusCode) {
-                    401 -> "Bot token rejected (check CALIB_BOT_TOKEN)."
-                    400 -> tgDesc ?: "Bad request (check chat id)."
-                    413 -> "File too big (Telegram limit is 50 MB)."
+                    401, 404 -> "Relay rejected the bot token or chat id (check the Worker secrets)."
+                    403 -> "Relay doesn't accept this app (check ALLOWED_APPS)."
+                    400 -> tgDesc ?: "Bad request."
+                    413 -> "Chunk too big for the relay."
                     429 -> "Rate-limited by Telegram. Wait a minute."
                     in 500..599 -> "Telegram server error (try again)."
                     else -> tgDesc ?: "HTTP ${response.statusCode}"
@@ -262,8 +261,8 @@ object LogReporter {
         val crlf = "\r\n"
         val head = buildString {
             append("--$boundary$crlf")
-            append("Content-Disposition: form-data; name=\"chat_id\"$crlf$crlf")
-            append(CHAT_ID); append(crlf)
+            append("Content-Disposition: form-data; name=\"app\"$crlf$crlf")
+            append(APP_TAG); append(crlf)
             if (caption.isNotBlank()) {
                 append("--$boundary$crlf")
                 append("Content-Disposition: form-data; name=\"caption\"$crlf$crlf")
