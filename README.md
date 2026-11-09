@@ -124,7 +124,9 @@ real meter & FIT: **[docs/real-meter-and-fit.md](docs/real-meter-and-fit.md)**.
    date/time of the ride and your meter model. Attaching the FIT helps a lot.
 
 **Privacy:** the copy that is sent has GPS coordinates, sensor names, serial numbers / device IDs and
-file paths removed. It goes only to the developer. Turn diagnostic logging off again when you're done —
+file paths removed. It goes only to the developer, over HTTPS through a write-only relay (a Cloudflare
+Worker) that forwards it to a private Telegram chat; the bot token lives only on that relay, never in
+the APK, so nobody can extract it to read the chat or other riders' logs. Turn diagnostic logging off again when you're done —
 it uses some extra battery and storage.
 
 ## Credits
@@ -134,7 +136,7 @@ it uses some extra battery and storage.
 - Power model: <https://www.gribble.org/cycling/power_v_speed.html>
 - KPower has no account or backend. Weather lookup sends the current position to Open-Meteo; when the
   off-by-default diagnostic log is enabled, anonymized GPS-stripped logs are sent to the developer
-  through Telegram (see [Found a problem?](#found-a-problem-send-the-log)).
+  through a write-only Cloudflare relay to a private Telegram chat (see [Found a problem?](#found-a-problem-send-the-log)).
 
 ## Links
 
