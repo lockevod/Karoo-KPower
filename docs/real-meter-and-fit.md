@@ -187,7 +187,8 @@ diagnostic log is the fastest way to get a problem fixed:
    meter model, and the FIT if you can.
 
 The uploaded copy removes GPS coordinates, saved sensor names, serial/device identifiers, raw ANT
-identity pages and file paths, and goes only to the developer through Telegram. The full-detail file
+identity pages and file paths, and goes only to the developer through Telegram, via a write-only Cloudflare relay that holds the bot
+token (it never ships in the APK). The full-detail file
 stays on the Karoo (the most recent logs are kept). Turn diagnostics off afterwards — they use extra
 battery, storage and network data.
 
